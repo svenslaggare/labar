@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 pub struct TablePrinter {
     rows: Vec<Vec<String>>,
     column_lengths: Vec<usize>
@@ -36,4 +38,13 @@ impl TablePrinter {
             println!();
         }
     }
+}
+
+#[allow(dead_code)]
+pub fn get_temp_folder() -> PathBuf {
+    let named_temp_folder = tempfile::Builder::new()
+        .suffix(".dfd")
+        .tempfile().unwrap();
+
+    named_temp_folder.path().to_owned()
 }

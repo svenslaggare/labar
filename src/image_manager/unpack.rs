@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::image_manager::layer::LayerManager;
 use crate::image::{Layer, LayerOperation, LinkType};
-use crate::image_manager::{ImageManagerError, ImageManagerResult};
+use crate::image_manager::{ImageManagerError, ImageManagerResult, ImageManagerConfig};
+use crate::helpers;
+use crate::image_manager::build::BuildManager;
+use crate::image_definition::ImageDefinition;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
@@ -174,5 +177,175 @@ impl UnpackManager {
 
         println!();
         Ok(())
+    }
+}
+
+#[test]
+fn test_unpack() {
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config);
+    let mut unpack_manager = UnpackManager::new();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    assert!(build_manager.build_image(&mut layer_manager, image_definition, "test").is_ok());
+
+    let unpack_result = unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        false
+    );
+
+    assert!(unpack_result.is_ok());
+    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[test]
+fn test_unpack_exist() {
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config);
+    let mut unpack_manager = UnpackManager::new();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    assert!(build_manager.build_image(&mut layer_manager, image_definition, "test").is_ok());
+
+    unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        false
+    ).unwrap();
+
+    let unpack_result = unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        false
+    );
+
+    assert!(unpack_result.is_err());
+    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[test]
+fn test_remove_unpack() {
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config);
+    let mut unpack_manager = UnpackManager::new();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    assert!(build_manager.build_image(&mut layer_manager, image_definition, "test").is_ok());
+
+    unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        false
+    ).unwrap();
+
+    let result = unpack_manager.remove_unpacking(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        false
+    );
+
+    assert!(result.is_ok());
+    assert!(!tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[test]
+fn test_unpack_replace1() {
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config);
+    let mut unpack_manager = UnpackManager::new();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    assert!(build_manager.build_image(&mut layer_manager, image_definition, "test").is_ok());
+
+    unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        false
+    ).unwrap();
+
+    let unpack_result = unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        true
+    );
+
+    assert!(unpack_result.is_ok());
+    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[test]
+fn test_unpack_replace2() {
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config);
+    let mut unpack_manager = UnpackManager::new();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    assert!(build_manager.build_image(&mut layer_manager, image_definition, "test").is_ok());
+
+    let unpack_result = unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        "test",
+        true
+    );
+
+    assert!(unpack_result.is_ok());
+    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
     }
 }

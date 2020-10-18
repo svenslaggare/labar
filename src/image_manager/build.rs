@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
@@ -7,6 +7,7 @@ use crate::image_manager::layer::LayerManager;
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
+use crate::helpers;
 
 pub struct BuildManager {
     config: ImageManagerConfig
@@ -167,23 +168,15 @@ fn create_hash(input: &str) -> String {
     hasher.result_str()
 }
 
-#[allow(dead_code)]
-fn get_temp_folder() -> PathBuf {
-    let named_temp_folder = tempfile::Builder::new()
-        .suffix(".dfd")
-        .tempfile().unwrap();
-
-    named_temp_folder.path().to_owned()
-}
-
 #[test]
 fn test_build() {
-    let tmp_dir = get_temp_folder();
+    let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config);
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -207,13 +200,14 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache() {
-    let tmp_dir = get_temp_folder();
+    let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config);
 
     // Build first time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -222,7 +216,7 @@ fn test_build_with_cache() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
