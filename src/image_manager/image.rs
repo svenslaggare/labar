@@ -233,6 +233,43 @@ impl ImageManager {
         Ok(total_size)
     }
 
+    pub fn list_content(&self, reference: &str) -> ImageManagerResult<Vec<String>> {
+        let mut files = Vec::new();
+
+        let mut stack = Vec::new();
+        stack.push(reference);
+
+        while let Some(current) = stack.pop() {
+            let layer = self.layer_manager.get_layer(current)?;
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.as_str());
+            }
+
+            let mut local_files = Vec::new();
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.as_str());
+                    }
+                    LayerOperation::File { path, ..  } => {
+                        local_files.push(path.clone());
+                    }
+                    LayerOperation::Directory { path } => {
+                        local_files.push(path.clone());
+                    }
+                }
+            }
+
+            local_files.reverse();
+
+            files.append(&mut local_files);
+        }
+
+        files.reverse();
+
+        Ok(files)
+    }
+
     pub fn list_unpackings(&self) -> &Vec<Unpacking> {
         &self.unpack_manager.unpackings
     }

@@ -64,11 +64,16 @@ enum CommandLineInput {
         #[structopt(name="tag", help="The new tag for the image")]
         tag: String
     },
-    #[structopt(about="Lists available the images")]
+    #[structopt(about="Lists the available images")]
     ListImages {
 
     },
-    #[structopt(about="Lists unpackings that has been made")]
+    #[structopt(about="Lists the content of an image")]
+    ListContent {
+        #[structopt(name="tag", help="The tag to list for")]
+        tag: String
+    },
+    #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
 
     },
@@ -190,6 +195,15 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
             print_images(&images);
+        }
+        CommandLineInput::ListContent { tag } => {
+            let image_manager = create_image_manager(&file_config,None);
+
+            let content = image_manager.list_content(&tag).map_err(|err| format!("{}", err))?;
+
+            for path in content {
+                println!("{}", path);
+            }
         }
         CommandLineInput::ListUnpackings { } => {
             let image_manager = create_image_manager(&file_config,None);
