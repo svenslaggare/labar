@@ -176,7 +176,7 @@ fn test_build() {
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config);
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -207,7 +207,7 @@ fn test_build_with_cache() {
     let build_manager = BuildManager::new(config);
 
     // Build first time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -216,7 +216,7 @@ fn test_build_with_cache() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 

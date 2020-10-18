@@ -189,7 +189,7 @@ fn test_unpack() {
     let build_manager = BuildManager::new(config);
     let mut unpack_manager = UnpackManager::new();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -219,7 +219,7 @@ fn test_unpack_exist() {
     let build_manager = BuildManager::new(config);
     let mut unpack_manager = UnpackManager::new();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -256,7 +256,7 @@ fn test_remove_unpack() {
     let build_manager = BuildManager::new(config);
     let mut unpack_manager = UnpackManager::new();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -292,7 +292,7 @@ fn test_unpack_replace1() {
     let build_manager = BuildManager::new(config);
     let mut unpack_manager = UnpackManager::new();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -329,7 +329,7 @@ fn test_unpack_replace2() {
     let build_manager = BuildManager::new(config);
     let mut unpack_manager = UnpackManager::new();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/specs/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
