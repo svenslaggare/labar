@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::ffi::OsStr;
 
 use crypto::sha2::Sha256;
 use crypto::digest::Digest;
@@ -169,21 +168,17 @@ fn create_hash(input: &str) -> String {
 }
 
 #[allow(dead_code)]
-fn get_tempfile_name() -> PathBuf {
-    let named_tempfile = tempfile::Builder::new()
+fn get_temp_folder() -> PathBuf {
+    let named_temp_folder = tempfile::Builder::new()
         .suffix(".dfd")
         .tempfile().unwrap();
 
-    let filename = named_tempfile
-        .path()
-        .file_name().and_then(OsStr::to_str).unwrap().to_owned();
-
-    std::env::temp_dir().join(filename)
+    named_temp_folder.path().to_owned()
 }
 
 #[test]
 fn test_build() {
-    let tmp_dir = get_tempfile_name();
+    let tmp_dir = get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config);
@@ -212,7 +207,7 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache() {
-    let tmp_dir = get_tempfile_name();
+    let tmp_dir = get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config);
