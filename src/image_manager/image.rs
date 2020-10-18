@@ -9,8 +9,6 @@ use crate::image_manager::layer::LayerManager;
 use crate::image_manager::unpack::{UnpackManager, Unpacking};
 use crate::image_manager::build::BuildManager;
 use crate::helpers;
-use rusoto_s3::S3Client;
-use rusoto_core::Region;
 
 pub struct ImageMetadata {
     pub image: Image,
@@ -362,6 +360,13 @@ impl Drop for ImageManager {
     }
 }
 
+fn create_test_registry_manager() -> RegistryManager {
+    use rusoto_s3::S3Client;
+    use rusoto_core::Region;
+
+    RegistryManager::new(String::new(), S3Client::new(Region::EuCentral1))
+}
+
 #[test]
 fn test_remove_image1() {
     let tmp_dir = helpers::get_temp_folder();
@@ -371,7 +376,7 @@ fn test_remove_image1() {
 
     let mut image_manager = ImageManager::with_config(
         config,
-        RegistryManager::new(String::new(), S3Client::new(Region::EuCentral1))
+        create_test_registry_manager()
     );
 
     let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
@@ -399,7 +404,7 @@ fn test_remove_image2() {
 
     let mut image_manager = ImageManager::with_config(
         config,
-        RegistryManager::new(String::new(), S3Client::new(Region::EuCentral1))
+        create_test_registry_manager()
     );
 
     let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
