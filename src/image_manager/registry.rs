@@ -53,18 +53,18 @@ impl std::fmt::Display for RegistryError {
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
-fn split_bucket_and_key(uri: &str) -> Option<(String, String)> {
+fn split_bucket_and_key(uri: &str) -> RegistryResult<(String, String)> {
     if !uri.starts_with("s3://") {
-        return None;
+        return Err(other_error("Invalid S3 URI.".to_owned()));
     }
 
     let uri = uri.replace("s3://", "");
     let parts = uri.split("/").collect::<Vec<_>>();
     if parts.len() < 2 {
-        return None;
+        return Err(other_error("Invalid S3 URI.".to_owned()));
     }
 
-    Some((parts[0].to_owned(), parts[1..].join("/")))
+    Ok((parts[0].to_owned(), parts[1..].join("/")))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -257,8 +257,7 @@ impl RegistryManager {
     }
 
     async fn file_exist(&self, file: &str) -> RegistryResult<bool> {
-        let (bucket, key) = split_bucket_and_key(file)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(file)?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -274,8 +273,7 @@ impl RegistryManager {
     }
 
     async fn file_size(&self, file: &str) -> RegistryResult<Option<usize>> {
-        let (bucket, key) = split_bucket_and_key(file)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(file)?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -291,8 +289,7 @@ impl RegistryManager {
     }
 
     async fn upload_file(&self, file: &Path, destination: &str) -> RegistryResult<()> {
-        let (bucket, key) = split_bucket_and_key(destination)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(destination)?;
 
         let mut put_object_request = PutObjectRequest::default();
         put_object_request.bucket = bucket;
@@ -314,8 +311,7 @@ impl RegistryManager {
     }
 
     async fn upload_text(&self, content: String, destination: &str) -> RegistryResult<()> {
-        let (bucket, key) = split_bucket_and_key(destination)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(destination)?;
 
         let mut put_object_request = PutObjectRequest::default();
         put_object_request.bucket = bucket;
@@ -330,8 +326,7 @@ impl RegistryManager {
     }
 
     async fn download_file(&self, source: &str, destination: &Path) -> RegistryResult<()> {
-        let (bucket, key) = split_bucket_and_key(source)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(source)?;
 
         let mut output_file = tokio::fs::File::create(destination)
             .await
@@ -380,8 +375,7 @@ impl RegistryManager {
     }
 
     async fn download_text(&self, source: &str) -> RegistryResult<String> {
-        let (bucket, key) = split_bucket_and_key(source)
-            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
+        let (bucket, key) = split_bucket_and_key(source)?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
