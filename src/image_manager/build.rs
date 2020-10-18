@@ -58,55 +58,53 @@ impl BuildManager {
     }
 
     fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer) -> ImageManagerResult<bool> {
-        if !layer_manager.layer_exist(&layer.hash) {
-            println!("\t* Building layer: {}", layer.hash);
-            let destination_base_path = self.config.get_layer_folder(&layer.hash);
-
-            #[allow(unused_must_use)] {
-                std::fs::create_dir_all(&destination_base_path);
-            }
-
-            for operation in &mut layer.operations {
-                match operation {
-                    LayerOperation::File { path, source_path, .. } => {
-                        let mut hasher = Sha256::new();
-                        hasher.input_str(&path);
-                        let destination_path = destination_base_path.join(Path::new(&hasher.result_str()));
-
-                        std::fs::copy(&source_path, &destination_path)
-                            .map_err(|err|
-                                ImageManagerError::FileIOError {
-                                    message: format!(
-                                        "Failed to copy file {} -> {} due to: {}",
-                                        source_path,
-                                        destination_path.to_str().unwrap(),
-                                        err
-                                    )
-                                }
-                            )?;
-
-                        *source_path = destination_path.to_str().unwrap().to_owned();
-                    },
-                    _ => {}
-                }
-            }
-
-            std::fs::write(
-                destination_base_path.join("manifest.json"),
-                serde_json::to_string_pretty(&layer)
-                    .map_err(|err|
-                        ImageManagerError::OtherError {
-                            message: format!("{}", err)
-                        }
-                    )?
-            )?;
-
-            layer_manager.add_layer(layer);
-            Ok(true)
-        } else {
+        if layer_manager.layer_exist(&layer.hash) {
             println!("\t* Layer already built: {}", layer.hash);
-            Ok(false)
+            return Ok(false);
         }
+
+        println!("\t* Building layer: {}", layer.hash);
+        let destination_base_path = self.config.get_layer_folder(&layer.hash);
+
+        #[allow(unused_must_use)] {
+            std::fs::create_dir_all(&destination_base_path);
+        }
+
+        for operation in &mut layer.operations {
+            match operation {
+                LayerOperation::File { path, source_path, .. } => {
+                    let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
+
+                    std::fs::copy(&source_path, &destination_path)
+                        .map_err(|err|
+                            ImageManagerError::FileIOError {
+                                message: format!(
+                                    "Failed to copy file {} -> {} due to: {}",
+                                    source_path,
+                                    destination_path.to_str().unwrap(),
+                                    err
+                                )
+                            }
+                        )?;
+
+                    *source_path = destination_path.to_str().unwrap().to_owned();
+                },
+                _ => {}
+            }
+        }
+
+        std::fs::write(
+            destination_base_path.join("manifest.json"),
+            serde_json::to_string_pretty(&layer)
+                .map_err(|err|
+                    ImageManagerError::OtherError {
+                        message: format!("{}", err)
+                    }
+                )?
+        )?;
+
+        layer_manager.add_layer(layer);
+        Ok(true)
     }
 
     fn create_layer(&self,
@@ -160,12 +158,14 @@ impl BuildManager {
             }
         }
 
-        let mut hasher = Sha256::new();
-        hasher.input_str(&hash_input);
-        let hash = hasher.result_str();
-
-        Ok(Layer::new(parent_hash.clone(), hash, layer_operations))
+        Ok(Layer::new(parent_hash.clone(), create_hash(&hash_input), layer_operations))
     }
+}
+
+fn create_hash(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.input_str(input);
+    hasher.result_str()
 }
 
 #[allow(dead_code)]
