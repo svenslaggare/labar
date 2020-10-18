@@ -8,6 +8,9 @@ use crate::image_manager::registry::{RegistryState, RegistryManager};
 use crate::image_manager::layer::LayerManager;
 use crate::image_manager::unpack::{UnpackManager, Unpacking};
 use crate::image_manager::build::BuildManager;
+use crate::helpers;
+use rusoto_s3::S3Client;
+use rusoto_core::Region;
 
 pub struct ImageMetadata {
     pub image: Image,
@@ -25,8 +28,10 @@ pub struct ImageManager {
 
 impl ImageManager {
     pub fn new(registry_manager: RegistryManager) -> ImageManager {
-        let config = ImageManagerConfig::new();
+        ImageManager::with_config(ImageManagerConfig::new(), registry_manager)
+    }
 
+    pub fn with_config(config: ImageManagerConfig, registry_manager: RegistryManager) -> ImageManager {
         ImageManager {
             config: config.clone(),
             layer_manager: LayerManager::new(),
@@ -355,4 +360,63 @@ impl Drop for ImageManager {
     fn drop(&mut self) {
         self.save_state().unwrap();
     }
+}
+
+#[test]
+fn test_remove_image1() {
+    let tmp_dir = helpers::get_temp_folder();
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut image_manager = ImageManager::with_config(
+        config,
+        RegistryManager::new(String::new(), S3Client::new(Region::EuCentral1))
+    );
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    image_manager.build_image(image_definition, "test").unwrap();
+
+    let result = image_manager.remove_image("test");
+    assert!(result.is_ok());
+
+    let images = image_manager.list_images();
+    assert!(result.is_ok());
+    let images = images.unwrap();
+
+    assert_eq!(0, images.len());
+}
+
+#[test]
+fn test_remove_image2() {
+    let tmp_dir = helpers::get_temp_folder();
+    std::fs::create_dir_all(&tmp_dir).unwrap();
+
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let mut image_manager = ImageManager::with_config(
+        config,
+        RegistryManager::new(String::new(), S3Client::new(Region::EuCentral1))
+    );
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    image_manager.build_image(image_definition.unwrap(), "test").unwrap();
+
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    assert!(image_definition.is_ok());
+    image_manager.build_image(image_definition.unwrap(), "test2").unwrap();
+
+    let result = image_manager.remove_image("test");
+    assert!(result.is_ok());
+
+    let images = image_manager.list_images();
+    assert!(result.is_ok());
+    let images = images.unwrap();
+
+    assert_eq!(1, images.len());
+    assert_eq!("test2", images[0].image.tag);
 }
