@@ -260,15 +260,10 @@ impl ImageManager {
             }
 
             let uploaded = if force {
-                self.registry_manager.force_upload_layer(&layer)
-                    .await
-                    .map_err(|error| ImageManagerError::RegistryError { error })?;
-
+                self.registry_manager.force_upload_layer(&layer).await?;
                 true
             } else {
-                self.registry_manager.upload_layer(&layer)
-                    .await
-                    .map_err(|error| ImageManagerError::RegistryError { error })?
+                self.registry_manager.upload_layer(&layer).await?
             };
 
             if !uploaded {
@@ -278,16 +273,12 @@ impl ImageManager {
             exported_layers.push(layer.hash.clone());
         }
 
-        let mut remote_state = self.registry_manager.download_state()
-            .await
-            .map_err(|error| ImageManagerError::RegistryError { error })?;
+        let mut remote_state = self.registry_manager.download_state().await?;
 
         remote_state.add_layers(&exported_layers);
         remote_state.add_image(Image::new(top_layer.hash.clone(), reference.to_owned()));
 
-        self.registry_manager.upload_state(&remote_state)
-            .await
-            .map_err(|error| ImageManagerError::RegistryError { error })?;
+        self.registry_manager.upload_state(&remote_state).await?;
 
         println!();
 
@@ -295,9 +286,7 @@ impl ImageManager {
     }
 
     pub async fn pull(&mut self, reference: &str) -> ImageManagerResult<Image> {
-        let remote_state = self.registry_manager.download_state()
-            .await
-            .map_err(|error| ImageManagerError::RegistryError { error })?;
+        let remote_state = self.registry_manager.download_state().await?;
 
         let top_level_hash = remote_state.get_hash(reference)
             .ok_or_else(|| ImageManagerError::ImageNotFound { reference: reference.to_owned() })?;
@@ -326,9 +315,7 @@ impl ImageManager {
                 visit_layer(&mut stack, &layer);
             } else {
                 println!("\t* Downloading layer: {}", current);
-                let layer = self.registry_manager.download_layer(&self.config.images_base_dir(), &current)
-                    .await
-                    .map_err(|error| ImageManagerError::RegistryError { error })?;
+                let layer = self.registry_manager.download_layer(&self.config.images_base_dir(), &current).await?;
 
                 visit_layer(&mut stack, &layer);
                 self.layer_manager.add_layer(layer);
@@ -342,20 +329,13 @@ impl ImageManager {
     }
 
     pub async fn list_images_remote(&self) -> ImageManagerResult<Vec<ImageMetadata>> {
-        let remote_state = self.registry_manager.download_state()
-            .await
-            .map_err(|error| ImageManagerError::RegistryError { error })?;
+        let remote_state = self.registry_manager.download_state().await?;
 
         let mut images = Vec::new();
 
         for image in &remote_state.images {
-            let remote_layer = self.registry_manager.download_layer_manifest(&image.hash)
-                .await
-                .map_err(|error| ImageManagerError::RegistryError { error })?;
-
-            let layer_size = self.registry_manager.get_layer_size(&image.hash)
-                .await
-                .map_err(|error| ImageManagerError::RegistryError { error })?;
+            let remote_layer = self.registry_manager.download_layer_manifest(&image.hash).await?;
+            let layer_size = self.registry_manager.get_layer_size(&image.hash).await?;
 
             let mut remote_image = image.clone();
             remote_image.tag = format!("{}/{}", self.registry_uri(), remote_image.tag);

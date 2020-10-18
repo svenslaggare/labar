@@ -225,7 +225,6 @@ fn test_build_with_cache() {
     let second_result = second_result.unwrap();
 
     assert_eq!("test", second_result.tag);
-
     assert_eq!(first_result.hash, second_result.hash);
 
     let image = layer_manager.get_layer("test");

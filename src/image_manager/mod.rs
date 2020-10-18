@@ -25,6 +25,12 @@ impl From<std::io::Error> for ImageManagerError {
     }
 }
 
+impl From<RegistryError> for ImageManagerError {
+    fn from(error: RegistryError) -> Self {
+        ImageManagerError::RegistryError { error }
+    }
+}
+
 impl std::fmt::Display for ImageManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
