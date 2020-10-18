@@ -16,8 +16,42 @@ use rusoto_s3::GetObjectError;
 
 use crate::image::{Layer, LayerOperation, Image};
 
-pub type RegistryError = String;
-pub type RepositoryResult<T> = Result<T, RegistryError>;
+#[derive(Debug)]
+pub enum RegistryError {
+    Remote { message: String },
+    Local { message: String },
+    Other { message: String }
+}
+
+fn remote_error(message: String) -> RegistryError {
+    RegistryError::Remote { message }
+}
+
+fn local_error(message: String) -> RegistryError {
+    RegistryError::Local { message }
+}
+
+fn other_error(message: String) -> RegistryError {
+    RegistryError::Other { message }
+}
+
+impl std::fmt::Display for RegistryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistryError::Remote { message } => {
+                write!(f, "{}", message)
+            }
+            RegistryError::Local { message } => {
+                write!(f, "{}", message)
+            }
+            RegistryError::Other { message } => {
+                write!(f, "{}", message)
+            }
+        }
+    }
+}
+
+pub type RegistryResult<T> = Result<T, RegistryError>;
 
 fn split_bucket_and_key(uri: &str) -> Option<(String, String)> {
     if !uri.starts_with("s3://") {
@@ -97,7 +131,7 @@ impl RegistryManager {
         }
     }
 
-    pub async fn upload_layer(&self, layer: &Layer) -> RepositoryResult<bool> {
+    pub async fn upload_layer(&self, layer: &Layer) -> RegistryResult<bool> {
         if !self.file_exist(&format!("{}/images/{}/manifest.json", self.registry_uri, layer.hash)).await? {
             self.force_upload_layer(layer).await?;
             Ok(true)
@@ -106,7 +140,7 @@ impl RegistryManager {
         }
     }
 
-    pub async fn force_upload_layer(&self, layer: &Layer) -> RepositoryResult<()> {
+    pub async fn force_upload_layer(&self, layer: &Layer) -> RegistryResult<()> {
         let mut exported_layer = layer.clone();
         let s3_base_path = format!("{}/images/{}", self.registry_uri, exported_layer.hash);
 
@@ -133,7 +167,7 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn download_layer(&self, download_base_dir: &Path, hash: &str) -> RepositoryResult<Layer> {
+    pub async fn download_layer(&self, download_base_dir: &Path, hash: &str) -> RegistryResult<Layer> {
         let mut layer = self.download_layer_manifest(hash).await?;
         let layer_base_dir = download_base_dir.join(&layer.hash);
 
@@ -156,24 +190,24 @@ impl RegistryManager {
         let new_manifest_text = serde_json::to_string_pretty(&layer).unwrap();
         tokio::fs::write(layer_base_dir.join("manifest.json"), new_manifest_text)
             .await
-            .map_err(|err| format!("Failed to write manifest due to: {}", err))?;
+            .map_err(|err| local_error(format!("Failed to write manifest due to: {}", err)))?;
 
         Ok(layer)
     }
 
-    pub async fn download_layer_manifest(&self, hash: &str) -> RepositoryResult<Layer> {
+    pub async fn download_layer_manifest(&self, hash: &str) -> RegistryResult<Layer> {
         let s3_base_path = format!("{}/images/{}", self.registry_uri, hash);
         let manifest_text = self.download_text(&format!("{}/manifest.json", s3_base_path))
             .await
-            .map_err(|err| format!("Could not find image {} due to: {}", hash, err))?;
+            .map_err(|err| remote_error(format!("Could not find image {} due to: {}", hash, err)))?;
 
         let layer: Layer = serde_json::from_str(&manifest_text)
-            .map_err(|err| format!("Could not deserialize image {} due to: {}", hash, err))?;
+            .map_err(|err| other_error(format!("Could not deserialize image {} due to: {}", hash, err)))?;
 
         Ok(layer)
     }
 
-    pub async fn get_layer_size(&self, hash: &str) -> RepositoryResult<usize> {
+    pub async fn get_layer_size(&self, hash: &str) -> RegistryResult<usize> {
         let mut total_size = 0;
 
         let mut stack = Vec::new();
@@ -203,7 +237,7 @@ impl RegistryManager {
         Ok(total_size)
     }
 
-    pub async fn download_state(&self) -> RepositoryResult<RegistryState> {
+    pub async fn download_state(&self) -> RegistryResult<RegistryState> {
         let state_file = format!("{}/state.json", self.registry_uri);
         if self.file_exist(&state_file).await? {
             let state_content = self.download_text(&state_file).await?;
@@ -213,7 +247,7 @@ impl RegistryManager {
         }
     }
 
-    pub async fn upload_state(&self, new_state: &RegistryState) -> RepositoryResult<()> {
+    pub async fn upload_state(&self, new_state: &RegistryState) -> RegistryResult<()> {
         self.upload_text(
             serde_json::to_string_pretty(new_state).unwrap(),
             &format!("{}/state.json", self.registry_uri)
@@ -222,8 +256,9 @@ impl RegistryManager {
         Ok(())
     }
 
-    async fn file_exist(&self, file: &str) -> RepositoryResult<bool> {
-        let (bucket, key) = split_bucket_and_key(file).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn file_exist(&self, file: &str) -> RegistryResult<bool> {
+        let (bucket, key) = split_bucket_and_key(file)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -234,12 +269,13 @@ impl RegistryManager {
         match result {
             Ok(_) => Ok(true),
             Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => Ok(false),
-            Err(err) => Err(format!("Failed to find status of object due to: {}", err))
+            Err(err) => Err(remote_error(format!("Failed to find status of object due to: {}", err)))
         }
     }
 
-    async fn file_size(&self, file: &str) -> RepositoryResult<Option<usize>> {
-        let (bucket, key) = split_bucket_and_key(file).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn file_size(&self, file: &str) -> RegistryResult<Option<usize>> {
+        let (bucket, key) = split_bucket_and_key(file)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -250,12 +286,13 @@ impl RegistryManager {
         match result {
             Ok(output) => Ok(output.content_length.map(|x| x as usize)),
             Err(RusotoError::Service(GetObjectError::NoSuchKey(_))) => Ok(None),
-            Err(err) => Err(format!("Failed to find status of object due to: {}", err))
+            Err(err) => Err(remote_error(format!("Failed to find status of object due to: {}", err)))
         }
     }
 
-    async fn upload_file(&self, file: &Path, destination: &str) -> RepositoryResult<()> {
-        let (bucket, key) = split_bucket_and_key(destination).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn upload_file(&self, file: &Path, destination: &str) -> RegistryResult<()> {
+        let (bucket, key) = split_bucket_and_key(destination)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut put_object_request = PutObjectRequest::default();
         put_object_request.bucket = bucket;
@@ -263,7 +300,7 @@ impl RegistryManager {
 
         let upload_file = tokio::fs::File::open(file)
             .await
-            .map_err(|err| format!("Failed to open file {} due to: {}", file.to_str().unwrap(), err))?;
+            .map_err(|err| local_error(format!("Failed to open file {} due to: {}", file.to_str().unwrap(), err)))?;
         put_object_request.content_length = Some(upload_file.metadata().await.unwrap().len() as i64);
 
         let upload_file_stream = FramedRead::new(upload_file, BytesCodec::new()).map_ok(|b| b.freeze());
@@ -271,13 +308,14 @@ impl RegistryManager {
 
         self.s3_client.put_object(put_object_request)
             .await
-            .map_err(|err| format!("Failed to upload {} due to: {}", destination, err))?;
+            .map_err(|err| remote_error(format!("Failed to upload {} due to: {}", destination, err)))?;
 
         Ok(())
     }
 
-    async fn upload_text(&self, content: String, destination: &str) -> RepositoryResult<()> {
-        let (bucket, key) = split_bucket_and_key(destination).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn upload_text(&self, content: String, destination: &str) -> RegistryResult<()> {
+        let (bucket, key) = split_bucket_and_key(destination)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut put_object_request = PutObjectRequest::default();
         put_object_request.bucket = bucket;
@@ -286,17 +324,18 @@ impl RegistryManager {
 
         self.s3_client.put_object(put_object_request)
             .await
-            .map_err(|err| format!("Failed to upload file {} due to: {}", destination, err))?;
+            .map_err(|err| remote_error(format!("Failed to upload file {} due to: {}", destination, err)))?;
 
         Ok(())
     }
 
-    async fn download_file(&self, source: &str, destination: &Path) -> RepositoryResult<()> {
-        let (bucket, key) = split_bucket_and_key(source).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn download_file(&self, source: &str, destination: &Path) -> RegistryResult<()> {
+        let (bucket, key) = split_bucket_and_key(source)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut output_file = tokio::fs::File::create(destination)
             .await
-            .map_err(|err| format!("Failed to create file {}, due to: {}", destination.to_str().unwrap(), err))?;
+            .map_err(|err| local_error(format!("Failed to create file {}, due to: {}", destination.to_str().unwrap(), err)))?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -304,9 +343,9 @@ impl RegistryManager {
 
         let result = self.s3_client.get_object(get_object_request)
             .await
-            .map_err(|err| format!("Could not find file {} due to: {}", source, err))?;
+            .map_err(|err| remote_error(format!("Could not find file {} due to: {}", source, err)))?;
 
-        let body = result.body.ok_or_else(|| format!("No body in file: {}", source))?;
+        let body = result.body.ok_or_else(|| remote_error(format!("No body in file: {}", source)))?;
         let num_to_read = result.content_length.unwrap() as usize;
 
         let mut buffer = vec![0; 4096];
@@ -316,32 +355,33 @@ impl RegistryManager {
         while num_read < num_to_read {
             let this_read = body_reader.read(&mut buffer)
                 .await
-                .map_err(|err| format!("Failed to read from remote due to: {}", err))?;
+                .map_err(|err| remote_error(format!("Failed to read from remote due to: {}", err)))?;
 
             output_file.write(&buffer[..this_read])
                 .await
-                .map_err(|err| format!("Failed to write to file due to: {}", err))?;
+                .map_err(|err| local_error(format!("Failed to write to file due to: {}", err)))?;
 
             num_read += this_read;
         }
 
         output_file.flush()
             .await
-            .map_err(|err| format!("Failed to flush file due to: {}", err))?;
+            .map_err(|err| local_error(format!("Failed to flush file due to: {}", err)))?;
 
         let output_file_metadata = output_file.metadata()
             .await
-            .map_err(|err| format!("Failed to get file metadata: {}", err))?;
+            .map_err(|err| local_error(format!("Failed to get file metadata: {}", err)))?;
 
         if num_to_read != output_file_metadata.len() as usize {
-            return Err(format!("Expected to file to be {} bytes but is {}", num_read, output_file_metadata.len()));
+            return Err(local_error(format!("Expected to file to be {} bytes but is {}", num_read, output_file_metadata.len())));
         }
 
         Ok(())
     }
 
-    async fn download_text(&self, source: &str) -> RepositoryResult<String> {
-        let (bucket, key) = split_bucket_and_key(source).ok_or_else(|| "Invalid S3 URI.")?;
+    async fn download_text(&self, source: &str) -> RegistryResult<String> {
+        let (bucket, key) = split_bucket_and_key(source)
+            .ok_or_else(|| other_error("Invalid S3 URI.".to_owned()))?;
 
         let mut get_object_request = GetObjectRequest::default();
         get_object_request.bucket = bucket;
@@ -349,13 +389,13 @@ impl RegistryManager {
 
         let result = self.s3_client.get_object(get_object_request)
             .await
-            .map_err(|err| format!("Could not find file {} due to: {}", source, err))?;
+            .map_err(|err| remote_error(format!("Could not find file {} due to: {}", source, err)))?;
 
-        let body = result.body.ok_or_else(|| format!("No body in file: {}", source))?;
+        let body = result.body.ok_or_else(|| remote_error(format!("No body in file: {}", source)))?;
         let mut content = String::new();
         body.into_async_read().read_to_string(&mut content)
             .await
-            .map_err(|err| format!("Failed to read content of file {} due to: {}", source, err))?;
+            .map_err(|err| local_error(format!("Failed to read content of file {} due to: {}", source, err)))?;
 
         Ok(content)
     }
