@@ -55,7 +55,7 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 
 fn split_bucket_and_key(uri: &str) -> RegistryResult<(String, String)> {
     if !uri.starts_with("s3://") {
-        return Err(other_error("Invalid S3 URI.".to_owned()));
+        return Err(other_error("Not S3 URI.".to_owned()));
     }
 
     let uri = uri.replace("s3://", "");

@@ -110,7 +110,7 @@ enum CommandLineInput {
         tag: String,
         #[structopt(long, help="Push to this registry instead of the default")]
         registry: Option<String>,
-        #[structopt(long, help="Pushes all the layer to the remote, even if they exists")]
+        #[structopt(long, help="Pushes all the layer to the remote, even if they exists on remote")]
         force: bool,
     },
     #[structopt(about="Lists the images in a remote registry")]
