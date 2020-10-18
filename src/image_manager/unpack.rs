@@ -24,6 +24,44 @@ impl UnpackManager {
         }
     }
 
+    pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_dir: &Path, reference: &str, replace: bool) -> ImageManagerResult<()> {
+        if replace && unpack_dir.exists() {
+            if let Err(err) = self.remove_unpacking(layer_manager, unpack_dir, true) {
+                println!("Failed removing packing due to: {}", err);
+            }
+        }
+
+        let top_layer = layer_manager.get_layer(reference)?;
+        if !unpack_dir.exists() {
+            std::fs::create_dir_all(unpack_dir)?;
+        }
+
+        let unpack_dir_str = unpack_dir.canonicalize()?.to_str().unwrap().to_owned();
+
+        if self.unpackings.iter().any(|unpacking| unpacking.destination == unpack_dir_str) {
+            return Err(ImageManagerError::UnpackingExist { path: unpack_dir_str.clone() });
+        }
+
+        if unpack_dir.exists() {
+            if std::fs::read_dir(unpack_dir)?.count() > 0 {
+                return Err(ImageManagerError::FolderNotEmpty { path: unpack_dir_str.clone() });
+            }
+        }
+
+        println!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_dir_str);
+        self.unpack_layer(layer_manager, unpack_dir, &top_layer)?;
+
+        let hash = top_layer.hash.clone();
+
+        self.unpackings.push(Unpacking {
+            hash,
+            destination: unpack_dir_str,
+            time: std::time::SystemTime::now()
+        });
+
+        Ok(())
+    }
+
     fn unpack_layer(&self, layer_manager: &LayerManager, unpack_dir: &Path, layer: &Layer) -> ImageManagerResult<()> {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_layer = layer_manager.get_layer(parent_hash)?;
@@ -85,39 +123,26 @@ impl UnpackManager {
         Ok(())
     }
 
-    pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_dir: &Path, reference: &str, replace: bool) -> ImageManagerResult<()> {
-        if replace && unpack_dir.exists() {
-            if let Err(err) = self.remove_unpacking(layer_manager, unpack_dir, true) {
-                println!("Failed removing packing due to: {}", err);
-            }
-        }
-
-        let top_layer = layer_manager.get_layer(reference)?;
-        if !unpack_dir.exists() {
-            std::fs::create_dir_all(unpack_dir)?;
-        }
-
+    pub fn remove_unpacking(&mut self, layer_manager: &LayerManager, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
         let unpack_dir_str = unpack_dir.canonicalize()?.to_str().unwrap().to_owned();
 
-        if self.unpackings.iter().any(|unpacking| unpacking.destination == unpack_dir_str) {
-            return Err(ImageManagerError::UnpackingExist { path: unpack_dir_str.clone() });
-        }
+        let unpacking = self.unpackings.iter()
+            .find(|unpacking| unpacking.destination == unpack_dir_str)
+            .ok_or_else(|| ImageManagerError::UnpackingNotFound { path: unpack_dir_str.clone() })?;
 
-        if unpack_dir.exists() {
-            if std::fs::read_dir(unpack_dir)?.count() > 0 {
-                return Err(ImageManagerError::FolderNotEmpty { path: unpack_dir_str.clone() });
+        println!("Clearing unpacking of {} at {}", unpacking.hash, unpack_dir_str);
+        let top_layer = layer_manager.get_layer(&unpacking.hash)?;
+
+        if !force {
+            self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer)?;
+        } else {
+            if let Err(err) = self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer) {
+                println!("Failed to clear unpacking due to: {}", err);
             }
         }
 
-        println!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_dir_str);
-        self.unpack_layer(layer_manager, unpack_dir, &top_layer)?;
-
-        let hash = top_layer.hash.clone();
-
-        self.unpackings.push(Unpacking {
-            hash,
-            destination: unpack_dir_str,
-            time: std::time::SystemTime::now()
+        self.unpackings.retain(|unpacking| {
+            return unpacking.destination != unpack_dir_str;
         });
 
         Ok(())
@@ -148,31 +173,6 @@ impl UnpackManager {
         }
 
         println!();
-        Ok(())
-    }
-
-    pub fn remove_unpacking(&mut self, layer_manager: &LayerManager, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
-        let unpack_dir_str = unpack_dir.canonicalize()?.to_str().unwrap().to_owned();
-
-        let unpacking = self.unpackings.iter()
-            .find(|unpacking| unpacking.destination == unpack_dir_str)
-            .ok_or_else(|| ImageManagerError::UnpackingNotFound { path: unpack_dir_str.clone() })?;
-
-        println!("Clearing unpacking of {} at {}", unpacking.hash, unpack_dir_str);
-        let top_layer = layer_manager.get_layer(&unpacking.hash)?;
-
-        if !force {
-            self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer)?;
-        } else {
-            if let Err(err) = self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer) {
-                println!("Failed to clear unpacking due to: {}", err);
-            }
-        }
-
-        self.unpackings.retain(|unpacking| {
-            return unpacking.destination != unpack_dir_str;
-        });
-
         Ok(())
     }
 }

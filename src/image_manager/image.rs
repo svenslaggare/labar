@@ -146,19 +146,6 @@ impl ImageManager {
         Ok(())
     }
 
-    fn get_hard_references(&self) -> Vec<&str> {
-        let mut hard_references = Vec::new();
-        for image in self.layer_manager.images_iter() {
-            hard_references.push(image.hash.as_str());
-        }
-
-        for unpacking in &self.unpack_manager.unpackings {
-            hard_references.push(unpacking.hash.as_str());
-        }
-
-        hard_references
-    }
-
     pub fn garbage_collect(&mut self) -> ImageManagerResult<usize> {
         let mut deleted_layers = 0;
 
@@ -189,6 +176,33 @@ impl ImageManager {
         Ok(deleted_layers)
     }
 
+    fn get_hard_references(&self) -> Vec<&str> {
+        let mut hard_references = Vec::new();
+        for image in self.layer_manager.images_iter() {
+            hard_references.push(image.hash.as_str());
+        }
+
+        for unpacking in &self.unpack_manager.unpackings {
+            hard_references.push(unpacking.hash.as_str());
+        }
+
+        hard_references
+    }
+
+    pub fn list_images(&self) -> ImageManagerResult<Vec<ImageMetadata>> {
+        let mut images = Vec::new();
+
+        for image in self.layer_manager.images_iter() {
+            images.push(ImageMetadata {
+                image: image.clone(),
+                created: self.layer_manager.get_layer(&image.hash)?.created,
+                size: self.image_size(&image.hash)?
+            })
+        }
+
+        Ok(images)
+    }
+
     fn image_size(&self, reference: &str) -> ImageManagerResult<usize> {
         let mut stack = Vec::new();
         stack.push(reference.to_owned());
@@ -214,20 +228,6 @@ impl ImageManager {
         }
 
         Ok(total_size)
-    }
-
-    pub fn list_images(&self) -> ImageManagerResult<Vec<ImageMetadata>> {
-        let mut images = Vec::new();
-
-        for image in self.layer_manager.images_iter() {
-            images.push(ImageMetadata {
-                image: image.clone(),
-                created: self.layer_manager.get_layer(&image.hash)?.created,
-                size: self.image_size(&image.hash)?
-            })
-        }
-
-        Ok(images)
     }
 
     pub fn list_unpackings(&self) -> &Vec<Unpacking> {

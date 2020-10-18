@@ -1,4 +1,6 @@
 use std::path::{Path};
+use std::str::FromStr;
+
 use chrono::{DateTime, Local};
 
 use serde::{Deserialize};
@@ -21,13 +23,15 @@ use crate::image_manager::{ImageManager, RegistryManager, ImageMetadata, ImageMa
 
 #[derive(Deserialize)]
 pub struct FileConfig {
-    pub registry_uri: String
+    pub registry_uri: String,
+    pub registry_region: String
 }
 
 impl FileConfig {
     pub fn default() -> FileConfig {
         FileConfig {
-            registry_uri: "s3://undefined".to_owned()
+            registry_uri: "s3://undefined".to_owned(),
+            registry_region: "undefined".to_owned()
         }
     }
 }
@@ -114,7 +118,7 @@ enum CommandLineInput {
 fn create_registry_manager(file_config: &FileConfig, registry_uri: Option<String>) -> RegistryManager {
     RegistryManager::new(
         registry_uri.unwrap_or_else(|| file_config.registry_uri.clone()),
-        S3Client::new(Region::EuCentral1)
+        S3Client::new(Region::from_str(&file_config.registry_region).unwrap())
     )
 }
 
@@ -124,11 +128,11 @@ fn create_image_manager(file_config: &FileConfig, registry_uri: Option<String>) 
 }
 
 fn create_write_lock() -> FileLock {
-    FileLock::new(dirs::home_dir().unwrap().join(".dfd").join("write_lock"))
+    FileLock::new(ImageManagerConfig::new().base_dir().join("write_lock"))
 }
 
 fn create_unpack_lock() -> FileLock {
-    FileLock::new(dirs::home_dir().unwrap().join(".dfd").join("unpack_lock"))
+    FileLock::new(ImageManagerConfig::new().base_dir().join("unpack_lock"))
 }
 
 fn print_images(images: &Vec<ImageMetadata>) {

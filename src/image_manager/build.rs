@@ -20,6 +20,43 @@ impl BuildManager {
         }
     }
 
+    pub fn build_image(&self,
+                       layer_manager: &mut LayerManager,
+                       image_definition: ImageDefinition,
+                       tag: &str) -> ImageManagerResult<Image> {
+        let mut parent_hash: Option<String> = None;
+
+        if let Some(base_image_reference) = image_definition.base_image {
+            let hash = layer_manager.fully_qualify_reference(&base_image_reference);
+            if !layer_manager.layer_exist(&hash) {
+                return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
+            }
+
+            parent_hash = Some(hash);
+        }
+
+        let num_layers = image_definition.layers.len();
+        for (layer_index, layer_definition) in image_definition.layers.into_iter().enumerate() {
+            println!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line);
+
+            let layer_definition = layer_definition
+                .expand()
+                .map_err(|err| ImageManagerError::FileIOError { message: err })?;
+
+            let layer = self.create_layer(layer_manager, layer_definition, &parent_hash)?;
+            let hash = layer.hash.clone();
+
+            self.build_layer(layer_manager, layer)?;
+
+            parent_hash = Some(hash);
+        }
+
+        let image = Image::new(parent_hash.unwrap(), tag.to_owned());
+        layer_manager.insert_or_replace_image(&image);
+
+        Ok(image)
+    }
+
     fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer) -> ImageManagerResult<bool> {
         if !layer_manager.layer_exist(&layer.hash) {
             println!("\t* Building layer: {}", layer.hash);
@@ -128,43 +165,6 @@ impl BuildManager {
         let hash = hasher.result_str();
 
         Ok(Layer::new(parent_hash.clone(), hash, layer_operations))
-    }
-
-    pub fn build_image(&self,
-                       layer_manager: &mut LayerManager,
-                       image_definition: ImageDefinition,
-                       tag: &str) -> ImageManagerResult<Image> {
-        let mut parent_hash: Option<String> = None;
-
-        if let Some(base_image_reference) = image_definition.base_image {
-            let hash = layer_manager.fully_qualify_reference(&base_image_reference);
-            if !layer_manager.layer_exist(&hash) {
-                return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
-            }
-
-            parent_hash = Some(hash);
-        }
-
-        let num_layers = image_definition.layers.len();
-        for (layer_index, layer_definition) in image_definition.layers.into_iter().enumerate() {
-            println!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line);
-
-            let layer_definition = layer_definition
-                .expand()
-                .map_err(|err| ImageManagerError::FileIOError { message: err })?;
-
-            let layer = self.create_layer(layer_manager, layer_definition, &parent_hash)?;
-            let hash = layer.hash.clone();
-
-            self.build_layer(layer_manager, layer)?;
-
-            parent_hash = Some(hash);
-        }
-
-        let image = Image::new(parent_hash.unwrap(), tag.to_owned());
-        layer_manager.insert_or_replace_image(&image);
-
-        Ok(image)
     }
 }
 

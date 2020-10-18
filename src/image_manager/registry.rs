@@ -97,6 +97,131 @@ impl RegistryManager {
         }
     }
 
+    pub async fn upload_layer(&self, layer: &Layer) -> RepositoryResult<bool> {
+        if !self.file_exist(&format!("{}/images/{}/manifest.json", self.registry_uri, layer.hash)).await? {
+            self.force_upload_layer(layer).await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    pub async fn force_upload_layer(&self, layer: &Layer) -> RepositoryResult<()> {
+        let mut exported_layer = layer.clone();
+        let s3_base_path = format!("{}/images/{}", self.registry_uri, exported_layer.hash);
+
+        for operation in &mut exported_layer.operations {
+            match operation {
+                LayerOperation::File { source_path, .. } => {
+                    let remote_source_path = format!(
+                        "{}/{}",
+                        s3_base_path,
+                        Path::new(source_path).file_name().unwrap().to_str().unwrap()
+                    );
+
+                    println!("\t\t* Uploading file {} -> {}", source_path, remote_source_path);
+                    self.upload_file(Path::new(&source_path), &remote_source_path).await?;
+                    *source_path = remote_source_path;
+                }
+                _ => {}
+            }
+        }
+
+        let manifest_content = serde_json::to_string_pretty(&exported_layer).unwrap();
+        self.upload_text(manifest_content, &format!("{}/manifest.json", s3_base_path)).await?;
+
+        Ok(())
+    }
+
+    pub async fn download_layer(&self, download_base_dir: &Path, hash: &str) -> RepositoryResult<Layer> {
+        let mut layer = self.download_layer_manifest(hash).await?;
+        let layer_base_dir = download_base_dir.join(&layer.hash);
+
+        #[allow(unused_must_use)] {
+            tokio::fs::create_dir_all(&layer_base_dir).await;
+        }
+
+        for operation in &mut layer.operations {
+            match operation {
+                LayerOperation::File { source_path, .. } => {
+                    let local_source_path = layer_base_dir.join(Path::new(source_path).file_name().unwrap());
+                    println!("\t\t* Downloading file {} -> {}", source_path, local_source_path.to_str().unwrap());
+                    self.download_file(source_path, &local_source_path).await?;
+                    *source_path = local_source_path.to_str().unwrap().to_owned();
+                },
+                _ => {}
+            }
+        }
+
+        let new_manifest_text = serde_json::to_string_pretty(&layer).unwrap();
+        tokio::fs::write(layer_base_dir.join("manifest.json"), new_manifest_text)
+            .await
+            .map_err(|err| format!("Failed to write manifest due to: {}", err))?;
+
+        Ok(layer)
+    }
+
+    pub async fn download_layer_manifest(&self, hash: &str) -> RepositoryResult<Layer> {
+        let s3_base_path = format!("{}/images/{}", self.registry_uri, hash);
+        let manifest_text = self.download_text(&format!("{}/manifest.json", s3_base_path))
+            .await
+            .map_err(|err| format!("Could not find image {} due to: {}", hash, err))?;
+
+        let layer: Layer = serde_json::from_str(&manifest_text)
+            .map_err(|err| format!("Could not deserialize image {} due to: {}", hash, err))?;
+
+        Ok(layer)
+    }
+
+    pub async fn get_layer_size(&self, hash: &str) -> RepositoryResult<usize> {
+        let mut total_size = 0;
+
+        let mut stack = Vec::new();
+        stack.push(hash.to_owned());
+
+        while let Some(current_hash) = stack.pop() {
+            let layer = self.download_layer_manifest(&current_hash).await?;
+            if let Some(parent_hash) = layer.parent_hash {
+                stack.push(parent_hash);
+            }
+
+            for operation in layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash);
+                    }
+                    LayerOperation::File { source_path, .. } => {
+                        if let Some(file_size) = self.file_size(&source_path).await? {
+                            total_size += file_size;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(total_size)
+    }
+
+    pub async fn download_state(&self) -> RepositoryResult<RegistryState> {
+        let state_file = format!("{}/state.json", self.registry_uri);
+        if self.file_exist(&state_file).await? {
+            let state_content = self.download_text(&state_file).await?;
+            Ok(serde_json::from_str(&state_content).unwrap_or_else(|_| RegistryState::new()))
+        } else {
+            Ok(RegistryState::new())
+        }
+    }
+
+    pub async fn upload_state(&self, new_state: &RegistryState) -> RepositoryResult<()> {
+        self.upload_text(
+            serde_json::to_string_pretty(new_state).unwrap(),
+            &format!("{}/state.json", self.registry_uri)
+        ).await?;
+
+        Ok(())
+    }
+
     async fn file_exist(&self, file: &str) -> RepositoryResult<bool> {
         let (bucket, key) = split_bucket_and_key(file).ok_or_else(|| "Invalid S3 URI.")?;
 
@@ -166,26 +291,6 @@ impl RegistryManager {
         Ok(())
     }
 
-    async fn download_text(&self, source: &str) -> RepositoryResult<String> {
-        let (bucket, key) = split_bucket_and_key(source).ok_or_else(|| "Invalid S3 URI.")?;
-
-        let mut get_object_request = GetObjectRequest::default();
-        get_object_request.bucket = bucket;
-        get_object_request.key = key;
-
-        let result = self.s3_client.get_object(get_object_request)
-            .await
-            .map_err(|err| format!("Could not find file {} due to: {}", source, err))?;
-
-        let body = result.body.ok_or_else(|| format!("No body in file: {}", source))?;
-        let mut content = String::new();
-        body.into_async_read().read_to_string(&mut content)
-            .await
-            .map_err(|err| format!("Failed to read content of file {} due to: {}", source, err))?;
-
-        Ok(content)
-    }
-
     async fn download_file(&self, source: &str, destination: &Path) -> RepositoryResult<()> {
         let (bucket, key) = split_bucket_and_key(source).ok_or_else(|| "Invalid S3 URI.")?;
 
@@ -235,129 +340,24 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn force_upload_layer(&self, layer: &Layer) -> RepositoryResult<()> {
-        let mut exported_layer = layer.clone();
-        let s3_base_path = format!("{}/images/{}", self.registry_uri, exported_layer.hash);
+    async fn download_text(&self, source: &str) -> RepositoryResult<String> {
+        let (bucket, key) = split_bucket_and_key(source).ok_or_else(|| "Invalid S3 URI.")?;
 
-        for operation in &mut exported_layer.operations {
-            match operation {
-                LayerOperation::File { source_path, .. } => {
-                    let remote_source_path = format!(
-                        "{}/{}",
-                        s3_base_path,
-                        Path::new(source_path).file_name().unwrap().to_str().unwrap()
-                    );
+        let mut get_object_request = GetObjectRequest::default();
+        get_object_request.bucket = bucket;
+        get_object_request.key = key;
 
-                    println!("\t\t* Uploading file {} -> {}", source_path, remote_source_path);
-                    self.upload_file(Path::new(&source_path), &remote_source_path).await?;
-                    *source_path = remote_source_path;
-                }
-                _ => {}
-            }
-        }
-
-        let manifest_content = serde_json::to_string_pretty(&exported_layer).unwrap();
-        self.upload_text(manifest_content, &format!("{}/manifest.json", s3_base_path)).await?;
-
-        Ok(())
-    }
-
-    pub async fn upload_layer(&self, layer: &Layer) -> RepositoryResult<bool> {
-        if !self.file_exist(&format!("{}/images/{}/manifest.json", self.registry_uri, layer.hash)).await? {
-            self.force_upload_layer(layer).await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub async fn download_layer_manifest(&self, hash: &str) -> RepositoryResult<Layer> {
-        let s3_base_path = format!("{}/images/{}", self.registry_uri, hash);
-        let manifest_text = self.download_text(&format!("{}/manifest.json", s3_base_path))
+        let result = self.s3_client.get_object(get_object_request)
             .await
-            .map_err(|err| format!("Could not find image {} due to: {}", hash, err))?;
+            .map_err(|err| format!("Could not find file {} due to: {}", source, err))?;
 
-        let layer: Layer = serde_json::from_str(&manifest_text)
-            .map_err(|err| format!("Could not deserialize image {} due to: {}", hash, err))?;
-
-        Ok(layer)
-    }
-
-    pub async fn get_layer_size(&self, hash: &str) -> RepositoryResult<usize> {
-        let mut total_size = 0;
-
-        let mut stack = Vec::new();
-        stack.push(hash.to_owned());
-
-        while let Some(current_hash) = stack.pop() {
-            let layer = self.download_layer_manifest(&current_hash).await?;
-            if let Some(parent_hash) = layer.parent_hash {
-                stack.push(parent_hash);
-            }
-
-            for operation in layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash);
-                    }
-                    LayerOperation::File { source_path, .. } => {
-                        if let Some(file_size) = self.file_size(&source_path).await? {
-                            total_size += file_size;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        Ok(total_size)
-    }
-
-    pub async fn download_layer(&self, download_base_dir: &Path, hash: &str) -> RepositoryResult<Layer> {
-        let mut layer = self.download_layer_manifest(hash).await?;
-        let layer_base_dir = download_base_dir.join(&layer.hash);
-
-        #[allow(unused_must_use)] {
-            tokio::fs::create_dir_all(&layer_base_dir).await;
-        }
-
-        for operation in &mut layer.operations {
-            match operation {
-                LayerOperation::File { source_path, .. } => {
-                    let local_source_path = layer_base_dir.join(Path::new(source_path).file_name().unwrap());
-                    println!("\t\t* Downloading file {} -> {}", source_path, local_source_path.to_str().unwrap());
-                    self.download_file(source_path, &local_source_path).await?;
-                    *source_path = local_source_path.to_str().unwrap().to_owned();
-                },
-                _ => {}
-            }
-        }
-
-        let new_manifest_text = serde_json::to_string_pretty(&layer).unwrap();
-        tokio::fs::write(layer_base_dir.join("manifest.json"), new_manifest_text)
+        let body = result.body.ok_or_else(|| format!("No body in file: {}", source))?;
+        let mut content = String::new();
+        body.into_async_read().read_to_string(&mut content)
             .await
-            .map_err(|err| format!("Failed to write manifest due to: {}", err))?;
+            .map_err(|err| format!("Failed to read content of file {} due to: {}", source, err))?;
 
-        Ok(layer)
-    }
-
-    pub async fn download_state(&self) -> RepositoryResult<RegistryState> {
-        let state_file = format!("{}/state.json", self.registry_uri);
-        if self.file_exist(&state_file).await? {
-            let state_content = self.download_text(&state_file).await?;
-            Ok(serde_json::from_str(&state_content).unwrap_or_else(|_| RegistryState::new()))
-        } else {
-            Ok(RegistryState::new())
-        }
-    }
-
-    pub async fn upload_state(&self, new_state: &RegistryState) -> RepositoryResult<()> {
-        self.upload_text(
-            serde_json::to_string_pretty(new_state).unwrap(),
-            &format!("{}/state.json", self.registry_uri)
-        ).await?;
-
-        Ok(())
+        Ok(content)
     }
 }
 
