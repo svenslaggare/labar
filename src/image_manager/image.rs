@@ -127,30 +127,6 @@ impl ImageManager {
         }
     }
 
-    fn delete_layer(&self, layer: &Layer) -> ImageManagerResult<()> {
-        let mut reclaimed_size = 0;
-
-        for operation in &layer.operations {
-            match operation {
-                LayerOperation::File { source_path, .. } => {
-                    reclaimed_size += std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0);
-                },
-                _ => {}
-            }
-        }
-
-        let layer_file = self.config.get_layer_folder(&layer.hash);
-        std::fs::remove_dir_all(&layer_file)
-            .map_err(|err|
-                ImageManagerError::FileIOError {
-                    message: format!("Failed to remove layer {} due to: {}", layer_file.to_str().unwrap(), err)
-                }
-            )?;
-
-        println!("Deleted layer: {} (reclaimed {:.2} MB)", layer.hash, reclaimed_size as f64 / (1024.0 * 1024.0));
-        Ok(())
-    }
-
     pub fn garbage_collect(&mut self) -> ImageManagerResult<usize> {
         let mut deleted_layers = 0;
 
@@ -179,6 +155,30 @@ impl ImageManager {
         std::mem::swap(&mut tmp_layers, &mut self.layer_manager.layers);
 
         Ok(deleted_layers)
+    }
+
+    fn delete_layer(&self, layer: &Layer) -> ImageManagerResult<()> {
+        let mut reclaimed_size = 0;
+
+        for operation in &layer.operations {
+            match operation {
+                LayerOperation::File { source_path, .. } => {
+                    reclaimed_size += std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0);
+                },
+                _ => {}
+            }
+        }
+
+        let layer_file = self.config.get_layer_folder(&layer.hash);
+        std::fs::remove_dir_all(&layer_file)
+            .map_err(|err|
+                ImageManagerError::FileIOError {
+                    message: format!("Failed to remove layer {} due to: {}", layer_file.to_str().unwrap(), err)
+                }
+            )?;
+
+        println!("Deleted layer: {} (reclaimed {:.2} MB)", layer.hash, reclaimed_size as f64 / (1024.0 * 1024.0));
+        Ok(())
     }
 
     fn get_hard_references(&self) -> Vec<&str> {
