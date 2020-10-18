@@ -1,0 +1,4 @@
+FROM test:this
+MKDIR sub1/sub2
+COPY testdata/rawdata/file1.txt file1.txt
+IMAGE test:that

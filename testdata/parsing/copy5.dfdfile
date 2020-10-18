@@ -1,0 +1,1 @@
+COPY testdata/rawdata/file1.txt sub/

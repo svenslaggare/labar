@@ -1,0 +1,1 @@
+COPY --link=soft testdata/rawdata/file1.txt file1.txt
