@@ -42,7 +42,7 @@ pub fn load_file_config(filename: &Path) -> std::result::Result<FileConfig, Stri
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name="docker-for-data", about="Docker-for-data")]
+#[structopt(name="labar", about="Layer Based Archive")]
 enum CommandLineInput {
     #[structopt(about="Builds an image")]
     Build {
@@ -200,7 +200,6 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config,None);
 
             let content = image_manager.list_content(&tag).map_err(|err| format!("{}", err))?;
-
             for path in content {
                 println!("{}", path);
             }

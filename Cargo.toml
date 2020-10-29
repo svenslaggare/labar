@@ -1,5 +1,5 @@
 [package]
-name = "docker-for-data"
+name = "labar"
 version = "0.1.0"
 authors = ["Anton Jansson <anton.jansson@topgolf.com>"]
 edition = "2018"

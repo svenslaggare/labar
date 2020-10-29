@@ -86,7 +86,8 @@ impl ImageManager {
 
         std::fs::write(
             self.config.base_dir().join("unpackings.json"),
-            serde_json::to_string_pretty(&self.unpack_manager.unpackings).map_err(|err| format!("{}", err))?
+            serde_json::to_string_pretty(&self.unpack_manager.unpackings)
+                .map_err(|err| format!("{}", err))?
         ).map_err(|err| format!("{}", err))?;
 
         Ok(())
@@ -142,9 +143,9 @@ impl ImageManager {
             if !keep {
                 if let Err(err) = self.delete_layer(layer) {
                     println!("Failed to remove layer: {}", err);
+                } else {
+                    deleted_layers += 1;
                 }
-
-                deleted_layers += 1;
             }
 
             keep
@@ -374,7 +375,7 @@ impl ImageManager {
         let mut images = Vec::new();
 
         for image in &remote_state.images {
-            let remote_layer = self.registry_manager.download_layer_manifest(&image.hash).await?;
+            let remote_layer = self.registry_manager.get_layer_metadata(&image.hash).await?;
             let layer_size = self.registry_manager.get_layer_size(&image.hash).await?;
 
             let mut remote_image = image.clone();

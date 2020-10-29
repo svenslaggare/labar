@@ -53,20 +53,6 @@ impl std::fmt::Display for RegistryError {
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
-fn split_bucket_and_key(uri: &str) -> RegistryResult<(String, String)> {
-    if !uri.starts_with("s3://") {
-        return Err(other_error("Not S3 URI.".to_owned()));
-    }
-
-    let uri = uri.replace("s3://", "");
-    let parts = uri.split("/").collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return Err(other_error("Invalid S3 URI.".to_owned()));
-    }
-
-    Ok((parts[0].to_owned(), parts[1..].join("/")))
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RegistryState {
     pub layers: Vec<String>,
@@ -168,7 +154,7 @@ impl RegistryManager {
     }
 
     pub async fn download_layer(&self, download_base_dir: &Path, hash: &str) -> RegistryResult<Layer> {
-        let mut layer = self.download_layer_manifest(hash).await?;
+        let mut layer = self.get_layer_metadata(hash).await?;
         let layer_base_dir = download_base_dir.join(&layer.hash);
 
         #[allow(unused_must_use)] {
@@ -195,7 +181,7 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    pub async fn download_layer_manifest(&self, hash: &str) -> RegistryResult<Layer> {
+    pub async fn get_layer_metadata(&self, hash: &str) -> RegistryResult<Layer> {
         let s3_base_path = format!("{}/images/{}", self.registry_uri, hash);
         let manifest_text = self.download_text(&format!("{}/manifest.json", s3_base_path))
             .await
@@ -214,7 +200,7 @@ impl RegistryManager {
         stack.push(hash.to_owned());
 
         while let Some(current_hash) = stack.pop() {
-            let layer = self.download_layer_manifest(&current_hash).await?;
+            let layer = self.get_layer_metadata(&current_hash).await?;
             if let Some(parent_hash) = layer.parent_hash {
                 stack.push(parent_hash);
             }
@@ -395,3 +381,16 @@ impl RegistryManager {
     }
 }
 
+fn split_bucket_and_key(uri: &str) -> RegistryResult<(String, String)> {
+    if !uri.starts_with("s3://") {
+        return Err(other_error("Not S3 URI.".to_owned()));
+    }
+
+    let uri = uri.replace("s3://", "");
+    let parts = uri.split("/").collect::<Vec<_>>();
+    if parts.len() < 2 {
+        return Err(other_error("Invalid S3 URI.".to_owned()));
+    }
+
+    Ok((parts[0].to_owned(), parts[1..].join("/")))
+}
