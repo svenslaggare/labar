@@ -7,6 +7,59 @@ use crate::image::LinkType;
 
 pub type ImageParseResult<T> = Result<T, String>;
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct ImageDefinition {
+    pub base_image: Option<String>,
+    pub layers: Vec<LayerDefinition>
+}
+
+impl ImageDefinition {
+    pub fn new(base_image: Option<String>, layers: Vec<LayerDefinition>) -> ImageDefinition {
+        ImageDefinition {
+            base_image,
+            layers
+        }
+    }
+
+    pub fn expand(self, build_context: &Path) -> ImageParseResult<ImageDefinition> {
+        let mut expanded_layers = Vec::new();
+        for layer in self.layers {
+            expanded_layers.push(layer.expand(build_context)?);
+        }
+
+        Ok(
+            ImageDefinition {
+                base_image: self.base_image,
+                layers: expanded_layers
+            }
+        )
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub struct LayerDefinition {
+    pub input_line: String,
+    pub operations: Vec<LayerOperationDefinition>
+}
+
+impl LayerDefinition {
+    pub fn new(input_line: String, operations: Vec<LayerOperationDefinition>) -> LayerDefinition {
+        LayerDefinition {
+            input_line,
+            operations
+        }
+    }
+
+    pub fn expand(self, build_context: &Path) -> ImageParseResult<LayerDefinition> {
+        Ok(
+            LayerDefinition {
+                input_line: self.input_line,
+                operations: expand_operations(build_context, self.operations)?
+            }
+        )
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum LayerOperationDefinition {
     Image { reference: String },
@@ -55,7 +108,7 @@ fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, l
     Ok(results)
 }
 
-fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseResult<Vec<LayerOperationDefinition>> {
+fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinition>) -> ImageParseResult<Vec<LayerOperationDefinition>> {
     let mut expanded_operations = Vec::new();
 
     for operation_definition in operations{
@@ -64,7 +117,7 @@ fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseRes
                 expanded_operations.push(LayerOperationDefinition::Image { reference });
             }
             LayerOperationDefinition::File { path, source_path, link_type } => {
-                let source_path_obj = Path::new(&source_path);
+                let source_path_obj = build_context.join(Path::new(&source_path));
                 let destination_path = Path::new(&path);
 
                 if source_path_obj.is_file() {
@@ -72,7 +125,7 @@ fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseRes
                         expanded_operations.push(
                             LayerOperationDefinition::File {
                                 path: destination_path.join(source_path_obj.file_name().unwrap()).to_str().unwrap().to_owned(),
-                                source_path,
+                                source_path: source_path_obj.to_str().unwrap().to_owned(),
                                 link_type
                             }
                         );
@@ -80,7 +133,7 @@ fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseRes
                         expanded_operations.push(
                             LayerOperationDefinition::File {
                                 path: source_path_obj.file_name().unwrap().to_str().unwrap().to_owned(),
-                                source_path,
+                                source_path: source_path_obj.to_str().unwrap().to_owned(),
                                 link_type
                             }
                         );
@@ -88,14 +141,14 @@ fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseRes
                         expanded_operations.push(
                             LayerOperationDefinition::File {
                                 path,
-                                source_path,
+                                source_path: source_path_obj.to_str().unwrap().to_owned(),
                                 link_type
                             }
                         );
                     }
                 } else {
                     expanded_operations.append(&mut recursive_copy_operations(
-                        source_path_obj,
+                        &source_path_obj,
                         destination_path,
                         link_type
                     )?);
@@ -108,59 +161,6 @@ fn expand_operations(operations: Vec<LayerOperationDefinition>) -> ImageParseRes
     }
 
     Ok(expanded_operations)
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct LayerDefinition {
-    pub input_line: String,
-    pub operations: Vec<LayerOperationDefinition>
-}
-
-impl LayerDefinition {
-    pub fn new(input_line: String, operations: Vec<LayerOperationDefinition>) -> LayerDefinition {
-        LayerDefinition {
-            input_line,
-            operations
-        }
-    }
-
-    pub fn expand(self) -> ImageParseResult<LayerDefinition> {
-        Ok(
-            LayerDefinition {
-                input_line: self.input_line,
-                operations: expand_operations(self.operations)?
-            }
-        )
-    }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct ImageDefinition {
-    pub base_image: Option<String>,
-    pub layers: Vec<LayerDefinition>
-}
-
-impl ImageDefinition {
-    pub fn new(base_image: Option<String>, layers: Vec<LayerDefinition>) -> ImageDefinition {
-        ImageDefinition {
-            base_image,
-            layers
-        }
-    }
-
-    pub fn expand(self) -> ImageParseResult<ImageDefinition> {
-        let mut expanded_layers = Vec::new();
-        for layer in self.layers {
-            expanded_layers.push(layer.expand()?);
-        }
-
-        Ok(
-            ImageDefinition {
-                base_image: self.base_image,
-                layers: expanded_layers
-            }
-        )
-    }
 }
 
 fn extract_arguments(parts: &mut Vec<&str>) -> HashMap<String, String> {
@@ -293,6 +293,10 @@ impl ImageDefinition {
 
         let mut is_first_line = true;
         for line in content.lines() {
+            if line.trim_start().starts_with("#") {
+                continue;
+            }
+
             let mut parts = line.split_whitespace().collect::<Vec<_>>();
             if parts.len() >= 1 {
                 let command = parts[0];
@@ -355,7 +359,7 @@ impl ImageDefinition {
 
 #[test]
 fn test_parse_copy1() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy1.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy1.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -368,7 +372,7 @@ fn test_parse_copy1() {
 
 #[test]
 fn test_parse_copy2() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy2.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy2.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -381,12 +385,12 @@ fn test_parse_copy2() {
 
 #[test]
 fn test_parse_copy3() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy3.dfdfile").unwrap());
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy3.labarfile").unwrap());
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
-    let result = result.expand();
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = result.expand(Path::new(""));
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
     assert_eq!(result.layers.len(), 1);
@@ -403,12 +407,12 @@ fn test_parse_copy3() {
 
 #[test]
 fn test_parse_copy4() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy4.dfdfile").unwrap());
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy4.labarfile").unwrap());
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
-    let result = result.expand();
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = result.expand(Path::new(""));
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
     assert_eq!(result.layers.len(), 1);
@@ -425,12 +429,12 @@ fn test_parse_copy4() {
 
 #[test]
 fn test_parse_copy5() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy5.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy5.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
-    let result = result.expand();
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = result.expand(Path::new(""));
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
     assert_eq!(1, result.layers.len());
@@ -443,12 +447,12 @@ fn test_parse_copy5() {
 
 #[test]
 fn test_parse_copy6() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy6.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy6.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
-    let result = result.expand();
-    assert!(result.is_ok(), result.err().unwrap());
+    let result = result.expand(Path::new(""));
+    assert!(result.is_ok(), "{}", result.err().unwrap());
     let result = result.unwrap();
 
     assert_eq!(1, result.layers.len());
@@ -460,7 +464,7 @@ fn test_parse_copy6() {
 
 #[test]
 fn test_parse_copy7() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy7.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy7.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -473,7 +477,7 @@ fn test_parse_copy7() {
 
 #[test]
 fn test_parse_copy8() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy8.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/copy8.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -486,7 +490,7 @@ fn test_parse_copy8() {
 
 #[test]
 fn test_parse_mkdir1() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/mkdir1.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/mkdir1.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -499,7 +503,7 @@ fn test_parse_mkdir1() {
 
 #[test]
 fn test_parse_mkdir2() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/mkdir2.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/mkdir2.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -512,7 +516,7 @@ fn test_parse_mkdir2() {
 
 #[test]
 fn test_parse_image1() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/image1.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/image1.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -525,7 +529,7 @@ fn test_parse_image1() {
 
 #[test]
 fn test_parse_from1() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/from1.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/from1.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -535,13 +539,13 @@ fn test_parse_from1() {
 
 #[test]
 fn test_parse_from2() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/from2.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/from2.labarfile").unwrap());
     assert!(result.is_err());
 }
 
 #[test]
 fn test_parse_multi1() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/multi1.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/multi1.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -564,7 +568,7 @@ fn test_parse_multi1() {
 
 #[test]
 fn test_parse_multi2() {
-    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/multi2.dfdfile").unwrap());
+    let result = ImageDefinition::from_str(&std::fs::read_to_string("testdata/parsing/multi2.labarfile").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 

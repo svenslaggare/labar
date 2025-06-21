@@ -1,27 +1,29 @@
 use std::path::{Path};
 
-use crypto::sha2::Sha256;
-use crypto::digest::Digest;
+use sha2::{Sha256, Digest};
 
 use crate::image_manager::layer::LayerManager;
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
-use crate::helpers;
+use crate::image_manager::printing::BoxPrinter;
 
 pub struct BuildManager {
-    config: ImageManagerConfig
+    config: ImageManagerConfig,
+    printer: BoxPrinter
 }
 
 impl BuildManager {
-    pub fn new(config: ImageManagerConfig) -> BuildManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> BuildManager {
         BuildManager {
-            config
+            config,
+            printer
         }
     }
 
     pub fn build_image(&self,
                        layer_manager: &mut LayerManager,
+                       build_context: &Path,
                        image_definition: ImageDefinition,
                        tag: &str) -> ImageManagerResult<Image> {
         let mut parent_hash: Option<String> = None;
@@ -37,10 +39,10 @@ impl BuildManager {
 
         let num_layers = image_definition.layers.len();
         for (layer_index, layer_definition) in image_definition.layers.into_iter().enumerate() {
-            println!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line);
+            self.printer.println(&format!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line));
 
             let layer_definition = layer_definition
-                .expand()
+                .expand(build_context)
                 .map_err(|err| ImageManagerError::FileIOError { message: err })?;
 
             let layer = self.create_layer(layer_manager, layer_definition, &parent_hash)?;
@@ -59,11 +61,12 @@ impl BuildManager {
 
     fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer) -> ImageManagerResult<bool> {
         if layer_manager.layer_exist(&layer.hash) {
-            println!("\t* Layer already built: {}", layer.hash);
+            self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
         }
 
-        println!("\t* Building layer: {}", layer.hash);
+        self.printer.println(&format!("\t* Building layer: {}", layer.hash));
+
         let destination_base_path = self.config.get_layer_folder(&layer.hash);
 
         #[allow(unused_must_use)] {
@@ -71,6 +74,8 @@ impl BuildManager {
         }
 
         for operation in &mut layer.operations {
+            self.printer.println(&format!("\t* {}", operation));
+
             match operation {
                 LayerOperation::File { path, source_path, .. } => {
                     let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
@@ -163,24 +168,26 @@ impl BuildManager {
 }
 
 fn create_hash(input: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.input_str(input);
-    hasher.result_str()
+    base16ct::lower::encode_string(&Sha256::digest(input.as_bytes()))
 }
 
 #[test]
 fn test_build() {
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
 
+    let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
-    let build_manager = BuildManager::new(config);
+    let build_manager = BuildManager::new(config, printer);
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let result = build_manager.build_image(&mut layer_manager, image_definition, "test");
+    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -200,27 +207,31 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache() {
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
 
+    let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
-    let build_manager = BuildManager::new(config);
+    let build_manager = BuildManager::new(config, printer.clone());
 
     // Build first time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let first_result = build_manager.build_image(&mut layer_manager, image_definition, "test");
+    let first_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.dfdfile").unwrap());
+    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let second_result = build_manager.build_image(&mut layer_manager, image_definition, "test");
+    let second_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
 

@@ -1,29 +1,29 @@
 [package]
 name = "labar"
 version = "0.1.0"
-authors = ["Anton Jansson <anton.jansson@topgolf.com>"]
-edition = "2018"
+authors = ["Anton Jansson <anton_jansson@live.se>"]
+edition = "2021"
 
 [dependencies]
 regex = "1"
 chrono = "0.4"
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_yaml = "0.8"
 
-rust-crypto = "0.2.36"
-dirs = "2.0.2"
+sha2 = "0.10"
+base16ct = { version = "0.2.0", features = ["alloc"] }
+
+dirs = "6"
 
 futures = "0.3"
-
-tokio = { version = "0.2", features = ["full"] }
-tokio-util = "0.3.1"
-
-rusoto_core = "0.44.0"
-rusoto_s3 = "0.44.0"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["io"] }
+axum = { version = "0.8" }
+reqwest = { version = "0.12", features = ["stream"] }
 
 structopt = "0.3"
 
-psutil = { version = "3.1.0", default-features = false, features = ["process"] }
-tempfile = "3.1.0"
+sysinfo = "0.35"
+tempfile = "3"

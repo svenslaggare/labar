@@ -1,4 +1,6 @@
+use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
 pub struct TablePrinter {
     rows: Vec<Vec<String>>,
@@ -40,10 +42,19 @@ impl TablePrinter {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct DataSize(pub usize);
+
+impl Display for DataSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:.2} MB", self.0 as f64 / 1024.0 / 1024.0)
+    }
+}
+
 #[allow(dead_code)]
 pub fn get_temp_folder() -> PathBuf {
     let named_temp_folder = tempfile::Builder::new()
-        .suffix(".dfd")
+        .suffix(".labar")
         .tempfile().unwrap();
 
     named_temp_folder.path().to_owned()

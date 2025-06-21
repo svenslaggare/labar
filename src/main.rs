@@ -1,5 +1,4 @@
-use std::path::{Path};
-use std::str::FromStr;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local};
 
@@ -7,38 +6,37 @@ use serde::{Deserialize};
 
 use structopt::StructOpt;
 
-use rusoto_s3::S3Client;
-use rusoto_core::Region;
-
 pub mod helpers;
 pub mod lock;
 pub mod image_definition;
 pub mod image;
 pub mod image_manager;
+pub mod registry;
 
 use crate::helpers::TablePrinter;
 use crate::image_definition::{ImageDefinition};
 use crate::lock::FileLock;
-use crate::image_manager::{ImageManager, RegistryManager, ImageMetadata, ImageManagerConfig};
+use crate::image_manager::{ImageManager, ImageMetadata, ImageManagerConfig, BoxPrinter, ConsolePrinter};
+use crate::registry::RegistryConfig;
 
 #[derive(Deserialize)]
 pub struct FileConfig {
-    pub registry_uri: String,
-    pub registry_region: String
+
 }
 
 impl FileConfig {
-    pub fn default() -> FileConfig {
-        FileConfig {
-            registry_uri: "s3://undefined".to_owned(),
-            registry_region: "undefined".to_owned()
-        }
+    pub fn load(filename: &Path) -> Result<FileConfig, String> {
+        let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
+        serde_yaml::from_str(&content).map_err(|err| format!("{}", err))
     }
 }
 
-pub fn load_file_config(filename: &Path) -> std::result::Result<FileConfig, String> {
-    let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
-    serde_yaml::from_str(&content).map_err(|err| format!("{}", err))
+impl Default for FileConfig {
+    fn default() -> Self {
+        FileConfig {
+
+        }
+    }
 }
 
 #[derive(Debug, StructOpt)]
@@ -48,8 +46,10 @@ enum CommandLineInput {
     Build {
         #[structopt(name="file", help="The file with the build definition")]
         file: String,
-        #[structopt(short, long, help="The tag of the image")]
-        tag: String
+        #[structopt(name="tag", help="The tag of the image")]
+        tag: String,
+        #[structopt(long, help="The build context")]
+        build_context: Option<PathBuf>
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
@@ -97,47 +97,42 @@ enum CommandLineInput {
     Purge {
 
     },
-    #[structopt(about="Pulls an image from a remote repository")]
+    #[structopt(about="Pulls an image from a remote registry")]
     Pull {
+        #[structopt(name="registry", help="The registry to pull from")]
+        registry: String,
         #[structopt(name="tag", help="The image to pull")]
-        tag: String,
-        #[structopt(long, help="Pull from this registry instead of the default")]
-        registry: Option<String>
+        tag: String
     },
-    #[structopt(about="Pushes a local image to a remote repository")]
+    #[structopt(about="Pushes a local image to a remote registry")]
     Push {
+        #[structopt(name="registry", help="The registry to push to")]
+        registry: String,
         #[structopt(name="tag", help="The image to push")]
-        tag: String,
-        #[structopt(long, help="Push to this registry instead of the default")]
-        registry: Option<String>,
-        #[structopt(long, help="Pushes all the layer to the remote, even if they exists on remote")]
-        force: bool,
+        tag: String
     },
     #[structopt(about="Lists the images in a remote registry")]
     ListImagesRegistry {
-        #[structopt(long, help="Use this registry instead of the default one")]
-        registry: Option<String>,
+        #[structopt(name="registry", help="The registry to list for")]
+        registry: String
+    },
+    #[structopt(about="Runs a labar registry")]
+    RunRegistry {
+        #[structopt(name="config_file", help="The YAML configuration file of the registry")]
+        config_file: PathBuf
     },
 }
 
-fn create_registry_manager(file_config: &FileConfig, registry_uri: Option<String>) -> RegistryManager {
-    RegistryManager::new(
-        registry_uri.unwrap_or_else(|| file_config.registry_uri.clone()),
-        S3Client::new(Region::from_str(&file_config.registry_region).unwrap())
-    )
-}
-
-fn create_image_manager(file_config: &FileConfig, registry_uri: Option<String>) -> ImageManager {
-    ImageManager::from_state_file(create_registry_manager(file_config, registry_uri.clone()))
-        .unwrap_or_else(|_| ImageManager::new(create_registry_manager(file_config, registry_uri)))
+fn create_image_manager(_file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
+    ImageManager::from_state_file(printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()))
 }
 
 fn create_write_lock() -> FileLock {
-    FileLock::new(ImageManagerConfig::new().base_dir().join("write_lock"))
+    FileLock::new(ImageManagerConfig::new().base_folder().join("write_lock"))
 }
 
 fn create_unpack_lock() -> FileLock {
-    FileLock::new(ImageManagerConfig::new().base_dir().join("unpack_lock"))
+    FileLock::new(ImageManagerConfig::new().base_folder().join("unpack_lock"))
 }
 
 fn print_images(images: &Vec<ImageMetadata>) {
@@ -157,7 +152,7 @@ fn print_images(images: &Vec<ImageMetadata>) {
             metadata.image.tag.clone(),
             metadata.image.hash.clone(),
             created.format("%Y-%m-%d %T").to_string(),
-            format!("{:.2} MB", metadata.size as f64 / 1024.0 / 1024.0)
+            metadata.size.to_string()
         ]);
     }
 
@@ -165,39 +160,43 @@ fn print_images(images: &Vec<ImageMetadata>) {
 }
 
 async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput) -> Result<(), String> {
+    let printer = ConsolePrinter::new();
+
     match command_line_input {
-        CommandLineInput::Build { file, tag } => {
+        CommandLineInput::Build { file, tag, build_context } => {
             let _write_lock = create_write_lock();
-            let mut image_manager = create_image_manager(&file_config, None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             println!("Building image: {}", tag);
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition file not found: {}", err))?;
             let image_definition = ImageDefinition::from_str(&image_definition_content).map_err(|err| format!("Failed parsing build definition: {}", err))?;
-            let image = image_manager.build_image(image_definition, &tag).map_err(|err| format!("{}", err))?;
-            println!("Built image {} ({})", image.tag, image.hash);
+            let build_context = build_context.unwrap_or_else(|| Path::new("").to_owned());
+            let image = image_manager.build_image(&build_context, image_definition, &tag).map_err(|err| format!("{}", err))?;
+            let image_size = image_manager.image_size(&image.tag).map_err(|err| format!("{}", err))?;
+            println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
         },
         CommandLineInput::RemoveImage { tag } => {
             let _write_lock = create_write_lock();
             let _unpack_lock = create_unpack_lock();
-            let mut image_manager = create_image_manager(&file_config,None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::TagImage { reference, tag } => {
             let _write_lock = create_write_lock();
-            let mut image_manager = create_image_manager(&file_config,None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             let image = image_manager.tag_image(&reference, &tag).map_err(|err| format!("{}", err))?;
             println!("Tagged {} ({}) as {}", reference, image.hash, image.tag);
         },
         CommandLineInput::ListImages { } => {
-            let image_manager = create_image_manager(&file_config,None);
+            let image_manager = create_image_manager(&file_config, printer.clone());
 
             let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
             print_images(&images);
         }
         CommandLineInput::ListContent { tag } => {
-            let image_manager = create_image_manager(&file_config,None);
+            let image_manager = create_image_manager(&file_config, printer.clone());
 
             let content = image_manager.list_content(&tag).map_err(|err| format!("{}", err))?;
             for path in content {
@@ -205,7 +204,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             }
         }
         CommandLineInput::ListUnpackings { } => {
-            let image_manager = create_image_manager(&file_config,None);
+            let image_manager = create_image_manager(&file_config, printer.clone());
 
             let unpackings = image_manager.list_unpackings();
             let mut table_printer = TablePrinter::new(
@@ -230,41 +229,45 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         }
         CommandLineInput::Unpack { tag, destination, replace } => {
             let _unpack_lock = create_unpack_lock();
-            let mut image_manager = create_image_manager(&file_config, None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.unpack(&Path::new(&destination), &tag, replace).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock();
-            let mut image_manager = create_image_manager(&file_config, None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.remove_unpacking(&Path::new(&path), force).map_err(|err| format!("{}", err))?;
         }
         CommandLineInput::Purge { } => {
             let _write_lock = create_write_lock();
-            let mut image_manager = create_image_manager(&file_config, None);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
-        CommandLineInput::Push { tag, registry, force } => {
+        CommandLineInput::Push { tag, registry } => {
             let _write_lock = create_write_lock();
-            let image_manager = create_image_manager(&file_config, registry);
+            let image_manager = create_image_manager(&file_config, printer.clone());
 
-            println!("Pushing image {} to {}", tag, image_manager.registry_uri());
-            image_manager.push(&tag, force).await.map_err(|err| format!("{}", err))?;
+            println!("Pushing image {} to {}", tag, registry);
+            image_manager.push(&registry, &tag).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::Pull { tag, registry } => {
             let _write_lock = create_write_lock();
-            let mut image_manager = create_image_manager(&file_config, registry);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            println!("Pulling image {} from {}", tag, image_manager.registry_uri());
-            image_manager.pull(&tag).await.map_err(|err| format!("{}", err))?;
+            println!("Pulling image {} from {}", tag, registry);
+            image_manager.pull(&registry, &tag).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::ListImagesRegistry { registry } => {
-            let image_manager = create_image_manager(&file_config, registry);
+            let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let images = image_manager.list_images_remote().await.map_err(|err| format!("{}", err))?;
+            let images = image_manager.list_images_registry(&registry).await.map_err(|err| format!("{}", err))?;
             print_images(&images);
+        }
+        CommandLineInput::RunRegistry { config_file } => {
+            let registry_config = RegistryConfig::load(&config_file).unwrap();
+            registry::run(registry_config).await;
         }
     }
 
@@ -273,7 +276,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let file_config = load_file_config(&ImageManagerConfig::new().base_dir().join("config.yaml")).unwrap_or(FileConfig::default());
+    let file_config = FileConfig::load(&ImageManagerConfig::new().base_folder().join("config.yaml")).unwrap_or(FileConfig::default());
     let command_line_input = CommandLineInput::from_args();
 
     if let Err(err) = main_run(file_config, command_line_input).await {

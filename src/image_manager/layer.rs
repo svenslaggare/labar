@@ -21,7 +21,7 @@ impl LayerManager {
             return image_hash;
         }
 
-        return reference.to_owned();
+        reference.to_owned()
     }
 
     pub fn get_layer(&self, reference: &str) -> ImageManagerResult<&Layer> {

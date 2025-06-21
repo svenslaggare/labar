@@ -1,20 +1,20 @@
 use std::path::{PathBuf, Path};
 
-use crate::image_manager::registry::RegistryError;
-
 mod layer;
 mod unpack;
 mod build;
-mod image;
+mod printing;
 mod registry;
+mod state;
+mod image;
 
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageNotFound { reference: String },
-    RegistryError { error: RegistryError },
     FileIOError { message: String },
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
+    RegistryError { error: RegistryError },
     FolderNotEmpty { path: String },
     OtherError { message: String }
 }
@@ -37,9 +37,6 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::ImageNotFound { reference } => {
                 write!(f, "Could not find the image: {}.", reference)
             }
-            ImageManagerError::RegistryError { error } => {
-                write!(f, "Repository error: {}", error)
-            },
             ImageManagerError::FileIOError { message } => {
                 write!(f, "{}", message)
             },
@@ -49,6 +46,9 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::UnpackingNotFound { path } => {
                 write!(f, "Could not find the unpacking at {}", path)
             },
+            ImageManagerError::RegistryError { error } => {
+                write!(f, "Registry error: {}", error)
+            }
             ImageManagerError::FolderNotEmpty { path } => {
                 write!(f, "The folder {} is not empty", path)
             },
@@ -63,35 +63,36 @@ pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 
 #[derive(Clone)]
 pub struct ImageManagerConfig {
-    base_dir: PathBuf
+    base_folder: PathBuf
 }
 
 impl ImageManagerConfig {
     pub fn new() -> ImageManagerConfig {
         ImageManagerConfig {
-            base_dir: dirs::home_dir().unwrap().join(".dfd")
+            base_folder: dirs::home_dir().unwrap().join(".labar")
         }
     }
 
-    pub fn with_base_dir(base_dir: PathBuf) -> ImageManagerConfig {
+    pub fn with_base_dir(base_folder: PathBuf) -> ImageManagerConfig {
         ImageManagerConfig {
-            base_dir
+            base_folder
         }
     }
 
-    pub fn base_dir(&self) -> PathBuf {
-        self.base_dir.clone()
+    pub fn base_folder(&self) -> PathBuf {
+        self.base_folder.clone()
     }
 
-    pub fn images_base_dir(&self) -> PathBuf {
-        self.base_dir().join("images")
+    pub fn images_base_folder(&self) -> PathBuf {
+        self.base_folder().join("images")
     }
 
     pub fn get_layer_folder(&self, hash: &str) -> PathBuf {
-        self.images_base_dir().join(&Path::new(&hash))
+        self.images_base_folder().join(&Path::new(&hash))
     }
 }
 
-pub use image::ImageManager;
-pub use image::ImageMetadata;
-pub use registry::RegistryManager;
+pub use image::{ImageManager, ImageMetadata};
+pub use state::State;
+pub use printing::{Printer, BoxPrinter, ConsolePrinter, EmptyPrinter};
+use crate::image_manager::registry::RegistryError;

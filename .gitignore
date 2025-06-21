@@ -2,3 +2,5 @@
 .idea
 specs
 test.sh
+private
+registry.yaml

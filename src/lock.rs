@@ -2,18 +2,20 @@ use std::path::PathBuf;
 use std::io::{Write, Read};
 use std::str::FromStr;
 
-use psutil::process::Process;
+use sysinfo::{Pid, ProcessStatus, System};
 
 pub struct FileLock {
     path: PathBuf,
-    has_lock: bool
+    has_lock: bool,
+    system: System
 }
 
 impl FileLock {
     pub fn new(path: PathBuf) -> FileLock {
         let mut file_lock = FileLock {
             path,
-            has_lock: false
+            has_lock: false,
+            system: System::new_all()
         };
 
         file_lock.lock();
@@ -34,8 +36,8 @@ impl FileLock {
                     let mut content = String::new();
                     if let Ok(_) = lock_file.read_to_string(&mut content) {
                         if let Ok(pid) = u32::from_str(&content) {
-                            let dead = if let Ok(process) = Process::new(pid) {
-                                !process.is_running()
+                            let dead = if let Some(process) = self.system.process(Pid::from_u32(pid)) {
+                                process.status() == ProcessStatus::Run
                             } else {
                                 true
                             };
