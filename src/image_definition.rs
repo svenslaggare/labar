@@ -67,47 +67,6 @@ pub enum LayerOperationDefinition {
     File { path: String, source_path: String, link_type: LinkType },
 }
 
-fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, link_type: LinkType) -> ImageParseResult<Vec<LayerOperationDefinition>> {
-    let mut stack = Vec::new();
-    stack.push(source_path.to_owned());
-
-    let mut results = Vec::new();
-
-    while let Some(current) = stack.pop() {
-        let mut read_dir = std::fs::read_dir(current).map_err(|err| format!("{}", err))?;
-        while let Some(entry) = read_dir.next() {
-            let entry = entry.map_err(|err| format!("{}", err))?;
-
-            let entry_path = entry.path();
-            let relative_entry_path = entry_path.strip_prefix(source_path).map_err(|err| format!("{}", err))?;
-
-            let relative_entry_path = if base_destination_path != Path::new(".") {
-                base_destination_path.join(relative_entry_path)
-            } else {
-                relative_entry_path.to_owned()
-            };
-
-            if entry_path.is_dir() {
-                results.push(LayerOperationDefinition::Directory {
-                    path: relative_entry_path.to_str().unwrap().to_owned()
-                });
-
-                stack.push(entry_path);
-            } else if entry_path.is_file() {
-                results.push(LayerOperationDefinition::File {
-                    path: relative_entry_path.to_str().unwrap().to_owned(),
-                    source_path: entry_path.to_str().unwrap().to_owned(),
-                    link_type
-                });
-            }
-        }
-    }
-
-    results.sort();
-
-    Ok(results)
-}
-
 fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinition>) -> ImageParseResult<Vec<LayerOperationDefinition>> {
     let mut expanded_operations = Vec::new();
 
@@ -161,6 +120,47 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
     }
 
     Ok(expanded_operations)
+}
+
+fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, link_type: LinkType) -> ImageParseResult<Vec<LayerOperationDefinition>> {
+    let mut stack = Vec::new();
+    stack.push(source_path.to_owned());
+
+    let mut results = Vec::new();
+
+    while let Some(current) = stack.pop() {
+        let mut read_dir = std::fs::read_dir(current).map_err(|err| format!("{}", err))?;
+        while let Some(entry) = read_dir.next() {
+            let entry = entry.map_err(|err| format!("{}", err))?;
+
+            let entry_path = entry.path();
+            let relative_entry_path = entry_path.strip_prefix(source_path).map_err(|err| format!("{}", err))?;
+
+            let relative_entry_path = if base_destination_path != Path::new(".") {
+                base_destination_path.join(relative_entry_path)
+            } else {
+                relative_entry_path.to_owned()
+            };
+
+            if entry_path.is_dir() {
+                results.push(LayerOperationDefinition::Directory {
+                    path: relative_entry_path.to_str().unwrap().to_owned()
+                });
+
+                stack.push(entry_path);
+            } else if entry_path.is_file() {
+                results.push(LayerOperationDefinition::File {
+                    path: relative_entry_path.to_str().unwrap().to_owned(),
+                    source_path: entry_path.to_str().unwrap().to_owned(),
+                    link_type
+                });
+            }
+        }
+    }
+
+    results.sort();
+
+    Ok(results)
 }
 
 fn extract_arguments(parts: &mut Vec<&str>) -> HashMap<String, String> {
