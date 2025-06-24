@@ -372,33 +372,6 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn get_image_layers(&self, reference: &str) -> ImageManagerResult<Vec<&str>> {
-        let mut layers = Vec::new();
-
-        let mut stack = Vec::new();
-        stack.push(reference);
-
-        while let Some(current) = stack.pop() {
-            let layer = self.layer_manager.get_layer(&current)?;
-            layers.push(layer.hash.as_str());
-
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash);
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash);
-                    },
-                    _ => {}
-                }
-            }
-        }
-
-        Ok(layers)
-    }
-
     pub fn get_layer(&self, reference: &str) -> ImageManagerResult<&Layer> {
         self.layer_manager.get_layer(reference)
     }
