@@ -266,7 +266,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             print_images(&images);
         }
         CommandLineInput::RunRegistry { config_file } => {
-            let registry_config = RegistryConfig::load(&config_file).unwrap();
+            let registry_config = RegistryConfig::load(&config_file)?;
             registry::run(registry_config).await;
         }
     }
