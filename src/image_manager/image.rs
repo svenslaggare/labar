@@ -24,6 +24,8 @@ pub struct ImageMetadata {
 pub struct ImageManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
+    changed: bool,
+
     layer_manager: LayerManager,
     build_manager: BuildManager,
     unpack_manager: UnpackManager,
@@ -40,6 +42,8 @@ impl ImageManager {
         ImageManager {
             config: config.clone(),
             printer: printer.clone(),
+            changed: false,
+
             layer_manager: LayerManager::new(),
             build_manager: BuildManager::new(config, printer.clone()),
             unpack_manager: UnpackManager::new(printer.clone()),
@@ -110,28 +114,36 @@ impl ImageManager {
     }
 
     pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &str) -> ImageManagerResult<Image> {
-        self.build_manager.build_image(&mut self.layer_manager, build_context, image_definition, tag)
+        let image = self.build_manager.build_image(&mut self.layer_manager, build_context, image_definition, tag)?;
+        self.changed = true;
+        Ok(image)
     }
 
     pub fn tag_image(&mut self, reference: &str, tag: &str) -> ImageManagerResult<Image> {
         let layer = self.layer_manager.get_layer(reference)?;
         let image = Image::new(layer.hash.clone(), tag.to_owned());
         self.layer_manager.insert_or_replace_image(&image);
+        self.changed = true;
         Ok(image)
     }
 
     pub fn unpack(&mut self, unpack_dir: &Path, reference: &str, replace: bool) -> ImageManagerResult<()> {
-        self.unpack_manager.unpack(&mut self.layer_manager, unpack_dir, reference, replace)
+        self.unpack_manager.unpack(&mut self.layer_manager, unpack_dir, reference, replace)?;
+        self.changed = true;
+        Ok(())
     }
 
     pub fn remove_unpacking(&mut self, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
-        self.unpack_manager.remove_unpacking(&mut self.layer_manager, unpack_dir, force)
+        self.unpack_manager.remove_unpacking(&mut self.layer_manager, unpack_dir, force)?;
+        self.changed = true;
+        Ok(())
     }
 
     pub fn remove_image(&mut self, tag: &str) -> ImageManagerResult<()> {
         if let Some(image) = self.layer_manager.remove_image_tag(tag) {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
             self.garbage_collect()?;
+            self.changed = true;
             Ok(())
         } else {
             Err(ImageManagerError::ImageNotFound { reference: tag.to_owned() })
@@ -165,6 +177,7 @@ impl ImageManager {
 
         std::mem::swap(&mut tmp_layers, &mut self.layer_manager.layers);
 
+        self.changed = true;
         Ok(deleted_layers)
     }
 
@@ -404,7 +417,9 @@ impl ImageManager {
 
 impl Drop for ImageManager {
     fn drop(&mut self) {
-        self.save_state().unwrap();
+        if self.changed {
+            self.save_state().unwrap();
+        }
     }
 }
 
