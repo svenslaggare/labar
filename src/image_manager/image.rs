@@ -1,4 +1,5 @@
 use std::collections::{HashMap, BTreeSet};
+use std::net::SocketAddr;
 use std::path::{Path};
 use std::time::SystemTime;
 
@@ -522,4 +523,65 @@ fn test_remove_image2() {
 
     assert_eq!(1, images.len());
     assert_eq!("test2", images[0].image.tag);
+}
+
+#[tokio::test]
+async fn test_push_pull() {
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+    use crate::registry::RegistryConfig;
+
+    let tmp_dir = helpers::get_temp_folder();
+    let tmp_registry_dir = helpers::get_temp_folder();
+
+    let address: SocketAddr = "0.0.0.0:9567".parse().unwrap();
+    tokio::spawn(crate::registry::run(RegistryConfig {
+        data_path: tmp_registry_dir.clone(),
+        address
+    }));
+
+    // Wait until registry starts
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    {
+        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+
+        // Build
+        let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image = image_manager.build_image(Path::new(""), image_definition, "test").unwrap();
+
+        // Push
+        let push_result = image_manager.push(&address.to_string(), &image.tag).await;
+        assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+
+        // List remote
+        let remote_images = image_manager.list_images_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(1, remote_images.len());
+        assert_eq!("test", &remote_images[0].image.tag);
+
+        // Remove in order to pull
+        assert!(image_manager.remove_image(&image.tag).is_ok());
+
+        // Pull
+        let pull_result = image_manager.pull(&address.to_string(), &image.tag).await;
+        assert!(pull_result.is_ok());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+
+        // List images
+        let images = image_manager.list_images();
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!("test", &images[0].image.tag);
+        assert_eq!(Some(DataSize(974)), image_manager.image_size(&image.tag).ok());
+    }
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+        std::fs::remove_dir_all(&tmp_registry_dir);
+    }
 }

@@ -75,7 +75,7 @@ impl Layer {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Image {
     pub hash: String,
     pub tag: String
