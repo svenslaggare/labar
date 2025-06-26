@@ -259,3 +259,45 @@ fn test_build_with_cache() {
         std::fs::remove_dir_all(&tmp_dir);
     }
 }
+
+#[test]
+fn test_build_with_image_ref() {
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+    use crate::reference::Reference;
+
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+    let printer = ConsolePrinter::new();
+    let mut layer_manager = LayerManager::new();
+    let build_manager = BuildManager::new(config, printer);
+
+    let image_definition = ImageDefinition::from_str_without_context(
+        &std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()
+    ).unwrap();
+    build_manager.build_image(
+        &mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()
+    ).unwrap();
+
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
+    assert!(image_definition.is_ok());
+    let image_definition = image_definition.unwrap();
+
+    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("that").unwrap());
+    assert!(result.is_ok());
+    let result = result.unwrap();
+
+    assert_eq!(ImageTag::from_str("that").unwrap(), result.tag);
+
+    let image = layer_manager.get_layer(&Reference::from_str("that").unwrap());
+    assert!(image.is_ok());
+    let image = image.unwrap();
+    assert_eq!(image.hash, result.hash);
+
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("that").unwrap()), Some(result.hash));
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}

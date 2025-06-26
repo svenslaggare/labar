@@ -616,3 +616,37 @@ async fn test_push_pull() {
         std::fs::remove_dir_all(&tmp_registry_dir);
     }
 }
+
+#[test]
+fn test_list_content() {
+    use std::str::FromStr;
+
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_dir = helpers::get_temp_folder();
+
+    {
+        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+
+        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
+
+        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
+        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("that").unwrap()).unwrap();
+
+        let files = image_manager.list_content(&Reference::from_str("that").unwrap());
+        assert!(files.is_ok());
+        let files = files.unwrap();
+
+        assert_eq!(2, files.len());
+        assert_eq!("file1.txt", files[0]);
+        assert_eq!("file2.txt", files[1]);
+    }
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
