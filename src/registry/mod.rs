@@ -35,7 +35,7 @@ pub struct RegistryConfig {
 impl RegistryConfig {
     pub fn load(filename: &std::path::Path) -> Result<RegistryConfig, String> {
         let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
-        serde_yaml::from_str(&content).map_err(|err| format!("{}", err))
+        toml::from_str(&content).map_err(|err| format!("{}", err))
     }
 
     pub fn image_manager_config(&self) -> ImageManagerConfig {

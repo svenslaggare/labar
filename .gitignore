@@ -3,5 +3,5 @@
 specs
 test.sh
 private
-registry.yaml
+registry.toml
 scripts

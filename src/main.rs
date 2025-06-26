@@ -29,7 +29,7 @@ pub struct FileConfig {
 impl FileConfig {
     pub fn load(filename: &Path) -> Result<FileConfig, String> {
         let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
-        serde_yaml::from_str(&content).map_err(|err| format!("{}", err))
+        toml::from_str(&content).map_err(|err| format!("{}", err))
     }
 }
 
@@ -118,7 +118,7 @@ enum CommandLineInput {
     },
     #[structopt(about="Runs a labar registry")]
     RunRegistry {
-        #[structopt(name="config_file", help="The YAML configuration file of the registry")]
+        #[structopt(name="config_file", help="The toml configuration file of the registry")]
         config_file: PathBuf
     },
 }
@@ -298,7 +298,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let file_config = FileConfig::load(&ImageManagerConfig::new().base_folder().join("config.yaml")).unwrap_or(FileConfig::default());
+    let file_config = FileConfig::load(&ImageManagerConfig::new().base_folder().join("config.toml")).unwrap_or(FileConfig::default());
     let command_line_input = CommandLineInput::from_args();
 
     if let Err(err) = main_run(file_config, command_line_input).await {
