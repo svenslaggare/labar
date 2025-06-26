@@ -42,7 +42,7 @@ impl TablePrinter {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DataSize(pub usize);
 
 impl Display for DataSize {

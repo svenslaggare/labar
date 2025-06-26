@@ -1,5 +1,5 @@
 use std::collections::{HashMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Path};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
@@ -45,8 +45,8 @@ impl ImageManager {
             changed: false,
 
             layer_manager: LayerManager::new(),
-            build_manager: BuildManager::new(config, printer.clone()),
-            unpack_manager: UnpackManager::new(printer.clone()),
+            build_manager: BuildManager::new(config.clone(), printer.clone()),
+            unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
             registry_manager: RegistryManager::new(printer.clone()),
         }
     }
@@ -111,6 +111,10 @@ impl ImageManager {
             .map_err(|err| format!("{}", err))?;
 
         Ok(())
+    }
+
+    pub fn state_exists(&self) -> bool {
+        self.config.base_folder().join("state.json").exists()
     }
 
     pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &str) -> ImageManagerResult<Image> {
@@ -250,7 +254,8 @@ impl ImageManager {
                         stack.push(hash.clone());
                     },
                     LayerOperation::File { source_path, .. } => {
-                        total_size += std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize;
+                        let abs_source_path = self.config.base_folder.join(source_path);
+                        total_size += std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize;
                     },
                     _ => {}
                 }
@@ -360,7 +365,7 @@ impl ImageManager {
         while let Some(current) = stack.pop() {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
 
-            let layer = self.get_normalized_layer(&current)?;
+            let layer = self.get_layer(&current)?;
 
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
                 stack.push(parent_hash.clone());
@@ -375,7 +380,7 @@ impl ImageManager {
                 }
             }
 
-            self.registry_manager.upload_layer(self.config(), registry, &layer).await?;
+            self.registry_manager.upload_layer(self.config(), registry, layer).await?;
         }
 
         self.registry_manager.upload_image(registry, &top_layer.hash, reference).await?;
@@ -389,29 +394,18 @@ impl ImageManager {
         self.layer_manager.get_layer(reference)
     }
 
-    pub fn get_normalized_layer(&self, reference: &str) -> ImageManagerResult<Layer> {
-        let mut layer = self.layer_manager.get_layer(reference)?.clone();
-        for operation in &mut layer.operations {
-            if let LayerOperation::File { source_path, .. } = operation {
-                *source_path = self.normalize_source_path(Path::new(source_path))?.to_str().unwrap().to_string();
-            }
-        }
-
-        Ok(layer)
-    }
-
-    fn normalize_source_path(&self, path: &Path) -> ImageManagerResult<PathBuf> {
-        path.strip_prefix(&self.config.base_folder)
-            .map(|x| x.to_path_buf())
-            .map_err(|err| ImageManagerError::OtherError { message: format!("Failed to normalize path due to: {}", err)})
-    }
-
     pub fn add_layer(&mut self, layer: Layer) {
         self.layer_manager.add_layer(layer);
+        self.changed = true;
+    }
+
+    pub fn get_image(&self, reference: &str) -> ImageManagerResult<&Image> {
+        self.layer_manager.get_image(reference)
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) {
         self.layer_manager.insert_or_replace_image(&image);
+        self.changed = true;
     }
 }
 
@@ -420,6 +414,46 @@ impl Drop for ImageManager {
         if self.changed {
             self.save_state().unwrap();
         }
+    }
+}
+
+#[test]
+fn test_build() {
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_dir = helpers::get_temp_folder();
+
+    {
+        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+
+        let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+        assert!(image_definition.is_ok());
+        let image_definition = image_definition.unwrap();
+
+        let result = image_manager.build_image(Path::new(""), image_definition, "test");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+
+        assert_eq!("test", result.tag);
+
+        let top_layer = image_manager.get_layer("test");
+        assert!(top_layer.is_ok());
+        let top_layer = top_layer.unwrap();
+        assert_eq!(top_layer.hash, result.hash);
+
+        let image = image_manager.get_image("test");
+        assert!(image.is_ok());
+        let image = image.unwrap();
+        assert_eq!(image.hash, top_layer.hash);
+
+        assert_eq!(Some(DataSize(974)), image_manager.image_size("test").ok());
+    }
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
     }
 }
 

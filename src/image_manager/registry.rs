@@ -45,7 +45,6 @@ impl RegistryManager {
         for operation in &mut layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
                 let local_source_path = config.base_folder.join(Path::new(source_path));
-                *source_path = local_source_path.to_str().unwrap().to_owned();
                 self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
 
                 if let Some(parent) = local_source_path.parent() {
@@ -76,7 +75,7 @@ impl RegistryManager {
 
         *request.body_mut() = Some(Body::from(serde_json::to_string(&layer)?));
         let response = self.http_client.execute(request).await?;
-        RegistryError::from_status_code(response.status())?;
+        RegistryError::from_status_code(response.status(), "manifest".to_owned())?;
 
         let upload_result: UploadLayerManifestResult = serde_json::from_str(&response.text().await?)?;
         if let UploadLayerManifestStatus::AlreadyExist = upload_result.status {
@@ -94,7 +93,7 @@ impl RegistryManager {
                 *request.body_mut() = Some(body);
 
                 let response = self.http_client.execute(request).await?;
-                RegistryError::from_status_code(response.status())?;
+                RegistryError::from_status_code(response.status(), format!("file {}", file_index))?;
 
                 file_index += 1;
             }
@@ -114,7 +113,7 @@ impl RegistryManager {
         )?));
 
         let response = self.http_client.execute(request).await?;
-        RegistryError::from_status_code(response.status())?;
+        RegistryError::from_status_code(response.status(), "image".to_owned())?;
 
         Ok(())
     }
@@ -126,12 +125,14 @@ impl RegistryManager {
     }
 
     async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<reqwest::Response> {
-        let response = self.http_client.execute(self.http_client.get(format!("http://{}/{}", registry, url)).build()?).await?;
+        let full_url = format!("http://{}/{}", registry, url);
+        let response = self.http_client.execute(self.http_client.get(full_url).build()?).await?;
         Ok(response)
     }
 
     fn post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        self.http_client.post(format!("http://{}/{}", registry, url))
+        let full_url = format!("http://{}/{}", registry, url);
+        self.http_client.post(full_url)
     }
 
     fn json_post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
@@ -143,17 +144,17 @@ impl RegistryManager {
 #[derive(Debug)]
 pub enum RegistryError {
     Http(reqwest::Error),
-    HttpFailed(StatusCode),
+    HttpFailed { status_code: StatusCode, description: String },
     Deserialize(serde_json::Error),
     IO(std::io::Error)
 }
 
 impl RegistryError {
-    pub fn from_status_code(status_code: StatusCode) -> RegistryResult<()> {
+    pub fn from_status_code(status_code: StatusCode, description: String) -> RegistryResult<()> {
         if status_code.is_success() {
             Ok(())
         } else {
-            Err(RegistryError::HttpFailed(status_code))
+            Err(RegistryError::HttpFailed { status_code, description })
         }
     }
 }
@@ -162,7 +163,7 @@ impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RegistryError::Http(err) => write!(f, "Http: {}", err),
-            RegistryError::HttpFailed(status_code) => write!(f, "Http failed with status code: {}", status_code),
+            RegistryError::HttpFailed { status_code, description } => write!(f, "Http failed with status code: {} ({})", status_code, description),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),
             RegistryError::IO(err) => write!(f, "I/O: {}", err)
         }

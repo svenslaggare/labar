@@ -79,6 +79,7 @@ impl BuildManager {
             match operation {
                 LayerOperation::File { path, source_path, .. } => {
                     let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
+                    let relative_destination_path = destination_path.strip_prefix(&self.config.base_folder).unwrap();
 
                     std::fs::copy(&source_path, &destination_path)
                         .map_err(|err|
@@ -92,7 +93,7 @@ impl BuildManager {
                             }
                         )?;
 
-                    *source_path = destination_path.to_str().unwrap().to_owned();
+                    *source_path = relative_destination_path.to_str().unwrap().to_owned();
                 },
                 _ => {}
             }

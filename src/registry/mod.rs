@@ -93,7 +93,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
                             Path(layer): Path<String>) -> AppResult<impl IntoResponse> {
     let image_manager = create_image_manager(&state);
 
-    let layer = image_manager.get_normalized_layer(layer.as_str())?;
+    let layer = image_manager.get_layer(layer.as_str())?;
     Ok(Json(json!(layer)))
 }
 
@@ -106,8 +106,9 @@ async fn download_layer(State(state): State<Arc<AppState>>,
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
             let source_path = std::path::Path::new(source_path);
+            let abs_source_path = image_manager.config().base_folder().join(source_path);
 
-            let file = tokio::fs::File::open(source_path).await?;
+            let file = tokio::fs::File::open(&abs_source_path).await?;
             let stream = ReaderStream::with_capacity(file, 4096);
             let body = Body::from_stream(stream);
 
@@ -116,7 +117,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                     .header("Content-Type", "application/octet-stream")
                     .header(
                         "Content-Disposition",
-                        format!("attachment; filename={}", source_path.components().last().unwrap().as_os_str().display())
+                        format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
                     )
                     .body(body)
                     .unwrap()
@@ -128,7 +129,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 }
 
 async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
-                               Json(mut layer): Json<Layer>) -> AppResult<impl IntoResponse> {
+                               Json(layer): Json<Layer>) -> AppResult<impl IntoResponse> {
     let _lock = create_write_lock(&state);
     let mut image_manager = create_image_manager(&state);
 
@@ -143,12 +144,6 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
     }
 
     let folder = image_manager.config().get_layer_folder(&layer.hash);
-    for operation in &mut layer.operations {
-        if let LayerOperation::File { source_path, .. } = operation {
-            *source_path = image_manager.config().base_folder().join(&source_path).to_str().unwrap().to_owned();
-        }
-    }
-
     tokio::fs::create_dir_all(&folder).await?;
 
     let mut file = tokio::fs::File::create(folder.join("manifest.json")).await?;
@@ -176,7 +171,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
-            let temp_file_path = source_path.to_owned() + ".tmp";
+            let abs_source_path = image_manager.config().base_folder().join(source_path).to_str().unwrap().to_owned();
+            let temp_file_path = abs_source_path.to_owned() + ".tmp";
             let mut file = tokio::fs::File::create(&temp_file_path).await?;
 
             let mut stream = request.into_body().into_data_stream();
@@ -191,7 +187,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 }
             }
 
-            tokio::fs::rename(&temp_file_path, source_path).await?;
+            tokio::fs::rename(&temp_file_path, abs_source_path).await?;
             return Ok(Json(json!({ "status": "uploaded" })));
         }
     }
@@ -216,7 +212,7 @@ impl IntoResponse for AppError {
                     err @ ImageManagerError::ImageNotFound { .. } => {
                         (
                             StatusCode::NOT_FOUND,
-                            Json(json!({ "error": format!("{}", err) }))
+                            Json(json!({ "error": format!("image not found due to: {}", err) }))
                         ).into_response()
                     }
                     err => {
@@ -271,7 +267,11 @@ fn create_image_manager(state: &AppState) -> ImageManager {
         EmptyPrinter::new()
     );
 
-    image_manager.load_state().unwrap();
+    if image_manager.state_exists() {
+        image_manager.load_state().unwrap();
+    } else {
+        image_manager.save_state().unwrap();
+    }
 
     image_manager
 }

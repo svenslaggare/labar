@@ -63,6 +63,10 @@ impl LayerManager {
         self.images.values()
     }
 
+    pub fn get_image(&self, tag: &str) -> ImageManagerResult<&Image> {
+        self.images.get(tag).ok_or_else(|| ImageManagerError::ImageNotFound { reference: tag.to_owned() })
+    }
+
     pub fn get_image_hash(&self, tag: &str) -> Option<String> {
         self.images.get(tag).map(|image| image.hash.clone())
     }
