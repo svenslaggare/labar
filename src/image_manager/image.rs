@@ -1,5 +1,4 @@
 use std::collections::{HashMap, BTreeSet};
-use std::net::SocketAddr;
 use std::path::{Path};
 use std::time::SystemTime;
 
@@ -430,7 +429,7 @@ fn test_build() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
-        let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
         assert!(image_definition.is_ok());
         let image_definition = image_definition.unwrap();
 
@@ -474,7 +473,7 @@ fn test_remove_image1() {
         printer
     );
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -506,11 +505,11 @@ fn test_remove_image2() {
         printer
     );
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     image_manager.build_image(Path::new(""), image_definition.unwrap(), "test").unwrap();
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     image_manager.build_image(Path::new(""), image_definition.unwrap(), "test2").unwrap();
 
@@ -527,6 +526,8 @@ fn test_remove_image2() {
 
 #[tokio::test]
 async fn test_push_pull() {
+    use std::net::SocketAddr;
+
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::registry::RegistryConfig;
@@ -541,14 +542,14 @@ async fn test_push_pull() {
     }));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     {
         let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
         // Build
-        let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
         let image = image_manager.build_image(Path::new(""), image_definition, "test").unwrap();
 
         // Push

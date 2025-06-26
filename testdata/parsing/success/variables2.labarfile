@@ -1,0 +1,1 @@
+COPY $INPUT_FILE file1.txt

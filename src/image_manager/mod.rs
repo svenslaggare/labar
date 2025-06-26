@@ -10,6 +10,7 @@ mod image;
 
 #[derive(Debug)]
 pub enum ImageManagerError {
+    ImageParser { error: ImageParseError },
     ImageNotFound { reference: String },
     FileIOError { message: String },
     UnpackingExist { path: String },
@@ -17,6 +18,12 @@ pub enum ImageManagerError {
     RegistryError { error: RegistryError },
     FolderNotEmpty { path: String },
     OtherError { message: String }
+}
+
+impl From<ImageParseError> for ImageManagerError {
+    fn from(error: ImageParseError) -> Self {
+        ImageManagerError::ImageParser { error }
+    }
 }
 
 impl From<std::io::Error> for ImageManagerError {
@@ -34,6 +41,9 @@ impl From<RegistryError> for ImageManagerError {
 impl std::fmt::Display for ImageManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ImageManagerError::ImageParser { error } => {
+                write!(f, "Image parser: {}", error)
+            }
             ImageManagerError::ImageNotFound { reference } => {
                 write!(f, "Could not find the image: {}.", reference)
             }
@@ -95,4 +105,5 @@ impl ImageManagerConfig {
 pub use image::{ImageManager, ImageMetadata};
 pub use state::State;
 pub use printing::{Printer, BoxPrinter, ConsolePrinter, EmptyPrinter};
+use crate::image_definition::ImageParseError;
 use crate::image_manager::registry::RegistryError;

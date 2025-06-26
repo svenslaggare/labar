@@ -41,10 +41,7 @@ impl BuildManager {
         for (layer_index, layer_definition) in image_definition.layers.into_iter().enumerate() {
             self.printer.println(&format!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line));
 
-            let layer_definition = layer_definition
-                .expand(build_context)
-                .map_err(|err| ImageManagerError::FileIOError { message: err })?;
-
+            let layer_definition = layer_definition.expand(build_context)?;
             let layer = self.create_layer(layer_manager, layer_definition, &parent_hash)?;
             let hash = layer.hash.clone();
 
@@ -184,7 +181,7 @@ fn test_build() {
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config, printer);
 
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -219,7 +216,7 @@ fn test_build_with_cache() {
     let build_manager = BuildManager::new(config, printer.clone());
 
     // Build first time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -228,7 +225,7 @@ fn test_build_with_cache() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::from_str(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
