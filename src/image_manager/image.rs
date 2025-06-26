@@ -62,8 +62,8 @@ impl ImageManager {
     }
 
     pub fn save_state(&self) -> Result<(), String> {
-        let layers = self.layer_manager.layers.keys().cloned().collect::<Vec<_>>();
-        let images = self.layer_manager.images.values().cloned().collect::<Vec<_>>();
+        let layers = self.layer_manager.layers_iter().map(|layer| layer.hash.clone()).collect::<Vec<_>>();
+        let images = self.layer_manager.images_iter().cloned().collect::<Vec<_>>();
 
         std::fs::write(
             self.config.base_folder().join("state.json"),
@@ -101,7 +101,7 @@ impl ImageManager {
         }
 
         for image in state.images {
-            self.layer_manager.images.insert(image.tag.clone(), image);
+            self.layer_manager.insert_image(image);
         }
 
         let unpackings_content = std::fs::read_to_string(self.config.base_folder().join("unpackings.json"))

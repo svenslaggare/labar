@@ -5,7 +5,7 @@ use crate::image::{Layer, Image, LayerOperation};
 
 pub struct LayerManager {
     pub layers: HashMap<String, Layer>,
-    pub images: HashMap<String, Image>,
+    images: HashMap<String, Image>,
 }
 
 impl LayerManager {
@@ -14,6 +14,10 @@ impl LayerManager {
             layers: HashMap::new(),
             images: HashMap::new()
         }
+    }
+
+    pub fn layers_iter(&self) -> impl Iterator<Item=&Layer> {
+        self.layers.values()
     }
 
     pub fn fully_qualify_reference(&self, reference: &str) -> String {
@@ -69,6 +73,10 @@ impl LayerManager {
 
     pub fn get_image_hash(&self, tag: &str) -> Option<String> {
         self.images.get(tag).map(|image| image.hash.clone())
+    }
+
+    pub fn insert_image(&mut self, image: Image) {
+        self.images.insert(image.hash.clone(), image);
     }
 
     pub fn insert_or_replace_image(&mut self, image: &Image) {
