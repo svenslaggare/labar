@@ -11,12 +11,13 @@ mod image;
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
-    ImageNotFound { reference: String },
+    ImageNotFound { reference: Reference },
     FileIOError { message: String },
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
     RegistryError { error: RegistryError },
     FolderNotEmpty { path: String },
+    NoRegistryDefined,
     OtherError { message: String }
 }
 
@@ -62,6 +63,9 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::FolderNotEmpty { path } => {
                 write!(f, "The folder {} is not empty", path)
             },
+            ImageManagerError::NoRegistryDefined => {
+                write!(f, "No registry defined")
+            }
             ImageManagerError::OtherError { message } => {
                 write!(f, "{}", message)
             },
@@ -97,8 +101,8 @@ impl ImageManagerConfig {
         self.base_folder().join("images")
     }
 
-    pub fn get_layer_folder(&self, hash: &str) -> PathBuf {
-        self.images_base_folder().join(&Path::new(&hash))
+    pub fn get_layer_folder(&self, hash: &ImageId) -> PathBuf {
+        self.images_base_folder().join(&Path::new(&hash.to_string()))
     }
 }
 
@@ -107,3 +111,4 @@ pub use state::State;
 pub use printing::{Printer, BoxPrinter, ConsolePrinter, EmptyPrinter};
 use crate::image_definition::ImageParseError;
 use crate::image_manager::registry::RegistryError;
+use crate::reference::{ImageId, Reference};

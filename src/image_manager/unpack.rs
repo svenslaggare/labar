@@ -6,10 +6,11 @@ use crate::image_manager::layer::LayerManager;
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{BoxPrinter};
+use crate::reference::{ImageId, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
-    pub hash: String,
+    pub hash: ImageId,
     pub destination: String,
     pub time: std::time::SystemTime
 }
@@ -29,7 +30,7 @@ impl UnpackManager {
         }
     }
 
-    pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_folder: &Path, reference: &str, replace: bool) -> ImageManagerResult<()> {
+    pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_folder: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {
         if replace && unpack_folder.exists() {
             if let Err(err) = self.remove_unpacking(layer_manager, unpack_folder, true) {
                 self.printer.println(&format!("Failed removing packing due to: {}", err));
@@ -56,10 +57,8 @@ impl UnpackManager {
         self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
         self.unpack_layer(layer_manager, unpack_folder, &top_layer)?;
 
-        let hash = top_layer.hash.clone();
-
         self.unpackings.push(Unpacking {
-            hash,
+            hash: top_layer.hash.clone(),
             destination: unpack_folder_str,
             time: std::time::SystemTime::now()
         });
@@ -69,7 +68,8 @@ impl UnpackManager {
 
     fn unpack_layer(&self, layer_manager: &LayerManager, unpack_dir: &Path, layer: &Layer) -> ImageManagerResult<()> {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
-            let parent_layer = layer_manager.get_layer(parent_hash)?;
+            let parent_hash = Reference::ImageId(parent_hash.clone());
+            let parent_layer = layer_manager.get_layer(&parent_hash)?;
             self.unpack_layer(layer_manager, unpack_dir, parent_layer)?;
         }
 
@@ -77,7 +77,11 @@ impl UnpackManager {
         for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { hash } => {
-                    self.unpack_layer(layer_manager, unpack_dir, layer_manager.get_layer(hash)?)?;
+                    self.unpack_layer(
+                        layer_manager,
+                        unpack_dir,
+                        layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
+                    )?;
                 },
                 LayerOperation::File { path, source_path, link_type } => {
                     let abs_source_path = self.config.base_folder.join(source_path);
@@ -138,7 +142,8 @@ impl UnpackManager {
             .ok_or_else(|| ImageManagerError::UnpackingNotFound { path: unpack_dir_str.clone() })?;
 
         self.printer.println(&format!("Clearing unpacking of {} at {}", unpacking.hash, unpack_dir_str));
-        let top_layer = layer_manager.get_layer(&unpacking.hash)?;
+        let unpacking_hash = Reference::ImageId(unpacking.hash.clone());
+        let top_layer = layer_manager.get_layer(&unpacking_hash)?;
 
         if !force {
             self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer)?;
@@ -159,7 +164,11 @@ impl UnpackManager {
         for operation in layer.operations.iter().rev() {
             match operation {
                 LayerOperation::Image { hash } => {
-                    self.remove_unpacked_layer(layer_manager, unpack_dir, layer_manager.get_layer(hash)?)?;
+                    self.remove_unpacked_layer(
+                        layer_manager,
+                        unpack_dir,
+                        layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
+                    )?;
                 },
                 LayerOperation::File { path, .. } => {
                     let destination_path = unpack_dir.join(path);
@@ -175,7 +184,8 @@ impl UnpackManager {
         }
 
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
-            let parent_layer = layer_manager.get_layer(parent_hash)?;
+            let parent_hash = Reference::ImageId(parent_hash.clone());
+            let parent_layer = layer_manager.get_layer(&parent_hash)?;
             self.remove_unpacked_layer(layer_manager, unpack_dir, parent_layer)?;
         }
 
@@ -186,7 +196,10 @@ impl UnpackManager {
 
 #[test]
 fn test_unpack() {
+    use std::str::FromStr;
+
     use crate::helpers;
+    use crate::reference::ImageTag;
     use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
@@ -204,12 +217,12 @@ fn test_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test").is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         false
     );
 
@@ -223,7 +236,10 @@ fn test_unpack() {
 
 #[test]
 fn test_unpack_exist() {
+    use std::str::FromStr;
+
     use crate::helpers;
+    use crate::reference::ImageTag;
     use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
@@ -241,19 +257,19 @@ fn test_unpack_exist() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test").is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         false
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         false
     );
 
@@ -267,7 +283,10 @@ fn test_unpack_exist() {
 
 #[test]
 fn test_remove_unpack() {
+    use std::str::FromStr;
+
     use crate::helpers;
+    use crate::reference::ImageTag;
     use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
@@ -285,12 +304,12 @@ fn test_remove_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test").is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         false
     ).unwrap();
 
@@ -310,7 +329,10 @@ fn test_remove_unpack() {
 
 #[test]
 fn test_unpack_replace1() {
+    use std::str::FromStr;
+
     use crate::helpers;
+    use crate::reference::ImageTag;
     use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
@@ -328,19 +350,19 @@ fn test_unpack_replace1() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test").is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         false
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         true
     );
 
@@ -354,7 +376,10 @@ fn test_unpack_replace1() {
 
 #[test]
 fn test_unpack_replace2() {
+    use std::str::FromStr;
+
     use crate::helpers;
+    use crate::reference::ImageTag;
     use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
@@ -372,12 +397,12 @@ fn test_unpack_replace2() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test").is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
         &tmp_dir.join("unpack"),
-        "test",
+        &Reference::from_str("test").unwrap(),
         true
     );
 

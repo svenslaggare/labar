@@ -13,6 +13,7 @@ use crate::image_manager::build::BuildManager;
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
 use crate::image_manager::registry::{RegistryManager};
+use crate::reference::{ImageId, ImageTag, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ImageMetadata {
@@ -117,21 +118,21 @@ impl ImageManager {
         self.config.base_folder().join("state.json").exists()
     }
 
-    pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &str) -> ImageManagerResult<Image> {
+    pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &ImageTag) -> ImageManagerResult<Image> {
         let image = self.build_manager.build_image(&mut self.layer_manager, build_context, image_definition, tag)?;
         self.changed = true;
         Ok(image)
     }
 
-    pub fn tag_image(&mut self, reference: &str, tag: &str) -> ImageManagerResult<Image> {
+    pub fn tag_image(&mut self, reference: &Reference, tag: &ImageTag) -> ImageManagerResult<Image> {
         let layer = self.layer_manager.get_layer(reference)?;
-        let image = Image::new(layer.hash.clone(), tag.to_owned());
+        let image = Image::new(layer.hash.clone(), tag.clone());
         self.layer_manager.insert_or_replace_image(&image);
         self.changed = true;
         Ok(image)
     }
 
-    pub fn unpack(&mut self, unpack_dir: &Path, reference: &str, replace: bool) -> ImageManagerResult<()> {
+    pub fn unpack(&mut self, unpack_dir: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {
         self.unpack_manager.unpack(&mut self.layer_manager, unpack_dir, reference, replace)?;
         self.changed = true;
         Ok(())
@@ -143,14 +144,14 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn remove_image(&mut self, tag: &str) -> ImageManagerResult<()> {
+    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
         if let Some(image) = self.layer_manager.remove_image_tag(tag) {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
             self.garbage_collect()?;
             self.changed = true;
             Ok(())
         } else {
-            Err(ImageManagerError::ImageNotFound { reference: tag.to_owned() })
+            Err(ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
         }
     }
 
@@ -210,14 +211,14 @@ impl ImageManager {
         Ok(())
     }
 
-    fn get_hard_references(&self) -> Vec<&str> {
+    fn get_hard_references(&self) -> Vec<&ImageId> {
         let mut hard_references = Vec::new();
         for image in self.layer_manager.images_iter() {
-            hard_references.push(image.hash.as_str());
+            hard_references.push(&image.hash);
         }
 
         for unpacking in &self.unpack_manager.unpackings {
-            hard_references.push(unpacking.hash.as_str());
+            hard_references.push(&unpacking.hash);
         }
 
         hard_references
@@ -227,31 +228,42 @@ impl ImageManager {
         let mut images = Vec::new();
 
         for image in self.layer_manager.images_iter() {
-            images.push(ImageMetadata {
-                image: image.clone(),
-                created: self.layer_manager.get_layer(&image.hash)?.created,
-                size: self.image_size(&image.hash)?
-            })
+            images.push(self.get_image_metadata(&image, &Reference::ImageId(image.hash.clone()))?);
         }
 
         Ok(images)
     }
 
-    pub fn image_size(&self, reference: &str) -> ImageManagerResult<DataSize> {
+    pub fn resolve_image(&self, tag: &ImageTag) -> ImageManagerResult<ImageMetadata> {
+        let image = self.get_image(tag)?;
+        self.get_image_metadata(&image, &Reference::ImageTag(tag.clone()))
+    }
+
+    fn get_image_metadata(&self, image: &Image, reference: &Reference) -> ImageManagerResult<ImageMetadata> {
+        Ok(
+            ImageMetadata {
+                image: image.clone(),
+                created: self.layer_manager.get_layer(&reference)?.created,
+                size: self.image_size(&reference)?
+            }
+        )
+    }
+
+    pub fn image_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
         let mut stack = Vec::new();
-        stack.push(reference.to_owned());
+        stack.push(reference.clone());
 
         let mut total_size = 0;
         while let Some(current) = stack.pop() {
             let layer = self.layer_manager.get_layer(&current)?;
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
+                stack.push(Reference::ImageId(parent_hash.clone()));
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(hash.clone());
+                        stack.push(Reference::ImageId(hash.clone()));
                     },
                     LayerOperation::File { source_path, .. } => {
                         let abs_source_path = self.config.base_folder.join(source_path);
@@ -265,23 +277,23 @@ impl ImageManager {
         Ok(DataSize(total_size))
     }
 
-    pub fn list_content(&self, reference: &str) -> ImageManagerResult<Vec<String>> {
+    pub fn list_content(&self, reference: &Reference) -> ImageManagerResult<Vec<String>> {
         let mut files = Vec::new();
 
         let mut stack = Vec::new();
-        stack.push(reference);
+        stack.push(reference.clone());
 
         while let Some(current) = stack.pop() {
-            let layer = self.layer_manager.get_layer(current)?;
+            let layer = self.layer_manager.get_layer(&current)?;
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.as_str());
+                stack.push(Reference::ImageId(parent_hash.clone()));
             }
 
             let mut local_files = Vec::new();
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(hash.as_str());
+                        stack.push(Reference::ImageId(hash.clone()));
                     }
                     LayerOperation::File { path, ..  } => {
                         local_files.push(path.clone());
@@ -311,19 +323,25 @@ impl ImageManager {
         Ok(images)
     }
 
-    pub async fn pull(&mut self, registry: &str, reference: &str) -> ImageManagerResult<Image> {
-        let mut stack = Vec::new();
-        stack.push(reference.to_string());
+    pub async fn pull(&mut self, tag: &ImageTag) -> ImageManagerResult<Image> {
+        let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
 
-        let visit_layer = |stack: &mut Vec<String>, layer: &Layer| {
+        self.printer.println(&format!("Pulling image {}", tag));
+
+        let image_metadata = self.registry_manager.resolve_image(registry, tag).await?;
+
+        let mut stack = Vec::new();
+        stack.push(Reference::ImageId(image_metadata.image.hash.clone()));
+
+        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
+                stack.push(Reference::ImageId(parent_hash.clone()));
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(hash.to_owned());
+                        stack.push(Reference::ImageId(hash.clone()));
                     },
                     _ => {}
                 }
@@ -351,30 +369,34 @@ impl ImageManager {
             }
         }
 
-        let image = Image::new(top_level_hash.unwrap(), reference.to_owned());
+        let image = Image::new(top_level_hash.unwrap(), tag.clone());
         self.insert_or_replace_image(image.clone());
 
         Ok(image)
     }
 
-    pub async fn push(&self, registry: &str, reference: &str) -> ImageManagerResult<()> {
-        let top_layer = self.get_layer(reference)?;
+    pub async fn push(&self, tag: &ImageTag) -> ImageManagerResult<()> {
+        let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
+
+        self.printer.println(&format!("Pushing image {}", tag));
+
+        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
 
         let mut stack = Vec::new();
-        stack.push(top_layer.hash.clone());
+        stack.push(Reference::ImageId(top_layer.hash.clone()));
         while let Some(current) = stack.pop() {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
 
             let layer = self.get_layer(&current)?;
 
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
+                stack.push(Reference::ImageId(parent_hash.clone()));
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push((*hash).clone());
+                        stack.push(Reference::ImageId(hash.clone()));
                     },
                     _ => {}
                 }
@@ -383,14 +405,14 @@ impl ImageManager {
             self.registry_manager.upload_layer(self.config(), registry, layer).await?;
         }
 
-        self.registry_manager.upload_image(registry, &top_layer.hash, reference).await?;
+        self.registry_manager.upload_image(registry, &top_layer.hash, tag).await?;
 
         self.printer.println("");
 
         Ok(())
     }
 
-    pub fn get_layer(&self, reference: &str) -> ImageManagerResult<&Layer> {
+    pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<&Layer> {
         self.layer_manager.get_layer(reference)
     }
 
@@ -399,8 +421,8 @@ impl ImageManager {
         self.changed = true;
     }
 
-    pub fn get_image(&self, reference: &str) -> ImageManagerResult<&Image> {
-        self.layer_manager.get_image(reference)
+    pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<&Image> {
+        self.layer_manager.get_image(tag)
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) {
@@ -419,6 +441,8 @@ impl Drop for ImageManager {
 
 #[test]
 fn test_build() {
+    use std::str::FromStr;
+
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
@@ -433,23 +457,23 @@ fn test_build() {
         assert!(image_definition.is_ok());
         let image_definition = image_definition.unwrap();
 
-        let result = image_manager.build_image(Path::new(""), image_definition, "test");
+        let result = image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
         assert!(result.is_ok());
         let result = result.unwrap();
 
-        assert_eq!("test", result.tag);
+        assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
 
-        let top_layer = image_manager.get_layer("test");
+        let top_layer = image_manager.get_layer(&Reference::from_str("test").unwrap());
         assert!(top_layer.is_ok());
         let top_layer = top_layer.unwrap();
         assert_eq!(top_layer.hash, result.hash);
 
-        let image = image_manager.get_image("test");
+        let image = image_manager.get_image(&ImageTag::from_str("test").unwrap());
         assert!(image.is_ok());
         let image = image.unwrap();
         assert_eq!(image.hash, top_layer.hash);
 
-        assert_eq!(Some(DataSize(974)), image_manager.image_size("test").ok());
+        assert_eq!(Some(DataSize(974)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
     }
 
     #[allow(unused_must_use)] {
@@ -459,6 +483,8 @@ fn test_build() {
 
 #[test]
 fn test_remove_image1() {
+    use std::str::FromStr;
+
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
@@ -477,9 +503,9 @@ fn test_remove_image1() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    image_manager.build_image(Path::new(""), image_definition, "test").unwrap();
+    image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
 
-    let result = image_manager.remove_image("test");
+    let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
 
     let images = image_manager.list_images();
@@ -491,6 +517,8 @@ fn test_remove_image1() {
 
 #[test]
 fn test_remove_image2() {
+    use std::str::FromStr;
+
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
@@ -507,13 +535,13 @@ fn test_remove_image2() {
 
     let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
-    image_manager.build_image(Path::new(""), image_definition.unwrap(), "test").unwrap();
+    image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test").unwrap()).unwrap();
 
     let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
-    image_manager.build_image(Path::new(""), image_definition.unwrap(), "test2").unwrap();
+    image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test2").unwrap()).unwrap();
 
-    let result = image_manager.remove_image("test");
+    let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
 
     let images = image_manager.list_images();
@@ -521,7 +549,7 @@ fn test_remove_image2() {
     let images = images.unwrap();
 
     assert_eq!(1, images.len());
-    assert_eq!("test2", images[0].image.tag);
+    assert_eq!(ImageTag::from_str("test2").unwrap(), images[0].image.tag);
 }
 
 #[tokio::test]
@@ -548,12 +576,14 @@ async fn test_push_pull() {
         let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
+        let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
+
         // Build
         let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
-        let image = image_manager.build_image(Path::new(""), image_definition, "test").unwrap();
+        let image = image_manager.build_image(Path::new(""), image_definition, &image_tag).unwrap();
 
         // Push
-        let push_result = image_manager.push(&address.to_string(), &image.tag).await;
+        let push_result = image_manager.push(&image.tag).await;
         assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
 
         // List remote
@@ -561,14 +591,14 @@ async fn test_push_pull() {
         assert!(remote_images.is_ok());
         let remote_images = remote_images.unwrap();
         assert_eq!(1, remote_images.len());
-        assert_eq!("test", &remote_images[0].image.tag);
+        assert_eq!(&image_tag, &remote_images[0].image.tag);
 
         // Remove in order to pull
         assert!(image_manager.remove_image(&image.tag).is_ok());
 
         // Pull
-        let pull_result = image_manager.pull(&address.to_string(), &image.tag).await;
-        assert!(pull_result.is_ok());
+        let pull_result = image_manager.pull(&image.tag).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
 
@@ -577,8 +607,8 @@ async fn test_push_pull() {
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
-        assert_eq!("test", &images[0].image.tag);
-        assert_eq!(Some(DataSize(974)), image_manager.image_size(&image.tag).ok());
+        assert_eq!(&image_tag, &images[0].image.tag);
+        assert_eq!(Some(DataSize(974)), image_manager.image_size(&Reference::ImageTag(image.tag.clone())).ok());
     }
 
     #[allow(unused_must_use)] {

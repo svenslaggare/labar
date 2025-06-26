@@ -1,4 +1,5 @@
 use std::path::{Path};
+use std::str::FromStr;
 
 use sha2::{Sha256, Digest};
 
@@ -7,6 +8,7 @@ use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDe
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::printing::BoxPrinter;
+use crate::reference::{ImageId, ImageTag};
 
 pub struct BuildManager {
     config: ImageManagerConfig,
@@ -25,11 +27,11 @@ impl BuildManager {
                        layer_manager: &mut LayerManager,
                        build_context: &Path,
                        image_definition: ImageDefinition,
-                       tag: &str) -> ImageManagerResult<Image> {
-        let mut parent_hash: Option<String> = None;
+                       tag: &ImageTag) -> ImageManagerResult<Image> {
+        let mut parent_hash: Option<ImageId> = None;
 
         if let Some(base_image_reference) = image_definition.base_image {
-            let hash = layer_manager.fully_qualify_reference(&base_image_reference);
+            let hash = layer_manager.fully_qualify_reference(&base_image_reference)?;
             if !layer_manager.layer_exist(&hash) {
                 return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
             }
@@ -113,30 +115,32 @@ impl BuildManager {
     fn create_layer(&self,
                     layer_manager: &LayerManager,
                     layer_definition: LayerDefinition,
-                    parent_hash: &Option<String>) -> ImageManagerResult<Layer> {
+                    parent_hash: &Option<ImageId>) -> ImageManagerResult<Layer> {
         let mut layer_operations = Vec::new();
         let mut hash_input = String::new();
         if let Some(parent_hash) = parent_hash.as_ref() {
-            hash_input += parent_hash;
+            hash_input += &parent_hash.to_string();
         }
 
         for operation_definition in &layer_definition.operations {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
-                    let hash = layer_manager.fully_qualify_reference(reference);
+                    let hash = layer_manager.fully_qualify_reference(reference)?;
                     if !layer_manager.layer_exist(&hash) {
                         return Err(ImageManagerError::ImageNotFound { reference: reference.clone() });
                     }
 
-                    hash_input += &hash;
+                    hash_input += &hash.to_string();
                     layer_operations.push(LayerOperation::Image { hash });
                 }
                 LayerOperationDefinition::File { path, source_path, link_type } => {
                     let source_path_entry = Path::new(&source_path);
                     if !source_path_entry.exists() {
-                        return Err(ImageManagerError::FileIOError {
-                            message: format!("The file '{}' does not exist.", source_path)
-                        });
+                        return Err(
+                            ImageManagerError::FileIOError {
+                                message: format!("The file '{}' does not exist.", source_path)
+                            }
+                        );
                     }
 
                     layer_operations.push(LayerOperation::File {
@@ -161,7 +165,13 @@ impl BuildManager {
             }
         }
 
-        Ok(Layer::new(parent_hash.clone(), create_hash(&hash_input), layer_operations))
+        Ok(
+            Layer::new(
+                parent_hash.clone(),
+                ImageId::from_str(&create_hash(&hash_input)).unwrap(),
+                layer_operations
+            )
+        )
     }
 }
 
@@ -173,6 +183,7 @@ fn create_hash(input: &str) -> String {
 fn test_build() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::reference::Reference;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
@@ -185,18 +196,18 @@ fn test_build() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
+    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
     let result = result.unwrap();
 
-    assert_eq!("test", result.tag);
+    assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
 
-    let image = layer_manager.get_layer("test");
+    let image = layer_manager.get_layer(&Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, result.hash);
 
-    assert_eq!(layer_manager.get_image_hash("test"), Some(result.hash));
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()), Some(result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
@@ -207,6 +218,7 @@ fn test_build() {
 fn test_build_with_cache() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::reference::Reference;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
@@ -220,7 +232,7 @@ fn test_build_with_cache() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let first_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
+    let first_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
 
@@ -229,19 +241,19 @@ fn test_build_with_cache() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let second_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, "test");
+    let second_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
 
-    assert_eq!("test", second_result.tag);
+    assert_eq!(ImageTag::from_str("test").unwrap(), second_result.tag);
     assert_eq!(first_result.hash, second_result.hash);
 
-    let image = layer_manager.get_layer("test");
+    let image = layer_manager.get_layer(&Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, second_result.hash);
 
-    assert_eq!(layer_manager.get_image_hash("test"), Some(second_result.hash));
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()), Some(second_result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);

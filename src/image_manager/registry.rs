@@ -6,6 +6,7 @@ use reqwest::{Body, Client, StatusCode};
 
 use crate::image::{Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig, ImageMetadata};
+use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
@@ -29,10 +30,16 @@ impl RegistryManager {
         Ok(images)
     }
 
+    pub async fn resolve_image(&self, registry: &str, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
+        let response = self.get_registry_text_response(registry, &format!("images/{}", tag)).await?;
+        let image: ImageMetadata = serde_json::from_str(&response)?;
+        Ok(image)
+    }
+
     pub async fn download_layer(&self,
                                 config: &ImageManagerConfig,
                                 registry: &str,
-                                reference: &str) -> RegistryResult<Layer> {
+                                reference: &Reference) -> RegistryResult<Layer> {
         let response = self.get_registry_text_response(registry, &format!("layers/{}/manifest", reference)).await?;
         let mut layer: Layer = serde_json::from_str(&response)?;
 
@@ -102,13 +109,13 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn upload_image(&self, registry: &str, hash: &str, tag: &str) -> RegistryResult<()> {
+    pub async fn upload_image(&self, registry: &str, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
         let mut request = self.json_post_registry_response(registry, "images").build()?;
 
         *request.body_mut() = Some(Body::from(serde_json::to_string(
             &ImageSpec {
-                hash: hash.to_owned(),
-                tag: tag.to_owned()
+                hash: hash.clone(),
+                tag: tag.clone()
             }
         )?));
 
@@ -120,6 +127,7 @@ impl RegistryManager {
 
     async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<String> {
         let response = self.get_registry_response(registry, url).await?;
+        RegistryError::from_status_code(response.status(), format!("url: {}", url))?;
         let response = response.text().await?;
         Ok(response)
     }

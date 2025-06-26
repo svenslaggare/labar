@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum LinkType {
@@ -20,7 +21,7 @@ impl Display for LinkType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerOperation {
-    Image { hash: String },
+    Image { hash: ImageId },
     File { path: String, source_path: String, link_type: LinkType },
     Directory { path: String }
 }
@@ -43,14 +44,14 @@ impl Display for LayerOperation {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Layer {
-    pub parent_hash: Option<String>,
-    pub hash: String,
+    pub parent_hash: Option<ImageId>,
+    pub hash: ImageId,
     pub operations: Vec<LayerOperation>,
     pub created: SystemTime,
 }
 
 impl Layer {
-    pub fn new(parent_hash: Option<String>, hash: String, operations: Vec<LayerOperation>) -> Layer {
+    pub fn new(parent_hash: Option<ImageId>, hash: ImageId, operations: Vec<LayerOperation>) -> Layer {
         Layer {
             parent_hash,
             hash,
@@ -77,12 +78,12 @@ impl Layer {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Image {
-    pub hash: String,
-    pub tag: String
+    pub hash: ImageId,
+    pub tag: ImageTag
 }
 
 impl Image {
-    pub fn new(hash: String, tag: String) -> Image {
+    pub fn new(hash: ImageId, tag: ImageTag) -> Image {
         Image {
             hash,
             tag

@@ -18,11 +18,12 @@ use crate::helpers::TablePrinter;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
 use crate::image_manager::{ImageManager, ImageMetadata, ImageManagerConfig, BoxPrinter, ConsolePrinter};
+use crate::reference::{ImageTag, Reference};
 use crate::registry::RegistryConfig;
 
 #[derive(Deserialize)]
 pub struct FileConfig {
-
+    default_registry: Option<String>
 }
 
 impl FileConfig {
@@ -35,7 +36,7 @@ impl FileConfig {
 impl Default for FileConfig {
     fn default() -> Self {
         FileConfig {
-
+            default_registry: None
         }
     }
 }
@@ -48,7 +49,7 @@ enum CommandLineInput {
         #[structopt(name="file", help="The file with the build definition")]
         file: String,
         #[structopt(name="tag", help="The tag of the image")]
-        tag: String,
+        tag: ImageTag,
         #[structopt(long, help="The build context")]
         build_context: Option<PathBuf>,
         #[structopt(long, help="The build arguments on format key=value")]
@@ -57,15 +58,15 @@ enum CommandLineInput {
     #[structopt(about="Removes an image")]
     RemoveImage {
         #[structopt(name="tag", help="The tag to remove")]
-        tag: String
+        tag: ImageTag
     },
     #[structopt(about="Tags an image")]
     #[structopt(name="tag")]
     TagImage {
         #[structopt(name="reference", help="The source image")]
-        reference: String,
+        reference: Reference,
         #[structopt(name="tag", help="The new tag for the image")]
-        tag: String
+        tag: ImageTag
     },
     #[structopt(about="Lists the available images")]
     ListImages {
@@ -73,8 +74,8 @@ enum CommandLineInput {
     },
     #[structopt(about="Lists the content of an image")]
     ListContent {
-        #[structopt(name="tag", help="The tag to list for")]
-        tag: String
+        #[structopt(name="reference", help="The reference to list for")]
+        reference: Reference
     },
     #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
@@ -82,8 +83,8 @@ enum CommandLineInput {
     },
     #[structopt(about="Unpacks an image to a directory")]
     Unpack {
-        #[structopt(name="tag", help="The image to unpack")]
-        tag: String,
+        #[structopt(name="reference", help="The image to unpack")]
+        reference: Reference,
         #[structopt(name="destination", help="The directory to unpack to. Must be empty.")]
         destination: String,
         #[structopt(long, help="Replaces the existing unpacking")]
@@ -102,17 +103,13 @@ enum CommandLineInput {
     },
     #[structopt(about="Pulls an image from a remote registry")]
     Pull {
-        #[structopt(name="registry", help="The registry to pull from")]
-        registry: String,
         #[structopt(name="tag", help="The image to pull")]
-        tag: String
+        tag: ImageTag
     },
     #[structopt(about="Pushes a local image to a remote registry")]
     Push {
-        #[structopt(name="registry", help="The registry to push to")]
-        registry: String,
         #[structopt(name="tag", help="The image to push")]
-        tag: String
+        tag: ImageTag
     },
     #[structopt(about="Lists the images in a remote registry")]
     ListImagesRegistry {
@@ -141,6 +138,7 @@ fn create_unpack_lock() -> FileLock {
 fn print_images(images: &Vec<ImageMetadata>) {
     let mut table_printer = TablePrinter::new(
         vec![
+            "REPOSITORY".to_owned(),
             "TAG".to_owned(),
             "IMAGE ID".to_owned(),
             "CREATED".to_owned(),
@@ -152,8 +150,9 @@ fn print_images(images: &Vec<ImageMetadata>) {
         let created: DateTime<Local> = metadata.created.into();
 
         table_printer.add_row(vec![
-            metadata.image.tag.clone(),
-            metadata.image.hash.clone(),
+            metadata.image.tag.full_repository(),
+            metadata.image.tag.tag().to_owned(),
+            metadata.image.hash.to_string(),
             created.format("%Y-%m-%d %T").to_string(),
             metadata.size.to_string()
         ]);
@@ -183,7 +182,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_definition = ImageDefinition::from_str(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
             let build_context = build_context.unwrap_or_else(|| Path::new("").to_owned());
             let image = image_manager.build_image(&build_context, image_definition, &tag).map_err(|err| format!("{}", err))?;
-            let image_size = image_manager.image_size(&image.tag).map_err(|err| format!("{}", err))?;
+            let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
         },
         CommandLineInput::RemoveImage { tag } => {
@@ -200,21 +199,21 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image = image_manager.tag_image(&reference, &tag).map_err(|err| format!("{}", err))?;
             println!("Tagged {} ({}) as {}", reference, image.hash, image.tag);
         },
-        CommandLineInput::ListImages { } => {
+        CommandLineInput::ListImages {} => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
             let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
             print_images(&images);
         }
-        CommandLineInput::ListContent { tag } => {
+        CommandLineInput::ListContent { reference } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let content = image_manager.list_content(&tag).map_err(|err| format!("{}", err))?;
+            let content = image_manager.list_content(&reference).map_err(|err| format!("{}", err))?;
             for path in content {
                 println!("{}", path);
             }
         }
-        CommandLineInput::ListUnpackings { } => {
+        CommandLineInput::ListUnpackings {} => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
             let unpackings = image_manager.list_unpackings();
@@ -231,18 +230,18 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
                 table_printer.add_row(vec![
                     unpacking.destination.clone(),
-                    unpacking.hash.clone(),
+                    unpacking.hash.to_string(),
                     datetime.format("%Y-%m-%d %T").to_string()
                 ]);
             }
 
             table_printer.print();
         }
-        CommandLineInput::Unpack { tag, destination, replace } => {
+        CommandLineInput::Unpack { reference, destination, replace } => {
             let _unpack_lock = create_unpack_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.unpack(&Path::new(&destination), &tag, replace).map_err(|err| format!("{}", err))?;
+            image_manager.unpack(&Path::new(&destination), &reference, replace).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock();
@@ -250,25 +249,37 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             image_manager.remove_unpacking(&Path::new(&path), force).map_err(|err| format!("{}", err))?;
         }
-        CommandLineInput::Purge { } => {
+        CommandLineInput::Purge {} => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
-        CommandLineInput::Push { tag, registry } => {
+        CommandLineInput::Push { tag } => {
             let _write_lock = create_write_lock();
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            println!("Pushing image {} to {}", tag, registry);
-            image_manager.push(&registry, &tag).await.map_err(|err| format!("{}", err))?;
+            let mut tag = tag;
+            if tag.registry().is_none() {
+                if let Some(default_registry) = file_config.default_registry.as_ref() {
+                    tag = tag.set_registry(default_registry);
+                }
+            }
+
+            image_manager.push(&tag).await.map_err(|err| format!("{}", err))?;
         },
-        CommandLineInput::Pull { tag, registry } => {
+        CommandLineInput::Pull { tag } => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            println!("Pulling image {} from {}", tag, registry);
-            image_manager.pull(&registry, &tag).await.map_err(|err| format!("{}", err))?;
+            let mut tag = tag;
+            if tag.registry().is_none() {
+                if let Some(default_registry) = file_config.default_registry.as_ref() {
+                    tag = tag.set_registry(default_registry);
+                }
+            }
+
+            image_manager.pull(&tag).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::ListImagesRegistry { registry } => {
             let image_manager = create_image_manager(&file_config, printer.clone());

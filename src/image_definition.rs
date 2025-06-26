@@ -1,21 +1,22 @@
 use std::path::Path;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
-
+use std::str::FromStr;
 use regex::Regex;
 
 use crate::image::LinkType;
+use crate::reference::Reference;
 
 pub type ImageParseResult<T> = Result<T, ImageParseError>;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ImageDefinition {
-    pub base_image: Option<String>,
+    pub base_image: Option<Reference>,
     pub layers: Vec<LayerDefinition>
 }
 
 impl ImageDefinition {
-    pub fn new(base_image: Option<String>, layers: Vec<LayerDefinition>) -> ImageDefinition {
+    pub fn new(base_image: Option<Reference>, layers: Vec<LayerDefinition>) -> ImageDefinition {
         ImageDefinition {
             base_image,
             layers
@@ -63,7 +64,7 @@ impl LayerDefinition {
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum LayerOperationDefinition {
-    Image { reference: String },
+    Image { reference: Reference },
     Directory { path: String },
     File { path: String, source_path: String, link_type: LinkType },
 }
@@ -75,6 +76,7 @@ pub enum ImageParseError {
     FromOnlyOnFirst,
     ExpectedArguments { expected: usize, actual: usize },
     VariableNotFound(String),
+    InvalidImageReference(String),
     IO(std::io::Error),
     Other(String),
 }
@@ -93,6 +95,7 @@ impl Display for ImageParseError {
             ImageParseError::FromOnlyOnFirst => write!(f, "FROM statement only allowed on the first line"),
             ImageParseError::ExpectedArguments { expected, actual } => write!(f, "Expected {} arguments but got {}", expected, actual),
             ImageParseError::VariableNotFound(name) => write!(f, "Variable '{}' not found", name),
+            ImageParseError::InvalidImageReference(error) => write!(f, "Invalid image reference: {}", error),
             ImageParseError::IO(error) => write!(f, "IO error: {}", error),
             ImageParseError::Other(error) => write!(f, "{}", error),
         }
@@ -232,7 +235,8 @@ impl ImageDefinition {
                         }
 
                         if is_first_line {
-                            image_definition.base_image = Some(parts[1].to_owned());
+                            let base_image = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
+                            image_definition.base_image = Some(base_image);
                         } else {
                             return Err(ImageParseError::FromOnlyOnFirst);
                         }
@@ -275,7 +279,8 @@ impl ImageDefinition {
                         ));
                     },
                     "IMAGE" => {
-                        let reference = parts[1].to_owned();
+                        let reference = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
+
                         if num_arguments != 1 {
                             return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
                         }
@@ -623,7 +628,7 @@ fn test_parse_image1() {
     assert_eq!(result.layers.len(), 1);
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::Image { reference: "test:this".to_owned() }],
+        vec![LayerOperationDefinition::Image { reference: Reference::from_str("test:this").unwrap() }],
     );
 }
 
@@ -634,7 +639,7 @@ fn test_parse_from1() {
     let result = result.unwrap();
 
     assert_eq!(result.layers.len(), 0);
-    assert_eq!(result.base_image, Some("test:this".to_owned()));
+    assert_eq!(result.base_image, Some(Reference::from_str("test:this").unwrap()));
 }
 
 #[test]
@@ -656,7 +661,7 @@ fn test_parse_multi1() {
 
     assert_eq!(
         result.layers[2].operations,
-        vec![LayerOperationDefinition::Image { reference: "test:this".to_owned() }]
+        vec![LayerOperationDefinition::Image { reference: Reference::from_str("test:this").unwrap() }]
     );
 }
 
@@ -666,7 +671,7 @@ fn test_parse_multi2() {
     assert!(result.is_ok(), "{}", result.unwrap_err());
     let result = result.unwrap();
 
-    assert_eq!(result.base_image, Some("test:this".to_owned()));
+    assert_eq!(result.base_image, Some(Reference::from_str("test:this").unwrap()));
 
     assert_eq!(result.layers.len(), 3);
     assert_eq!(
@@ -681,7 +686,7 @@ fn test_parse_multi2() {
 
     assert_eq!(
         result.layers[2].operations,
-        vec![LayerOperationDefinition::Image { reference: "test:that".to_owned() }]
+        vec![LayerOperationDefinition::Image { reference: Reference::from_str("test:that").unwrap() }]
     );
 }
 
@@ -764,7 +769,7 @@ fn test_parse_image5() {
     assert_eq!(result.layers.len(), 1);
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::Image { reference: "test:this".to_owned() }],
+        vec![LayerOperationDefinition::Image { reference: Reference::from_str("test:this").unwrap() }],
     );
 }
 

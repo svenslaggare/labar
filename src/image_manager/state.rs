@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
 use crate::image::Image;
+use crate::reference::ImageId;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct State {
-    pub layers: Vec<String>,
+    pub layers: Vec<ImageId>,
     pub images: Vec<Image>
 }
 

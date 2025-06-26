@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 use regex::Regex;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -10,36 +11,43 @@ pub enum Reference {
     ImageId(ImageId)
 }
 
-impl Reference {
-    pub fn from_str(text: &str) -> Option<Reference> {
-        if let Some(image_id) = ImageId::from_str(text) {
-            return Some(Reference::ImageId(image_id));
+impl FromStr for Reference {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        if let Ok(image_id) = ImageId::from_str(text) {
+            return Ok(Reference::ImageId(image_id));
         }
 
-        if let Some(image_tag) = ImageTag::from_str(text) {
-            return Some(Reference::ImageTag(image_tag));
+        if let Ok(image_tag) = ImageTag::from_str(text) {
+            return Ok(Reference::ImageTag(image_tag));
         }
 
-        None
+        Err("Expected tag or image id".to_owned())
     }
 }
 
 impl Display for Reference {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        match self {
+            Reference::ImageTag(tag) => write!(f, "{}", tag),
+            Reference::ImageId(id) => write!(f, "{}", id)
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct ImageId(String);
 
-impl ImageId {
-    pub fn from_str(text: &str) -> Option<ImageId> {
+impl FromStr for ImageId {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
         let regex = Regex::new("^[a-z0-9]+$").unwrap();
         if text.len() == 64 && regex.is_match(text) {
-            Some(ImageId(text.to_owned()))
+            Ok(ImageId(text.to_owned()))
         } else {
-            None
+            Err("Expected image id".to_owned())
         }
     }
 }
@@ -49,9 +57,6 @@ impl Display for ImageId {
         write!(f, "{}", self.0)
     }
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FullReference(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ImageTag {
@@ -77,23 +82,6 @@ impl ImageTag {
         }
     }
 
-    pub fn from_str(text: &str) -> Option<ImageTag> {
-        let regex = Regex::new("((.+)/)?([A-Za-z0-9_\\-\\.]+)(:([A-Za-z0-9_\\-\\.]+))?").unwrap();
-        let capture = regex.captures(text)?;
-
-        let registry = capture.get(2).map(|x| x.as_str().to_string());
-        let repository = capture.get(3).map(|x| x.as_str().to_string())?;
-        let tag = capture.get(5).map(|x| x.as_str().to_string()).unwrap_or_else(|| "latest".to_owned());
-
-        Some(
-            ImageTag {
-                registry,
-                repository,
-                tag
-            }
-        )
-    }
-
     pub fn registry(&self) -> Option<&str> {
         self.registry.as_deref()
     }
@@ -112,6 +100,32 @@ impl ImageTag {
 
     pub fn tag(&self) -> &str {
         &self.tag
+    }
+
+    pub fn set_registry(mut self, registry: &str) -> Self {
+        self.registry = Some(registry.to_owned());
+        self
+    }
+}
+
+impl FromStr for ImageTag {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        let regex = Regex::new("((.+)/)?([A-Za-z0-9_\\-\\.]+)(:([A-Za-z0-9_\\-\\.]+))?").unwrap();
+        let capture = regex.captures(text).ok_or_else(|| "Expected image tag")?;
+
+        let registry = capture.get(2).map(|x| x.as_str().to_string());
+        let repository = capture.get(3).map(|x| x.as_str().to_string()).ok_or_else(|| "Expected image tag")?;
+        let tag = capture.get(5).map(|x| x.as_str().to_string()).unwrap_or_else(|| "latest".to_owned());
+
+        Ok(
+            ImageTag {
+                registry,
+                repository,
+                tag
+            }
+        )
     }
 }
 
@@ -140,11 +154,11 @@ impl<'de> Visitor<'de> for ImageTagVisitor {
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E> where E: Error {
-        ImageTag::from_str(&v).ok_or(E::custom("not a valid reference"))
+        ImageTag::from_str(&v).map_err(|err| E::custom(err.to_string()))
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E> where E: Error {
-        ImageTag::from_str(v).ok_or(E::custom("not a valid reference"))
+        ImageTag::from_str(v).map_err(|err| E::custom(err.to_string()))
     }
 }
 
@@ -158,7 +172,7 @@ impl<'de> Deserialize<'de> for ImageTag {
 fn test_reference1() {
     assert_eq!(
         Some(Reference::ImageTag(ImageTag::new("labar", "test"))),
-        Reference::from_str("labar:test")
+        Reference::from_str("labar:test").ok()
     );
 }
 
@@ -166,7 +180,7 @@ fn test_reference1() {
 fn test_reference2() {
     assert_eq!(
         Some(Reference::ImageId(ImageId("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216".to_owned()))),
-        Reference::from_str("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216")
+        Reference::from_str("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216").ok()
     );
 }
 
@@ -174,7 +188,7 @@ fn test_reference2() {
 fn test_image_id_parse1() {
     assert_eq!(
         Some(ImageId("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216".to_owned())),
-        ImageId::from_str("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216")
+        ImageId::from_str("679447d45a6c8ed2dce1d106fd2ffbc61b96c3633ec3ae4ee20034055d7e0216").ok()
     )
 }
 
@@ -182,7 +196,7 @@ fn test_image_id_parse1() {
 fn test_image_id_parse2() {
     assert_eq!(
         None,
-        ImageId::from_str("679447d45a6c8ed2dce1d106bc61b96c3633ec3ae4ee20034055d7e0216")
+        ImageId::from_str("679447d45a6c8ed2dce1d106bc61b96c3633ec3ae4ee20034055d7e0216").ok()
     )
 }
 
@@ -190,7 +204,7 @@ fn test_image_id_parse2() {
 fn test_image_id_parse3() {
     assert_eq!(
         None,
-        ImageId::from_str("labar:test")
+        ImageId::from_str("labar:test").ok()
     )
 }
 
@@ -236,22 +250,22 @@ fn test_image_tag_to_string2() {
 
 #[test]
 fn test_image_tag_parse1() {
-    assert_eq!(Some(ImageTag::new("labar", "test")), ImageTag::from_str("labar:test"))
+    assert_eq!(Some(ImageTag::new("labar", "test")), ImageTag::from_str("labar:test").ok())
 }
 
 #[test]
 fn test_image_tag_parse2() {
-    assert_eq!(Some(ImageTag::with_registry("localhost:3000", "labar", "test")), ImageTag::from_str("localhost:3000/labar:test"))
+    assert_eq!(Some(ImageTag::with_registry("localhost:3000", "labar", "test")), ImageTag::from_str("localhost:3000/labar:test").ok())
 }
 
 #[test]
 fn test_image_tag_parse3() {
-    assert_eq!(Some(ImageTag::new("labar", "latest")), ImageTag::from_str("labar"))
+    assert_eq!(Some(ImageTag::new("labar", "latest")), ImageTag::from_str("labar").ok())
 }
 
 #[test]
 fn test_image_tag_parse4() {
-    assert_eq!(Some(ImageTag::with_registry("localhost:3000", "labar", "latest")), ImageTag::from_str("localhost:3000/labar"))
+    assert_eq!(Some(ImageTag::with_registry("localhost:3000", "labar", "latest")), ImageTag::from_str("localhost:3000/labar").ok())
 }
 
 #[test]

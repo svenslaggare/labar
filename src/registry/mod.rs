@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde_json::json;
@@ -22,6 +23,7 @@ pub mod model;
 use crate::image::{Layer, LayerOperation};
 use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerConfig, ImageManagerError};
 use crate::lock::FileLock;
+use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,7 @@ pub async fn run(config: RegistryConfig) {
     let app = Router::new()
         .route("/images", get(list_images))
         .route("/images", post(set_image))
+        .route("/images/{*tag}", get(resolve_image))
         .route("/layers/{layer}/manifest", get(get_layer_manifest))
         .route("/layers/{layer}/download/{index}", get(download_layer))
         .route("/layers/manifest", post(upload_layer_manifest))
@@ -84,16 +87,27 @@ async fn set_image(State(state): State<Arc<AppState>>,
     let _lock = create_write_lock(&state);
     let mut image_manager = create_image_manager(&state);
 
-    image_manager.tag_image(&spec.hash, &spec.tag)?;
+    image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
 
     Ok(())
 }
 
-async fn get_layer_manifest(State(state): State<Arc<AppState>>,
-                            Path(layer): Path<String>) -> AppResult<impl IntoResponse> {
+async fn resolve_image(State(state): State<Arc<AppState>>, Path(tag): Path<String>) -> AppResult<impl IntoResponse> {
     let image_manager = create_image_manager(&state);
 
-    let layer = image_manager.get_layer(layer.as_str())?;
+    let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
+    let image = image_manager.resolve_image(&tag)?;
+
+    Ok(Json(json!(image)))
+}
+
+async fn get_layer_manifest(State(state): State<Arc<AppState>>,
+                            Path(reference): Path<String>) -> AppResult<impl IntoResponse> {
+    let image_manager = create_image_manager(&state);
+
+    let layer_reference = ImageId::from_str(&reference).map_err(|err| AppError::InvalidImageReference(err))?;
+    let layer_reference = Reference::ImageId(layer_reference);
+    let layer = image_manager.get_layer(&layer_reference)?;
     Ok(Json(json!(layer)))
 }
 
@@ -101,7 +115,9 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         Path((layer, file_index)): Path<(String, usize)>) -> AppResult<impl IntoResponse> {
     let image_manager = create_image_manager(&state);
 
-    let layer = image_manager.get_layer(layer.as_str())?;
+    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
+    let layer_reference = Reference::ImageId(layer_reference);
+    let layer = image_manager.get_layer(&layer_reference)?;
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
@@ -133,7 +149,7 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
     let _lock = create_write_lock(&state);
     let mut image_manager = create_image_manager(&state);
 
-    if image_manager.get_layer(&layer.hash).is_ok() {
+    if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
         return Ok(
             Json(json!(
                 UploadLayerManifestResult {
@@ -167,7 +183,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let _lock = create_write_lock(&state);
     let image_manager = create_image_manager(&state);
 
-    let layer = image_manager.get_layer(&layer)?;
+    let layer_reference = Reference::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
+    let layer = image_manager.get_layer(&layer_reference)?;
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
@@ -201,6 +218,7 @@ enum AppError {
     ImagerManager(ImageManagerError),
     LayerFileNotFound,
     FailedToUploadLayerFile(String),
+    InvalidImageReference(String),
     IO(std::io::Error),
 }
 
@@ -233,6 +251,12 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({ "error": format!("Failed to upload layer file: {}", err) }))
+                ).into_response()
+            }
+            AppError::InvalidImageReference(err) => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": format!("{}", err) }))
                 ).into_response()
             }
             AppError::IO(err) => {
