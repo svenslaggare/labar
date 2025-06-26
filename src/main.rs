@@ -97,7 +97,7 @@ enum CommandLineInput {
         #[structopt(long, help="Force removes an unpacking, not guaranteeing that all files are removed, but entry removed")]
         force: bool,
     },
-    #[structopt(about="Removes images not used")]
+    #[structopt(about="Removes layers not used")]
     Purge {
 
     },
