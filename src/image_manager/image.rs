@@ -38,8 +38,7 @@ impl ImageManager {
         ImageManager::with_config(ImageManagerConfig::new(), printer)
     }
 
-    pub fn with_config(config: ImageManagerConfig,
-                       printer: BoxPrinter) -> ImageManager {
+    pub fn with_config(config: ImageManagerConfig, printer: BoxPrinter) -> ImageManager {
         ImageManager {
             config: config.clone(),
             printer: printer.clone(),
@@ -62,42 +61,22 @@ impl ImageManager {
         &self.config
     }
 
-    pub fn save_state(&self) -> Result<(), String> {
+    pub fn save_state(&mut self) -> Result<(), String> {
         let layers = self.layer_manager.layers_iter().map(|layer| layer.hash.clone()).collect::<Vec<_>>();
         let images = self.layer_manager.images_iter().cloned().collect::<Vec<_>>();
 
-        std::fs::write(
-            self.config.base_folder().join("state.json"),
-            serde_json::to_string_pretty(&State {
-                layers,
-                images
-            }).map_err(|err| format!("{}", err))?
-        ).map_err(|err| format!("{}", err))?;
+        State { layers, images }.save_to_file(&self.config.base_folder().join("state.json"))?;
+        self.unpack_manager.save_to_file(&self.config.base_folder().join("unpackings.json"))?;
 
-        std::fs::write(
-            self.config.base_folder().join("unpackings.json"),
-            serde_json::to_string_pretty(&self.unpack_manager.unpackings)
-                .map_err(|err| format!("{}", err))?
-        ).map_err(|err| format!("{}", err))?;
-
+        self.changed = false;
         Ok(())
     }
 
     pub fn load_state(&mut self) -> Result<(), String> {
-        let state_content = std::fs::read_to_string(self.config.base_folder().join("state.json"))
-            .map_err(|err| format!("{}", err))?;
-
-        let state: State = serde_json::from_str(&state_content)
-            .map_err(|err| format!("{}", err))?;
+        let state = State::from_file(&self.config.base_folder().join("state.json"))?;
 
         for layer_hash in state.layers {
-            let layer_manifest_filename = self.config.get_layer_folder(&layer_hash).join("manifest.json");
-            let layer_content = std::fs::read_to_string(layer_manifest_filename)
-                .map_err(|err| format!("{}", err))?;
-
-            let layer: Layer = serde_json::from_str(&layer_content)
-                .map_err(|err| format!("{}", err))?;
-
+            let layer = Layer::from_file(&self.config.get_layer_folder(&layer_hash).join("manifest.json"))?;
             self.layer_manager.add_layer(layer);
         }
 
@@ -105,11 +84,7 @@ impl ImageManager {
             self.layer_manager.insert_image(image);
         }
 
-        let unpackings_content = std::fs::read_to_string(self.config.base_folder().join("unpackings.json"))
-            .map_err(|err| format!("{}", err))?;
-
-        self.unpack_manager.unpackings = serde_json::from_str(&unpackings_content)
-            .map_err(|err| format!("{}", err))?;
+        self.unpack_manager.load_from_file(&self.config.base_folder().join("unpackings.json"))?;
 
         Ok(())
     }
@@ -198,16 +173,16 @@ impl ImageManager {
             }
         }
 
-        let layer_file = self.config.get_layer_folder(&layer.hash);
-        std::fs::remove_dir_all(&layer_file)
+        let layer_path = self.config.get_layer_folder(&layer.hash);
+        std::fs::remove_dir_all(&layer_path)
             .map_err(|err|
                 ImageManagerError::FileIOError {
-                    message: format!("Failed to remove layer {} due to: {}", layer_file.to_str().unwrap(), err)
+                    message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
                 }
             )?;
 
         let reclaimed_size = DataSize(reclaimed_size as usize);
-        self.printer.println(&format!("Deleted layer: {} (reclaimed {:.2} MB)", layer.hash, reclaimed_size));
+        self.printer.println(&format!("Deleted layer: {} (reclaimed {})", layer.hash, reclaimed_size));
         Ok(())
     }
 
@@ -217,7 +192,7 @@ impl ImageManager {
             hard_references.push(&image.hash);
         }
 
-        for unpacking in &self.unpack_manager.unpackings {
+        for unpacking in self.unpack_manager.unpackings() {
             hard_references.push(&unpacking.hash);
         }
 
@@ -315,7 +290,7 @@ impl ImageManager {
     }
 
     pub fn list_unpackings(&self) -> &Vec<Unpacking> {
-        &self.unpack_manager.unpackings
+        self.unpack_manager.unpackings()
     }
 
     pub async fn list_images_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {

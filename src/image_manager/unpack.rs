@@ -18,7 +18,7 @@ pub struct Unpacking {
 pub struct UnpackManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
-    pub unpackings: Vec<Unpacking>
+    unpackings: Vec<Unpacking>
 }
 
 impl UnpackManager {
@@ -28,6 +28,30 @@ impl UnpackManager {
             printer,
             unpackings: Vec::new()
         }
+    }
+
+    pub fn load_from_file(&mut self, path: &Path) -> Result<(), String> {
+        let unpackings_content = std::fs::read_to_string(path)
+            .map_err(|err| format!("{}", err))?;
+
+        self.unpackings = serde_json::from_str(&unpackings_content)
+            .map_err(|err| format!("{}", err))?;
+
+        Ok(())
+    }
+
+    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
+        std::fs::write(
+            path,
+            serde_json::to_string_pretty(&self.unpackings)
+                .map_err(|err| format!("{}", err))?
+        ).map_err(|err| format!("{}", err))?;
+
+        Ok(())
+    }
+
+    pub fn unpackings(&self) -> &Vec<Unpacking> {
+        &self.unpackings
     }
 
     pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_folder: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {

@@ -1,7 +1,9 @@
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
+
 use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -58,6 +60,16 @@ impl Layer {
             operations,
             created: SystemTime::now()
         }
+    }
+
+    pub fn from_file(path: &Path) -> Result<Layer, String> {
+        let layer_content = std::fs::read_to_string(path)
+            .map_err(|err| format!("{}", err))?;
+
+        let layer: Layer = serde_json::from_str(&layer_content)
+            .map_err(|err| format!("{}", err))?;
+
+        Ok(layer)
     }
 
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {
