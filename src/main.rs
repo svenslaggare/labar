@@ -12,6 +12,7 @@ pub mod image_definition;
 pub mod image;
 pub mod image_manager;
 pub mod registry;
+pub mod reference;
 
 use crate::helpers::TablePrinter;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
