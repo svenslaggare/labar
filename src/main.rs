@@ -49,7 +49,9 @@ enum CommandLineInput {
         #[structopt(name="tag", help="The tag of the image")]
         tag: String,
         #[structopt(long, help="The build context")]
-        build_context: Option<PathBuf>
+        build_context: Option<PathBuf>,
+        #[structopt(long, help="The build arguments on format key=value")]
+        build_arguments: Vec<String>
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
@@ -163,13 +165,20 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
     let printer = ConsolePrinter::new();
 
     match command_line_input {
-        CommandLineInput::Build { file, tag, build_context } => {
+        CommandLineInput::Build { file, tag, build_context, build_arguments } => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
+            let mut image_definition_context = ImageDefinitionContext::new();
+            for argument in build_arguments {
+                let parts = argument.split("=").collect::<Vec<_>>();
+                if parts.len() == 2 {
+                    image_definition_context.add_variable(parts[0], parts[1]);
+                }
+            }
+
             println!("Building image: {}", tag);
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition file not found: {}", err))?;
-            let image_definition_context = ImageDefinitionContext::new();
             let image_definition = ImageDefinition::from_str(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
             let build_context = build_context.unwrap_or_else(|| Path::new("").to_owned());
             let image = image_manager.build_image(&build_context, image_definition, &tag).map_err(|err| format!("{}", err))?;
