@@ -253,7 +253,7 @@ impl ImageDefinition {
                         let link_type = match arguments.get("link").map(|x| x.as_str()) {
                             Some("soft") => LinkType::Soft,
                             Some("hard") => LinkType::Hard,
-                            _ => LinkType::Soft
+                            _ => LinkType::Hard
                         };
 
                         image_definition.layers.push(LayerDefinition::new(
@@ -471,7 +471,7 @@ fn test_parse_copy1() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
     );
 }
 
@@ -484,7 +484,7 @@ fn test_parse_copy2() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft  }],
+        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(),source_path: "testdata/rawdata/file1.txt".to_owned(),link_type: LinkType::Hard }],
     );
 }
 
@@ -503,9 +503,9 @@ fn test_parse_copy3() {
         result.layers[0].operations,
         vec![
             LayerOperationDefinition::Directory { path: "dir2".to_owned() },
-            LayerOperationDefinition::File { path: "dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Soft },
-            LayerOperationDefinition::File { path: "dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Soft },
-            LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Soft },
+            LayerOperationDefinition::File { path: "dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File { path: "dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard },
         ],
     );
 }
@@ -525,9 +525,9 @@ fn test_parse_copy4() {
         result.layers[0].operations,
         vec![
             LayerOperationDefinition::Directory { path: "test/dir2".to_owned() },
-            LayerOperationDefinition::File { path: "test/dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Soft },
-            LayerOperationDefinition::File { path: "test/dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Soft },
-            LayerOperationDefinition::File { path: "test/file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Soft },
+            LayerOperationDefinition::File { path: "test/dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File { path: "test/dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File { path: "test/file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard },
         ],
     );
 }
@@ -545,7 +545,7 @@ fn test_parse_copy5() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft  }]
+        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
     );
 }
 
@@ -563,7 +563,7 @@ fn test_parse_copy6() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }]
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
     );
 }
 
@@ -656,7 +656,7 @@ fn test_parse_multi1() {
 
     assert_eq!(
         result.layers[1].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft  }]
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
     );
 
     assert_eq!(
@@ -681,7 +681,7 @@ fn test_parse_multi2() {
 
     assert_eq!(
         result.layers[1].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft  }]
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
     );
 
     assert_eq!(
@@ -702,7 +702,7 @@ fn test_parse_variables1() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
     );
 }
 
@@ -718,7 +718,7 @@ fn test_parse_variables2() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
     );
 }
 
@@ -734,7 +734,7 @@ fn test_parse_variables3() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
     );
 }
 
@@ -752,7 +752,7 @@ fn test_parse_variables4() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file_1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![LayerOperationDefinition::File { path: "file_1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
     );
 }
 

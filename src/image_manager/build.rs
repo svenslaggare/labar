@@ -151,7 +151,7 @@ impl BuildManager {
 
                     let created_time = source_path_entry.metadata()?.modified()?;
                     hash_input += &format!(
-                        "{}{}{}{:?}",
+                        "{}{}{}{}",
                         path,
                         source_path,
                         created_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
