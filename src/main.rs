@@ -237,12 +237,18 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 ]
             );
 
+            let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
+
             for unpacking in unpackings {
                 let datetime: DateTime<Local> = unpacking.time.into();
+                let image_tag = images
+                    .iter()
+                    .find(|image| image.image.hash == unpacking.hash)
+                    .map(|image| &image.image.tag);
 
                 table_printer.add_row(vec![
                     unpacking.destination.clone(),
-                    unpacking.tag.as_ref().map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
+                    image_tag.map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
                     unpacking.hash.to_string(),
                     datetime.format("%Y-%m-%d %T").to_string()
                 ]);

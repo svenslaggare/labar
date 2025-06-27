@@ -8,11 +8,10 @@ use crate::image_manager::layer::LayerManager;
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{BoxPrinter};
-use crate::reference::{ImageId, ImageTag, Reference};
+use crate::reference::{ImageId, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
-    pub tag: Option<ImageTag>,
     pub hash: ImageId,
     pub destination: String,
     pub time: SystemTime
@@ -85,7 +84,6 @@ impl UnpackManager {
         self.unpack_layer(layer_manager, unpack_folder, &top_layer)?;
 
         self.unpackings.push(Unpacking {
-            tag: reference.image_tag().cloned(),
             hash: top_layer.hash.clone(),
             destination: unpack_folder_str,
             time: SystemTime::now()
