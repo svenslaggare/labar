@@ -66,7 +66,7 @@ impl LayerDefinition {
 pub enum LayerOperationDefinition {
     Image { reference: Reference },
     Directory { path: String },
-    File { path: String, source_path: String, link_type: LinkType },
+    File { path: String, source_path: String, link_type: LinkType, writable: bool },
 }
 
 #[derive(Debug)]
@@ -110,7 +110,7 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
             LayerOperationDefinition::Image { reference } => {
                 expanded_operations.push(LayerOperationDefinition::Image { reference });
             }
-            LayerOperationDefinition::File { path, source_path, link_type } => {
+            LayerOperationDefinition::File { path, source_path, link_type, writable } => {
                 let source_path_obj = build_context.join(Path::new(&source_path));
                 let destination_path = Path::new(&path);
 
@@ -120,7 +120,8 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
                             LayerOperationDefinition::File {
                                 path: destination_path.join(source_path_obj.file_name().unwrap()).to_str().unwrap().to_owned(),
                                 source_path: source_path_obj.to_str().unwrap().to_owned(),
-                                link_type
+                                link_type,
+                                writable
                             }
                         );
                     } else if path == "." {
@@ -128,7 +129,8 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
                             LayerOperationDefinition::File {
                                 path: source_path_obj.file_name().unwrap().to_str().unwrap().to_owned(),
                                 source_path: source_path_obj.to_str().unwrap().to_owned(),
-                                link_type
+                                link_type,
+                                writable
                             }
                         );
                     } else {
@@ -136,7 +138,8 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
                             LayerOperationDefinition::File {
                                 path,
                                 source_path: source_path_obj.to_str().unwrap().to_owned(),
-                                link_type
+                                link_type,
+                                writable
                             }
                         );
                     }
@@ -144,7 +147,8 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
                     expanded_operations.append(&mut recursive_copy_operations(
                         &source_path_obj,
                         destination_path,
-                        link_type
+                        link_type,
+                        writable
                     )?);
                 }
             },
@@ -157,7 +161,10 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
     Ok(expanded_operations)
 }
 
-fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, link_type: LinkType) -> ImageParseResult<Vec<LayerOperationDefinition>> {
+fn recursive_copy_operations(source_path: &Path,
+                             base_destination_path: &Path,
+                             link_type: LinkType,
+                             writable: bool) -> ImageParseResult<Vec<LayerOperationDefinition>> {
     let mut stack = Vec::new();
     stack.push(source_path.to_owned());
 
@@ -187,7 +194,8 @@ fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, l
                 results.push(LayerOperationDefinition::File {
                     path: relative_entry_path.to_str().unwrap().to_owned(),
                     source_path: entry_path.to_str().unwrap().to_owned(),
-                    link_type
+                    link_type,
+                    writable
                 });
             }
         }
@@ -199,7 +207,7 @@ fn recursive_copy_operations(source_path: &Path, base_destination_path: &Path, l
 }
 
 impl ImageDefinition {
-    pub fn from_str(content: &str, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
+    pub fn parse(content: &str, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
         let mut image_definition = ImageDefinition::new(None, Vec::new());
         let variable_regex = [
             Regex::new("\\$([A-Za-z0-9_]+)").unwrap(),
@@ -256,13 +264,20 @@ impl ImageDefinition {
                             _ => LinkType::Hard
                         };
 
+                        let writable = match arguments.get("writable").map(|x| x.as_str()) {
+                            Some("yes" | "true") => true,
+                            Some("no" | "false") => false,
+                            _ => false
+                        };
+
                         image_definition.layers.push(LayerDefinition::new(
                             line.to_owned(),
                             vec![
                                 LayerOperationDefinition::File {
                                     path: destination,
                                     source_path: source,
-                                    link_type
+                                    link_type,
+                                    writable
                                 }
                             ]
                         ));
@@ -302,8 +317,8 @@ impl ImageDefinition {
         Ok(image_definition)
     }
 
-    pub fn from_str_without_context(context: &str) -> ImageParseResult<ImageDefinition> {
-        ImageDefinition::from_str(context, &ImageDefinitionContext::new())
+    pub fn parse_without_context(context: &str) -> ImageParseResult<ImageDefinition> {
+        ImageDefinition::parse(context, &ImageDefinitionContext::new())
     }
 }
 
@@ -454,7 +469,7 @@ fn test_extract_arguments5() {
 
 #[cfg(test)]
 fn image_definition_from_file(path: &str, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
-    ImageDefinition::from_str(&std::fs::read_to_string(path)?, context)
+    ImageDefinition::parse(&std::fs::read_to_string(path)?, context)
 }
 
 #[cfg(test)]
@@ -471,7 +486,12 @@ fn test_parse_copy1() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -484,7 +504,12 @@ fn test_parse_copy2() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(),source_path: "testdata/rawdata/file1.txt".to_owned(),link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "sub/file1.txt".to_owned(),source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -503,9 +528,15 @@ fn test_parse_copy3() {
         result.layers[0].operations,
         vec![
             LayerOperationDefinition::Directory { path: "dir2".to_owned() },
-            LayerOperationDefinition::File { path: "dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard },
-            LayerOperationDefinition::File { path: "dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard },
-            LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File {
+                path: "dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard , writable: false
+            },
+            LayerOperationDefinition::File {
+                path: "dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard, writable: false
+            },
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard, writable: false
+            },
         ],
     );
 }
@@ -525,9 +556,9 @@ fn test_parse_copy4() {
         result.layers[0].operations,
         vec![
             LayerOperationDefinition::Directory { path: "test/dir2".to_owned() },
-            LayerOperationDefinition::File { path: "test/dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard },
-            LayerOperationDefinition::File { path: "test/dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard },
-            LayerOperationDefinition::File { path: "test/file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard },
+            LayerOperationDefinition::File { path: "test/dir2/file1.txt".to_owned(), source_path: "testdata/dir1/dir2/file1.txt".to_owned(), link_type: LinkType::Hard, writable: false },
+            LayerOperationDefinition::File { path: "test/dir2/file2.txt".to_owned(), source_path: "testdata/dir1/dir2/file2.txt".to_owned(), link_type: LinkType::Hard, writable: false },
+            LayerOperationDefinition::File { path: "test/file1.txt".to_owned(), source_path: "testdata/dir1/file1.txt".to_owned(), link_type: LinkType::Hard, writable: false },
         ],
     );
 }
@@ -545,7 +576,12 @@ fn test_parse_copy5() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "sub/file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
+        vec![
+            LayerOperationDefinition::File {
+                path: "sub/file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ]
     );
 }
 
@@ -563,7 +599,12 @@ fn test_parse_copy6() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ]
     );
 }
 
@@ -576,7 +617,12 @@ fn test_parse_copy7() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -589,7 +635,30 @@ fn test_parse_copy8() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Soft }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Soft, writable: false
+            }
+        ],
+    );
+}
+
+#[test]
+fn test_parse_copy9() {
+    let result = image_definition_from_file2("testdata/parsing/success/copy9.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(1, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: true
+            }
+        ],
     );
 }
 
@@ -656,7 +725,12 @@ fn test_parse_multi1() {
 
     assert_eq!(
         result.layers[1].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ]
     );
 
     assert_eq!(
@@ -681,7 +755,12 @@ fn test_parse_multi2() {
 
     assert_eq!(
         result.layers[1].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }]
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ]
     );
 
     assert_eq!(
@@ -702,7 +781,12 @@ fn test_parse_variables1() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -718,7 +802,12 @@ fn test_parse_variables2() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -734,7 +823,12 @@ fn test_parse_variables3() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 
@@ -752,7 +846,12 @@ fn test_parse_variables4() {
     assert_eq!(1, result.layers.len());
     assert_eq!(
         result.layers[0].operations,
-        vec![LayerOperationDefinition::File { path: "file_1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(), link_type: LinkType::Hard }],
+        vec![
+            LayerOperationDefinition::File {
+                path: "file_1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
     );
 }
 

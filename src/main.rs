@@ -190,7 +190,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             println!("Building image: {}", tag);
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition file not found: {}", err))?;
-            let image_definition = ImageDefinition::from_str(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
+            let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
             let build_context = build_context.unwrap_or_else(|| Path::new("").to_owned());
             let image = image_manager.build_image(&build_context, image_definition, &tag).map_err(|err| format!("{}", err))?;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;

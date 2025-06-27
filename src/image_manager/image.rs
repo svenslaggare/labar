@@ -428,7 +428,7 @@ fn test_build() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
-        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
         assert!(image_definition.is_ok());
         let image_definition = image_definition.unwrap();
 
@@ -474,7 +474,7 @@ fn test_remove_image1() {
         printer
     );
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -508,11 +508,11 @@ fn test_remove_image2() {
         printer
     );
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test").unwrap()).unwrap();
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test2").unwrap()).unwrap();
 
@@ -554,7 +554,7 @@ async fn test_push_pull() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
-        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
         let image = image_manager.build_image(Path::new(""), image_definition, &image_tag).unwrap();
 
         // Push
@@ -606,10 +606,10 @@ fn test_list_content() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
-        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
         image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
 
-        let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
         image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("that").unwrap()).unwrap();
 
         let files = image_manager.list_content(&Reference::from_str("that").unwrap());

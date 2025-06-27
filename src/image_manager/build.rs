@@ -133,7 +133,7 @@ impl BuildManager {
                     hash_input += &hash.to_string();
                     layer_operations.push(LayerOperation::Image { hash });
                 }
-                LayerOperationDefinition::File { path, source_path, link_type } => {
+                LayerOperationDefinition::File { path, source_path, link_type, writable } => {
                     let source_path_entry = Path::new(&source_path);
                     if !source_path_entry.exists() {
                         return Err(
@@ -146,16 +146,18 @@ impl BuildManager {
                     layer_operations.push(LayerOperation::File {
                         path: path.clone(),
                         source_path: source_path.clone(),
-                        link_type: *link_type
+                        link_type: *link_type,
+                        writable: *writable
                     });
 
                     let created_time = source_path_entry.metadata()?.modified()?;
                     hash_input += &format!(
-                        "{}{}{}{}",
+                        "{}{}{}{}{}",
                         path,
                         source_path,
                         created_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
-                        link_type
+                        link_type,
+                        writable
                     );
                 },
                 LayerOperationDefinition::Directory { path } => {
@@ -192,7 +194,7 @@ fn test_build() {
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config, printer);
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -228,7 +230,7 @@ fn test_build_with_cache() {
     let build_manager = BuildManager::new(config, printer.clone());
 
     // Build first time
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -237,7 +239,7 @@ fn test_build_with_cache() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -273,14 +275,14 @@ fn test_build_with_image_ref() {
     let mut layer_manager = LayerManager::new();
     let build_manager = BuildManager::new(config, printer);
 
-    let image_definition = ImageDefinition::from_str_without_context(
+    let image_definition = ImageDefinition::parse_without_context(
         &std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()
     ).unwrap();
     build_manager.build_image(
         &mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()
     ).unwrap();
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 

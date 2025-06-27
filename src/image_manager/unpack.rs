@@ -1,3 +1,4 @@
+use std::fs::{File};
 use std::path::Path;
 use std::time::SystemTime;
 
@@ -110,7 +111,7 @@ impl UnpackManager {
                         layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
                     )?;
                 },
-                LayerOperation::File { path, source_path, link_type } => {
+                LayerOperation::File { path, source_path, link_type, writable } => {
                     let abs_source_path = self.config.base_folder.join(source_path);
 
                     has_files = true;
@@ -127,7 +128,7 @@ impl UnpackManager {
 
                     match link_type {
                         LinkType::Soft => {
-                            std::os::unix::fs::symlink(abs_source_path, destination_path)
+                            std::os::unix::fs::symlink(&abs_source_path, &destination_path)
                                 .map_err(|err|
                                     ImageManagerError::FileIOError {
                                         message: format!("Failed to unpack file {} due to: {}", path, err)
@@ -135,13 +136,20 @@ impl UnpackManager {
                                 )?;
                         },
                         LinkType::Hard => {
-                            std::fs::hard_link(abs_source_path, destination_path)
+                            std::fs::hard_link(&abs_source_path, &destination_path)
                                 .map_err(|err|
                                     ImageManagerError::FileIOError {
                                         message: format!("Failed to unpack file {} due to: {}", path, err)
                                     }
                                 )?;
                         },
+                    }
+
+                    if !writable {
+                        let file = File::open(destination_path)?;
+                        let mut permissions = file.metadata()?.permissions();
+                        permissions.set_readonly(true);
+                        file.set_permissions(permissions)?;
                     }
                 },
                 LayerOperation::Directory { path } => {
@@ -240,7 +248,7 @@ fn test_unpack() {
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -280,7 +288,7 @@ fn test_unpack_exist() {
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -327,7 +335,7 @@ fn test_remove_unpack() {
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -373,7 +381,7 @@ fn test_unpack_replace1() {
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
@@ -420,7 +428,7 @@ fn test_unpack_replace2() {
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
-    let image_definition = ImageDefinition::from_str_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
+    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 

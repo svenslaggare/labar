@@ -24,7 +24,7 @@ impl Display for LinkType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerOperation {
     Image { hash: ImageId },
-    File { path: String, source_path: String, link_type: LinkType },
+    File { path: String, source_path: String, link_type: LinkType, writable: bool },
     Directory { path: String }
 }
 
@@ -37,7 +37,7 @@ impl Display for LayerOperation {
             LayerOperation::Directory { path } => {
                 write!(f, "Create directory: {}", path)
             }
-            LayerOperation::File { path, source_path, link_type } => {
+            LayerOperation::File { path, source_path, link_type, .. } => {
                 write!(f, "Copy file {} -> {} ({})", source_path, path, link_type)
             }
         }
