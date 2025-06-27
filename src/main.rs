@@ -231,6 +231,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let mut table_printer = TablePrinter::new(
                 vec![
                     "PATH".to_owned(),
+                    "IMAGE TAG".to_owned(),
                     "IMAGE ID".to_owned(),
                     "CREATED".to_owned()
                 ]
@@ -241,6 +242,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
                 table_printer.add_row(vec![
                     unpacking.destination.clone(),
+                    unpacking.tag.as_ref().map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
                     unpacking.hash.to_string(),
                     datetime.format("%Y-%m-%d %T").to_string()
                 ]);

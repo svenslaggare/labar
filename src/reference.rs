@@ -36,6 +36,24 @@ impl Display for Reference {
     }
 }
 
+impl Reference {
+    pub fn image_tag(&self) -> Option<&ImageTag> {
+        if let Reference::ImageTag(tag) = self {
+            Some(tag)
+        } else {
+            None
+        }
+    }
+
+    pub fn image_id(&self) -> Option<&ImageId> {
+        if let Reference::ImageId(id) = self {
+            Some(id)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct ImageId(String);
 
