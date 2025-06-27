@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +13,7 @@ use crate::reference::{ImageId, Reference};
 pub struct Unpacking {
     pub hash: ImageId,
     pub destination: String,
-    pub time: std::time::SystemTime
+    pub time: SystemTime
 }
 
 pub struct UnpackManager {
@@ -84,7 +85,7 @@ impl UnpackManager {
         self.unpackings.push(Unpacking {
             hash: top_layer.hash.clone(),
             destination: unpack_folder_str,
-            time: std::time::SystemTime::now()
+            time: SystemTime::now()
         });
 
         Ok(())
