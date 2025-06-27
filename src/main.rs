@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local};
 
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 
 use structopt::StructOpt;
 
@@ -21,15 +21,21 @@ use crate::image_manager::{ImageManager, ImageMetadata, ImageManagerConfig, BoxP
 use crate::reference::{ImageTag, Reference};
 use crate::registry::RegistryConfig;
 
-#[derive(Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileConfig {
     default_registry: Option<String>
 }
 
 impl FileConfig {
-    pub fn load(filename: &Path) -> Result<FileConfig, String> {
-        let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
+    pub fn from_file(path: &Path) -> Result<FileConfig, String> {
+        let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
         toml::from_str(&content).map_err(|err| format!("{}", err))
+    }
+
+    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
+        let content = toml::to_string(self).map_err(|err| format!("{}", err))?;
+        std::fs::write(path, content).map_err(|err| format!("{}", err))?;
+        Ok(())
     }
 }
 
@@ -121,6 +127,11 @@ enum CommandLineInput {
         #[structopt(name="config_file", help="The toml configuration file of the registry")]
         config_file: PathBuf
     },
+    #[structopt(about="Manages the configuration")]
+    Config {
+        #[structopt(long, help="Sets a configuration value (key=value)")]
+        edit: Option<String>
+    }
 }
 
 fn create_image_manager(_file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
@@ -291,6 +302,43 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let registry_config = RegistryConfig::load(&config_file)?;
             registry::run(registry_config).await;
         }
+        CommandLineInput::Config { edit } => {
+            fn print_config(file_config: &FileConfig) {
+                println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"))
+            }
+
+            if let Some(edit) = edit {
+                let parts = edit.split('=').collect::<Vec<&str>>();
+
+                let mut new_file_config = file_config.clone();
+                if parts.len() == 2 {
+                    let key = parts[0];
+                    let value = parts[1];
+
+                    match key {
+                        "default_registry" => {
+                            if !value.is_empty() {
+                                new_file_config.default_registry = Some(value.to_owned());
+                            } else {
+                                new_file_config.default_registry = None;
+                            }
+                        }
+                        _ => {
+                            return Err(format!("Invalid key '{}'", key));
+                        }
+                    }
+                } else {
+                    return Err("Expected key=value".to_owned());
+                }
+
+                new_file_config.save_to_file(&get_config_file())?;
+
+                println!("New config:");
+                print_config(&new_file_config);
+            } else {
+                print_config(&file_config);
+            }
+        }
     }
 
     Ok(())
@@ -298,7 +346,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
-    let file_config = FileConfig::load(&ImageManagerConfig::new().base_folder().join("config.toml")).unwrap_or(FileConfig::default());
+    let file_config = FileConfig::from_file(&get_config_file()).unwrap_or(FileConfig::default());
     let command_line_input = CommandLineInput::from_args();
 
     if let Err(err) = main_run(file_config, command_line_input).await {
@@ -306,4 +354,8 @@ async fn main() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn get_config_file() -> PathBuf {
+    ImageManagerConfig::new().base_folder().join("config.toml")
 }
