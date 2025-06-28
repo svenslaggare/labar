@@ -77,6 +77,7 @@ pub enum ImageParseError {
     ExpectedArguments { expected: usize, actual: usize },
     VariableNotFound(String),
     InvalidImageReference(String),
+    IsAbsolutePath(String),
     IO(std::io::Error),
     Other(String),
 }
@@ -96,6 +97,7 @@ impl Display for ImageParseError {
             ImageParseError::ExpectedArguments { expected, actual } => write!(f, "Expected {} arguments but got {}", expected, actual),
             ImageParseError::VariableNotFound(name) => write!(f, "Variable '{}' not found", name),
             ImageParseError::InvalidImageReference(error) => write!(f, "Invalid image reference: {}", error),
+            ImageParseError::IsAbsolutePath(path) => write!(f, "The path '{}' is absolute", path),
             ImageParseError::IO(error) => write!(f, "IO error: {}", error),
             ImageParseError::Other(error) => write!(f, "{}", error),
         }
@@ -112,6 +114,10 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
             }
             LayerOperationDefinition::File { path, source_path, link_type, writable } => {
                 let source_path_obj = build_context.join(Path::new(&source_path));
+                let source_path_obj = source_path_obj
+                    .strip_prefix(build_context).map_err(|_| ImageParseError::IsAbsolutePath(source_path.clone()))?;
+                let source_path_obj = build_context.join(Path::new(&source_path_obj));
+
                 let destination_path = Path::new(&path);
 
                 if source_path_obj.is_file() {

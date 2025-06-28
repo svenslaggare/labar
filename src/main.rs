@@ -58,9 +58,9 @@ enum CommandLineInput {
         #[structopt(name="tag", help="The tag of the image")]
         tag: ImageTag,
         #[structopt(long, help="The build context")]
-        build_context: Option<PathBuf>,
+        context: Option<PathBuf>,
         #[structopt(long, help="The build arguments on format key=value")]
-        build_arguments: Vec<String>
+        arguments: Vec<String>
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
@@ -182,12 +182,12 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
     let printer = ConsolePrinter::new();
 
     match command_line_input {
-        CommandLineInput::Build { file, tag, build_context, build_arguments } => {
+        CommandLineInput::Build { file, tag, context, arguments } => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             let mut image_definition_context = ImageDefinitionContext::new();
-            for argument in build_arguments {
+            for argument in arguments {
                 let parts = argument.split("=").collect::<Vec<_>>();
                 if parts.len() == 2 {
                     image_definition_context.add_variable(parts[0], parts[1]);
@@ -195,13 +195,13 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             }
 
             println!("Building image: {}", tag);
-            let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition file not found: {}", err))?;
+            let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
             let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
-            let build_context = build_context.unwrap_or_else(|| Path::new("").to_owned());
-            let image = image_manager.build_image(&build_context, image_definition, &tag).map_err(|err| format!("{}", err))?;
+            let context = context.unwrap_or_else(|| std::env::current_dir().unwrap());
+            let image = image_manager.build_image(&context, image_definition, &tag).map_err(|err| format!("{}", err))?;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
-        },
+        }
         CommandLineInput::RemoveImage { tag } => {
             let _write_lock = create_write_lock();
             let _unpack_lock = create_unpack_lock();
