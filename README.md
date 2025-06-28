@@ -24,16 +24,16 @@ Each operation creates its own layer. The following operations are supported:
 ### COPY
 Copies a file from the build context into the image.
 
+**Arguments**:
+
+* writable (yes/no) - Makes the unpacked file writable. Default is no.
+* link (soft/hard) - Use soft or hard links. Default is hard.
+
 **Examples**: 
 
 * `COPY data/test1.txt test1.txt`
 * `COPY --writable=yes data/test1.txt test1.txt`
 * `COPY --link=soft data/test1.txt test1.txt`
-
-**Arguments**:
-
-* writable (yes/no) - Makes the file writable. Default is no.
-* link (soft/hard) - Use soft or hard links. Default is hard.
 
 ### MKDIR
 Creates a new directory in the image.
