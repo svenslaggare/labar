@@ -43,10 +43,13 @@ impl RegistryManager {
         let response = self.get_registry_text_response(registry, &format!("layers/{}/manifest", reference)).await?;
         let mut layer: Layer = serde_json::from_str(&response)?;
 
-        let manifest_file_path = config.get_layer_folder(&layer.hash).join("manifest.json");
+        let layer_folder = config.get_layer_folder(&layer.hash);
+        let manifest_file_path = layer_folder.join("manifest.json");
         if manifest_file_path.exists() {
             return Ok(layer);
         }
+
+        tokio::fs::create_dir_all(&layer_folder).await?;
 
         let mut file_index = 0;
         for operation in &mut layer.operations {
@@ -54,14 +57,10 @@ impl RegistryManager {
                 let local_source_path = config.base_folder.join(Path::new(source_path));
                 self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
 
-                if let Some(parent) = local_source_path.parent() {
-                    tokio::fs::create_dir_all(parent).await?;
-                }
-
-                let mut file = tokio::fs::File::create(local_source_path).await?;
-
                 let response = self.get_registry_response(registry, &format!("layers/{}/download/{}", reference, file_index)).await?;
                 let mut byte_stream = response.bytes_stream();
+
+                let mut file = tokio::fs::File::create(local_source_path).await?;
                 while let Some(item) = byte_stream.next().await {
                     tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
                 }

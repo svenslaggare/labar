@@ -569,6 +569,40 @@ fn test_remove_image2() {
     assert_eq!(ImageTag::from_str("test2").unwrap(), images[0].image.tag);
 }
 
+#[test]
+fn test_list_content() {
+    use std::str::FromStr;
+
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_dir = helpers::get_temp_folder();
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
+
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
+        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("that").unwrap()).unwrap();
+
+        let files = image_manager.list_content(&Reference::from_str("that").unwrap());
+        assert!(files.is_ok());
+        let files = files.unwrap();
+
+        assert_eq!(2, files.len());
+        assert_eq!("file1.txt", files[0]);
+        assert_eq!("file2.txt", files[1]);
+    }
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
 #[tokio::test]
 async fn test_push_pull() {
     use std::net::SocketAddr;
@@ -625,7 +659,12 @@ async fn test_push_pull() {
         let images = images.unwrap();
         assert_eq!(1, images.len());
         assert_eq!(&image_tag, &images[0].image.tag);
-        assert_eq!(Some(DataSize(974)), image_manager.image_size(&Reference::ImageTag(image.tag.clone())).ok());
+
+        // Check content
+        let reference = Reference::ImageTag(image.tag.clone());
+        assert_eq!(Some(DataSize(974)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference).unwrap();
+        assert_eq!(vec!["file1.txt".to_owned()], files);
     }
 
     #[allow(unused_must_use)] {
@@ -634,36 +673,77 @@ async fn test_push_pull() {
     }
 }
 
-#[test]
-fn test_list_content() {
+#[tokio::test]
+async fn test_push_pull_with_ref() {
+    use std::net::SocketAddr;
     use std::str::FromStr;
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::registry::RegistryConfig;
 
     let tmp_dir = helpers::get_temp_folder();
+    let tmp_registry_dir = helpers::get_temp_folder();
+
+    let address: SocketAddr = "0.0.0.0:9568".parse().unwrap();
+    tokio::spawn(crate::registry::run(RegistryConfig {
+        data_path: tmp_registry_dir.clone(),
+        address
+    }));
+
+    // Wait until registry starts
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
-
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
+        let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
+
+        // Build
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
-        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
+        let image_referred = image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
-        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("that").unwrap()).unwrap();
+        let image = image_manager.build_image(Path::new(""), image_definition, &image_tag).unwrap();
 
-        let files = image_manager.list_content(&Reference::from_str("that").unwrap());
-        assert!(files.is_ok());
-        let files = files.unwrap();
+        // Push
+        let push_result = image_manager.push(&image.tag).await;
+        assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
 
-        assert_eq!(2, files.len());
-        assert_eq!("file1.txt", files[0]);
-        assert_eq!("file2.txt", files[1]);
+        // List remote
+        let remote_images = image_manager.list_images_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(1, remote_images.len());
+        assert_eq!(&image_tag, &remote_images[0].image.tag);
+
+        // Remove in order to pull
+        assert!(image_manager.remove_image(&image.tag).is_ok());
+        assert!(image_manager.remove_image(&image_referred.tag).is_ok());
+
+        // Pull
+        let pull_result = image_manager.pull(&image.tag).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+
+        // List images
+        let images = image_manager.list_images();
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!(&image_tag, &images[0].image.tag);
+
+        // Check content
+        let reference = Reference::ImageTag(image.tag.clone());
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference).unwrap();
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
+        std::fs::remove_dir_all(&tmp_registry_dir);
     }
 }
