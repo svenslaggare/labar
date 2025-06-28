@@ -1,1 +1,2 @@
 COPY testdata/rawdata/file1.txt file1.txt
+# Comments are supported
