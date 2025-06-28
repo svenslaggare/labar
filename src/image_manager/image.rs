@@ -1,26 +1,15 @@
-use std::collections::{HashMap, BTreeSet};
-use std::path::{Path};
-use std::time::SystemTime;
-
-use serde::{Deserialize, Serialize};
-
-use crate::image::{Image, LayerOperation, Layer};
-use crate::image_definition::{ImageDefinition};
-use crate::image_manager::{ImageManagerError, ImageManagerConfig, ImageManagerResult, State};
+use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
+use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
+use crate::image_definition::ImageDefinition;
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, State};
 use crate::image_manager::layer::LayerManager;
 use crate::image_manager::unpack::{UnpackManager, Unpacking};
 use crate::image_manager::build::BuildManager;
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
-use crate::image_manager::registry::{RegistryManager};
+use crate::image_manager::registry::RegistryManager;
 use crate::reference::{ImageId, ImageTag, Reference};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ImageMetadata {
-    pub image: Image,
-    pub created: SystemTime,
-    pub size: DataSize
-}
 
 pub struct ImageManager {
     config: ImageManagerConfig,

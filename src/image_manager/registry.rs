@@ -4,8 +4,8 @@ use std::path::Path;
 use futures::StreamExt;
 use reqwest::{Body, Client, StatusCode};
 
-use crate::image::{Layer, LayerOperation};
-use crate::image_manager::{BoxPrinter, ImageManagerConfig, ImageMetadata};
+use crate::image::{ImageMetadata, Layer, LayerOperation};
+use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
 

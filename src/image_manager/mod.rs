@@ -1,4 +1,4 @@
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
 mod layer;
 mod unpack;
@@ -106,9 +106,9 @@ impl ImageManagerConfig {
     }
 }
 
-pub use image::{ImageManager, ImageMetadata};
+pub use image::ImageManager;
 pub use state::State;
-pub use printing::{Printer, BoxPrinter, ConsolePrinter, EmptyPrinter};
+pub use printing::{BoxPrinter, ConsolePrinter, EmptyPrinter, Printer};
 use crate::image_definition::ImageParseError;
 use crate::image_manager::registry::RegistryError;
 use crate::reference::{ImageId, Reference};

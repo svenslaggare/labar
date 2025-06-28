@@ -4,6 +4,7 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::helpers::DataSize;
 use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -101,4 +102,11 @@ impl Image {
             tag
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ImageMetadata {
+    pub image: Image,
+    pub created: SystemTime,
+    pub size: DataSize
 }

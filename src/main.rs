@@ -5,6 +5,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use structopt::StructOpt;
+use image::ImageMetadata;
 
 pub mod helpers;
 pub mod lock;
@@ -17,7 +18,7 @@ pub mod reference;
 use crate::helpers::TablePrinter;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{ImageManager, ImageMetadata, ImageManagerConfig, BoxPrinter, ConsolePrinter};
+use crate::image_manager::{BoxPrinter, ConsolePrinter, ImageManager, ImageManagerConfig};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::RegistryConfig;
 
