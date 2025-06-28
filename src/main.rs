@@ -401,5 +401,5 @@ async fn main() -> Result<(), String> {
 }
 
 fn get_config_file() -> PathBuf {
-    ImageManagerConfig::new().base_folder().join("config.toml")
+    dirs::home_dir().unwrap().join(".labar").join("config.toml")
 }
