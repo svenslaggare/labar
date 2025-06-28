@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::{File};
 use std::path::Path;
 use std::time::SystemTime;
@@ -81,7 +82,7 @@ impl UnpackManager {
         }
 
         self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
-        self.unpack_layer(layer_manager, unpack_folder, &top_layer)?;
+        self.unpack_layer(layer_manager, &mut HashSet::new(), unpack_folder, &top_layer)?;
 
         self.unpackings.push(Unpacking {
             hash: top_layer.hash.clone(),
@@ -92,11 +93,21 @@ impl UnpackManager {
         Ok(())
     }
 
-    fn unpack_layer(&self, layer_manager: &LayerManager, unpack_dir: &Path, layer: &Layer) -> ImageManagerResult<()> {
+    fn unpack_layer(&self,
+                    layer_manager: &LayerManager,
+                    already_unpacked: &mut HashSet<ImageId>,
+                    unpack_folder: &Path,
+                    layer: &Layer) -> ImageManagerResult<()> {
+        if already_unpacked.contains(&layer.hash) {
+            return Err(ImageManagerError::SelfReferential);
+        }
+
+        already_unpacked.insert(layer.hash.clone());
+
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_hash = Reference::ImageId(parent_hash.clone());
             let parent_layer = layer_manager.get_layer(&parent_hash)?;
-            self.unpack_layer(layer_manager, unpack_dir, parent_layer)?;
+            self.unpack_layer(layer_manager, already_unpacked, unpack_folder, parent_layer)?;
         }
 
         let mut has_files = false;
@@ -105,7 +116,8 @@ impl UnpackManager {
                 LayerOperation::Image { hash } => {
                     self.unpack_layer(
                         layer_manager,
-                        unpack_dir,
+                        already_unpacked,
+                        unpack_folder,
                         layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
                     )?;
                 },
@@ -113,7 +125,7 @@ impl UnpackManager {
                     let abs_source_path = self.config.base_folder.join(source_path);
 
                     has_files = true;
-                    let destination_path = unpack_dir.join(path);
+                    let destination_path = unpack_folder.join(path);
                     self.printer.println(&format!("\t* Unpacking file {} -> {}", path, destination_path.to_str().unwrap()));
 
                     #[allow(unused_must_use)] {
@@ -154,7 +166,7 @@ impl UnpackManager {
                     self.printer.println(&format!("\t* Creating directory {}", path));
 
                     #[allow(unused_must_use)] {
-                        std::fs::create_dir_all(unpack_dir.join(path));
+                        std::fs::create_dir_all(unpack_folder.join(path));
                     }
                 },
             }
@@ -441,6 +453,44 @@ fn test_unpack_replace2() {
 
     assert!(unpack_result.is_ok());
     assert!(tmp_dir.join("unpack").join("file1.txt").exists());
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_dir);
+    }
+}
+
+#[test]
+fn test_unpack_self_reference() {
+    use std::str::FromStr;
+
+    use crate::helpers;
+    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::printing::{ConsolePrinter};
+
+    let tmp_dir = helpers::get_temp_folder();
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+
+    let printer = ConsolePrinter::new();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+
+    let hash = ImageId::from_str("3d197ee59b46d114379522e6f68340371f2f1bc1525cb4456caaf5b8430acea3").unwrap();
+    let layer = Layer {
+        parent_hash: None,
+        hash: hash.clone(),
+        operations: vec![LayerOperation::Image { hash: hash.clone() }],
+        created: SystemTime::now(),
+    };
+    layer_manager.add_layer(layer);
+
+    let unpack_result = unpack_manager.unpack(
+        &layer_manager,
+        &tmp_dir.join("unpack"),
+        &hash.clone().to_ref(),
+        false
+    );
+
+    assert!(unpack_result.is_err());
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);

@@ -19,6 +19,7 @@ pub enum ImageManagerError {
     RegistryError { error: RegistryError },
     FolderNotEmpty { path: String },
     NoRegistryDefined,
+    SelfReferential,
     OtherError { message: String }
 }
 
@@ -69,6 +70,9 @@ impl std::fmt::Display for ImageManagerError {
             },
             ImageManagerError::NoRegistryDefined => {
                 write!(f, "No registry defined")
+            }
+            ImageManagerError::SelfReferential => {
+                write!(f, "This layer refers to itself")
             }
             ImageManagerError::OtherError { message } => {
                 write!(f, "{}", message)
