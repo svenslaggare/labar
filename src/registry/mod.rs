@@ -291,10 +291,14 @@ fn create_image_manager(state: &AppState) -> ImageManager {
         EmptyPrinter::new()
     );
 
-    if image_manager.state_exists() {
-        image_manager.load_state().unwrap();
+    let result = if image_manager.state_exists() {
+        image_manager.load_state()
     } else {
-        image_manager.save_state().unwrap();
+        image_manager.save_state()
+    };
+
+    if let Err(err) = result {
+        println!("Failed loading state: {}", err);
     }
 
     image_manager
