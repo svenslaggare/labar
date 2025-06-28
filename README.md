@@ -9,10 +9,42 @@ This approach makes it easy to do incremental changes to the archives and re-use
 ## Building images
 Run the `labar build` command to build an image. Images are defined in _labarfiles_ similar to Docker files.
 
-The following definition would create an image that copies a file as `file1.txt`.
+The following definition would create an image that copies a file on the host into the image as `file1.txt`.
 ```
 COPY testdata/rawdata/file1.txt file1.txt
 ```
 
 ## Unpacking images
 To unpack the image (make the content available), use the `labar unpack` command. This will unpack the folder structure into a new folder, but the actual files are linked into new directory, leading to no extra space used.
+
+
+## Labar file reference
+Each operation creates its own layer. The following operations are supported:
+
+### COPY
+Copies a file from the build context into the image.
+
+**Examples**: 
+
+* `COPY data/test1.txt test1.txt`
+* `COPY --writable=yes data/test1.txt test1.txt`
+* `COPY --link=soft data/test1.txt test1.txt`
+
+**Arguments**:
+
+* writable (yes/no) - Makes the file writable. Default is no.
+* link (soft/hard) - Use soft or hard links. Default is hard.
+
+### MKDIR
+Creates a new directory in the image.
+
+**Examples**:
+
+* `MKDIR test`.
+
+### IMAGE
+Merge the refered to image into the current image.
+
+**Examples**:
+
+* `IMAGE test:latest`
