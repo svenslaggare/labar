@@ -1,4 +1,5 @@
 use std::collections::{BTreeSet, HashMap};
+use std::ops::Deref;
 use std::path::Path;
 
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
@@ -216,13 +217,20 @@ impl ImageManager {
 
     pub fn inspect(&self, reference: &Reference) -> ImageManagerResult<InspectResult> {
         let top_layer = self.get_layer(&reference)?;
+        let mut layers = Vec::new();
+        for layer in self.get_layers(&reference)? {
+            layers.push(InspectLayerResult {
+                layer,
+                size: self.layer_size(&layer.hash.clone().to_ref())?
+            });
+        }
 
         Ok(
             InspectResult {
                 top_layer,
                 image_tags: self.get_image_tags(reference)?,
                 size: self.image_size(reference)?,
-                layers: self.get_layers(&reference)?
+                layers
             }
         )
     }
@@ -342,11 +350,8 @@ impl ImageManager {
 
         let mut stack = Vec::new();
         stack.push(top_layer.hash.clone().to_ref());
-        while let Some(current) = stack.pop() {
-            self.printer.println(&format!("\t* Pushing layer: {}", current));
 
-            let layer = self.get_layer(&current)?;
-
+        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
                 stack.push(parent_hash.clone().to_ref());
             }
@@ -359,7 +364,12 @@ impl ImageManager {
                     _ => {}
                 }
             }
+        };
 
+        while let Some(current) = stack.pop() {
+            self.printer.println(&format!("\t* Pushing layer: {}", current));
+            let layer = self.get_layer(&current)?;
+            visit_layer(&mut stack, &layer);
             self.registry_manager.upload_layer(self.config(), registry, layer).await?;
         }
 
@@ -430,7 +440,20 @@ pub struct InspectResult<'a> {
     pub top_layer: &'a Layer,
     pub image_tags: Vec<ImageTag>,
     pub size: DataSize,
-    pub layers: Vec<&'a Layer>
+    pub layers: Vec<InspectLayerResult<'a>>
+}
+
+pub struct InspectLayerResult<'a> {
+    pub layer: &'a Layer,
+    pub size: DataSize
+}
+
+impl Deref for InspectLayerResult<'_> {
+    type Target = Layer;
+
+    fn deref(&self) -> &Self::Target {
+        self.layer
+    }
 }
 
 #[test]

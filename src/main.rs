@@ -250,11 +250,11 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 ]
             );
 
-            for layer in inspect_result.layers.iter() {
+            for layer in inspect_result.layers {
                 table_printer.add_row(vec![
                     layer.hash.to_string(),
                     layer.created_datetime().format("%Y-%m-%d %T").to_string(),
-                    image_manager.layer_size(&layer.hash.clone().to_ref()).map_err(|err| format!("{}", err))?.to_string(),
+                    layer.size.to_string(),
                 ]);
             }
 
