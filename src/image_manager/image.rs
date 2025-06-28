@@ -214,6 +214,19 @@ impl ImageManager {
         )
     }
 
+    pub fn inspect(&self, reference: &Reference) -> ImageManagerResult<InspectResult> {
+        let top_layer = self.get_layer(&reference)?;
+
+        Ok(
+            InspectResult {
+                top_layer,
+                image_tags: self.get_image_tags(reference)?,
+                size: self.image_size(reference)?,
+                layers: self.get_layers(&reference)?
+            }
+        )
+    }
+
     pub fn image_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
         self.layer_manager.size_of_reference(reference, true)
     }
@@ -411,6 +424,13 @@ impl Drop for ImageManager {
             self.save_state().unwrap();
         }
     }
+}
+
+pub struct InspectResult<'a> {
+    pub top_layer: &'a Layer,
+    pub image_tags: Vec<ImageTag>,
+    pub size: DataSize,
+    pub layers: Vec<&'a Layer>
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::time::SystemTime;
-
+use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::DataSize;
@@ -71,6 +71,10 @@ impl Layer {
             .map_err(|err| format!("{}", err))?;
 
         Ok(layer)
+    }
+
+    pub fn created_datetime(&self) -> DateTime<Local> {
+        self.created.into()
     }
 
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {

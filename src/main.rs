@@ -233,12 +233,12 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Inspect { reference } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let top_layer = image_manager.get_layer(&reference).map_err(|err| format!("{}", err))?;
-            let datetime: DateTime<Local> = top_layer.created.into();
-            println!("Image id: {}", top_layer.hash);
-            println!("Tags: {}", image_manager.get_image_tags(&reference).map_err(|err| format!("{}", err))?.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
-            println!("Created: {}", datetime.format("%Y-%m-%d %T"));
-            println!("Size: {}", image_manager.image_size(&reference).map_err(|err| format!("{}", err))?);
+            let inspect_result = image_manager.inspect(&reference).map_err(|err| format!("{}", err))?;
+
+            println!("Image id: {}", inspect_result.top_layer.hash);
+            println!("Tags: {}", inspect_result.image_tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
+            println!("Created: {}", inspect_result.top_layer.created_datetime().format("%Y-%m-%d %T"));
+            println!("Size: {}", inspect_result.size);
             println!();
             println!("Layers:");
 
@@ -250,11 +250,10 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 ]
             );
 
-            for layer in image_manager.get_layers(&reference).map_err(|err| format!("{}", err))? {
-                let datetime: DateTime<Local> = top_layer.created.into();
+            for layer in inspect_result.layers.iter() {
                 table_printer.add_row(vec![
                     layer.hash.to_string(),
-                    datetime.format("%Y-%m-%d %T").to_string(),
+                    layer.created_datetime().format("%Y-%m-%d %T").to_string(),
                     image_manager.layer_size(&layer.hash.clone().to_ref()).map_err(|err| format!("{}", err))?.to_string(),
                 ]);
             }
