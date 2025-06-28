@@ -69,6 +69,7 @@ impl RegistryManager {
             }
         }
 
+        // This will commit the layer to local file system
         tokio::fs::write(&manifest_file_path, serde_json::to_string_pretty(&layer)?.as_bytes()).await?;
         Ok(layer)
     }
