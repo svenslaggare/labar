@@ -1,4 +1,5 @@
 use std::fmt::{Display, Formatter};
+use std::ops::{Add, AddAssign};
 use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +49,20 @@ pub struct DataSize(pub usize);
 impl Display for DataSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:.2} MB", self.0 as f64 / 1024.0 / 1024.0)
+    }
+}
+
+impl Add for DataSize {
+    type Output = DataSize;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        DataSize(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign for DataSize {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
     }
 }
 

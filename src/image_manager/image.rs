@@ -224,28 +224,28 @@ impl ImageManager {
 
     fn internal_image_size(&self, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {
         let layer = self.layer_manager.get_layer(reference)?;
-        let mut total_size = 0;
+        let mut total_size = DataSize(0);
 
         if recursive {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                total_size += self.internal_image_size(&Reference::ImageId(parent_hash.clone()), true)?.0;
+                total_size += self.internal_image_size(&Reference::ImageId(parent_hash.clone()), true)?;
             }
         }
 
         for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { hash } => {
-                    total_size += self.internal_image_size(&Reference::ImageId(hash.clone()), true)?.0;
+                    total_size += self.internal_image_size(&Reference::ImageId(hash.clone()), true)?;
                 },
                 LayerOperation::File { source_path, .. } => {
                     let abs_source_path = self.config.base_folder.join(source_path);
-                    total_size += std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize;
+                    total_size += DataSize(std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
                 },
                 _ => {}
             }
         }
 
-        Ok(DataSize(total_size))
+        Ok(total_size)
     }
 
     pub fn list_content(&self, reference: &Reference) -> ImageManagerResult<Vec<String>> {
