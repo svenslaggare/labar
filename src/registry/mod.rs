@@ -39,7 +39,7 @@ impl RegistryConfig {
     }
 
     pub fn image_manager_config(&self) -> ImageManagerConfig {
-        ImageManagerConfig::with_base_dir(self.data_path.clone())
+        ImageManagerConfig::with_base_folder(self.data_path.clone())
     }
 }
 

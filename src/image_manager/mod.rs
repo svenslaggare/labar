@@ -87,7 +87,7 @@ impl ImageManagerConfig {
         }
     }
 
-    pub fn with_base_dir(base_folder: PathBuf) -> ImageManagerConfig {
+    pub fn with_base_folder(base_folder: PathBuf) -> ImageManagerConfig {
         ImageManagerConfig {
             base_folder
         }

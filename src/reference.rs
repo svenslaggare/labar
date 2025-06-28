@@ -76,6 +76,12 @@ impl Display for ImageId {
     }
 }
 
+impl ImageId {
+    pub fn to_ref(self) -> Reference {
+        Reference::ImageId(self)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ImageTag {
     registry: Option<String>,

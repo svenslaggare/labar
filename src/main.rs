@@ -84,6 +84,11 @@ enum CommandLineInput {
         #[structopt(name="reference", help="The reference to list for")]
         reference: Reference
     },
+    #[structopt(about="Inspects an image")]
+    Inspect {
+        #[structopt(name="tag", help="The image to inspect")]
+        reference: Reference
+    },
     #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
 
@@ -224,6 +229,37 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             for path in content {
                 println!("{}", path);
             }
+        }
+        CommandLineInput::Inspect { reference } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+
+            let top_layer = image_manager.get_layer(&reference).map_err(|err| format!("{}", err))?;
+            let datetime: DateTime<Local> = top_layer.created.into();
+            println!("Image id: {}", top_layer.hash);
+            println!("Tags: {}", image_manager.get_image_tags(&reference).map_err(|err| format!("{}", err))?.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
+            println!("Created: {}", datetime.format("%Y-%m-%d %T"));
+            println!("Size: {}", image_manager.image_size(&reference).map_err(|err| format!("{}", err))?);
+            println!();
+            println!("Layers:");
+
+            let mut table_printer = TablePrinter::new(
+                vec![
+                    "IMAGE ID".to_owned(),
+                    "CREATED".to_owned(),
+                    "SIZE".to_owned()
+                ]
+            );
+
+            for layer in image_manager.get_layers(&reference).map_err(|err| format!("{}", err))? {
+                let datetime: DateTime<Local> = top_layer.created.into();
+                table_printer.add_row(vec![
+                    layer.hash.to_string(),
+                    datetime.format("%Y-%m-%d %T").to_string(),
+                    image_manager.layer_size(&layer.hash.clone().to_ref()).map_err(|err| format!("{}", err))?.to_string(),
+                ]);
+            }
+
+            table_printer.print();
         }
         CommandLineInput::ListUnpackings {} => {
             let image_manager = create_image_manager(&file_config, printer.clone());

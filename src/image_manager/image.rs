@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_definition::ImageDefinition;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, State};
@@ -214,27 +215,33 @@ impl ImageManager {
     }
 
     pub fn image_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
-        let mut stack = Vec::new();
-        stack.push(reference.clone());
+        self.internal_image_size(reference, true)
+    }
 
+    pub fn layer_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
+        self.internal_image_size(reference, false)
+    }
+
+    fn internal_image_size(&self, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {
+        let layer = self.layer_manager.get_layer(reference)?;
         let mut total_size = 0;
-        while let Some(current) = stack.pop() {
-            let layer = self.layer_manager.get_layer(&current)?;
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(Reference::ImageId(parent_hash.clone()));
-            }
 
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(Reference::ImageId(hash.clone()));
-                    },
-                    LayerOperation::File { source_path, .. } => {
-                        let abs_source_path = self.config.base_folder.join(source_path);
-                        total_size += std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize;
-                    },
-                    _ => {}
-                }
+        if recursive {
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                total_size += self.internal_image_size(&Reference::ImageId(parent_hash.clone()), true)?.0;
+            }
+        }
+
+        for operation in &layer.operations {
+            match operation {
+                LayerOperation::Image { hash } => {
+                    total_size += self.internal_image_size(&Reference::ImageId(hash.clone()), true)?.0;
+                },
+                LayerOperation::File { source_path, .. } => {
+                    let abs_source_path = self.config.base_folder.join(source_path);
+                    total_size += std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize;
+                },
+                _ => {}
             }
         }
 
@@ -380,6 +387,22 @@ impl ImageManager {
         self.layer_manager.get_layer(reference)
     }
 
+    pub fn get_layers(&self, reference: &Reference) -> ImageManagerResult<Vec<&Layer>> {
+        let mut stack = vec![self.layer_manager.fully_qualify_reference(reference)?.to_ref()];
+
+        let mut layers = Vec::new();
+        while let Some(current) = stack.pop() {
+            let layer = self.get_layer(&current)?;
+            layers.push(layer);
+
+            if let Some(parent) = layer.parent_hash.as_ref() {
+                stack.push(parent.clone().to_ref());
+            }
+        }
+
+        Ok(layers)
+    }
+
     pub fn add_layer(&mut self, layer: Layer) {
         self.layer_manager.add_layer(layer);
         self.changed = true;
@@ -387,6 +410,19 @@ impl ImageManager {
 
     pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<&Image> {
         self.layer_manager.get_image(tag)
+    }
+
+    pub fn get_image_tags(&self, reference: &Reference) -> ImageManagerResult<Vec<ImageTag>> {
+        let image_id = self.layer_manager.fully_qualify_reference(reference)?;
+
+        let mut tags = Vec::new();
+        for image in self.layer_manager.images_iter() {
+            if image.hash == image_id {
+                tags.push(image.tag.clone())
+            }
+        }
+
+        Ok(tags)
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) {
@@ -413,7 +449,7 @@ fn test_build() {
     let tmp_dir = helpers::get_temp_folder();
 
     {
-        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
@@ -455,7 +491,7 @@ fn test_remove_image1() {
     let tmp_dir = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_dir).unwrap();
 
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -489,7 +525,7 @@ fn test_remove_image2() {
     let tmp_dir = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_dir).unwrap();
 
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -537,7 +573,7 @@ async fn test_push_pull() {
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     {
-        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
@@ -591,7 +627,7 @@ fn test_list_content() {
     let tmp_dir = helpers::get_temp_folder();
 
     {
-        let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 

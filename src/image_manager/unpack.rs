@@ -239,7 +239,7 @@ fn test_unpack() {
     use crate::image_manager::printing::{ConsolePrinter};
 
     let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
@@ -279,7 +279,7 @@ fn test_unpack_exist() {
     use crate::image_manager::printing::{ConsolePrinter};
 
     let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
@@ -326,7 +326,7 @@ fn test_remove_unpack() {
     use crate::image_manager::printing::{ConsolePrinter};
 
     let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
@@ -372,7 +372,7 @@ fn test_unpack_replace1() {
     use crate::image_manager::printing::{ConsolePrinter};
 
     let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
@@ -419,7 +419,7 @@ fn test_unpack_replace2() {
     use crate::image_manager::printing::{ConsolePrinter};
 
     let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_dir(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
     let mut layer_manager = LayerManager::new();
