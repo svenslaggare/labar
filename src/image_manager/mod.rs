@@ -11,6 +11,7 @@ mod image;
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
+    LayerNotFound { image_id: ImageId },
     ImageNotFound { reference: Reference },
     FileIOError { message: String },
     UnpackingExist { path: String },
@@ -44,6 +45,9 @@ impl std::fmt::Display for ImageManagerError {
         match self {
             ImageManagerError::ImageParser { error } => {
                 write!(f, "Image parser: {}", error)
+            }
+            ImageManagerError::LayerNotFound { image_id } => {
+                write!(f, "Could not find the layer: {}.", image_id)
             }
             ImageManagerError::ImageNotFound { reference } => {
                 write!(f, "Could not find the image: {}.", reference)

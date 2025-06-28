@@ -191,7 +191,7 @@ fn test_build() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -226,7 +226,7 @@ fn test_build_with_cache() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer.clone());
 
     // Build first time
@@ -272,7 +272,7 @@ fn test_build_with_image_ref() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer);
 
     let image_definition = ImageDefinition::parse_without_context(

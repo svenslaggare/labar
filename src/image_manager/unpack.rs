@@ -242,7 +242,7 @@ fn test_unpack() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
@@ -282,7 +282,7 @@ fn test_unpack_exist() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
@@ -329,7 +329,7 @@ fn test_remove_unpack() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
@@ -375,7 +375,7 @@ fn test_unpack_replace1() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 
@@ -422,7 +422,7 @@ fn test_unpack_replace2() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new();
+    let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
 

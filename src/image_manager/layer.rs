@@ -1,17 +1,20 @@
 use std::collections::{HashMap, BTreeSet};
 
-use crate::image_manager::{ImageManagerError, ImageManagerResult};
+use crate::helpers::DataSize;
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image::{Layer, Image, LayerOperation};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct LayerManager {
+    config: ImageManagerConfig,
     pub layers: HashMap<ImageId, Layer>,
     images: HashMap<ImageTag, Image>,
 }
 
 impl LayerManager {
-    pub fn new() -> LayerManager {
+    pub fn new(config: ImageManagerConfig) -> LayerManager {
         LayerManager {
+            config,
             layers: HashMap::new(),
             images: HashMap::new()
         }
@@ -41,6 +44,10 @@ impl LayerManager {
             .ok_or_else(|| ImageManagerError::ImageNotFound { reference: reference.clone() })
     }
 
+    fn get_layer_by_hash(&self, hash: &ImageId) -> ImageManagerResult<&Layer> {
+        self.layers.get(hash).ok_or_else(|| ImageManagerError::LayerNotFound { image_id: hash.clone() })
+    }
+
     pub fn layer_exist(&self, hash: &ImageId) -> bool {
         self.layers.contains_key(hash)
     }
@@ -49,17 +56,17 @@ impl LayerManager {
         self.layers.insert(layer.hash.clone(), layer);
     }
 
-    pub fn find_used_layers(&self, hash: &ImageId, used_layers: &mut BTreeSet<ImageId>) {
+    pub fn find_used_layers(&self, hash: &ImageId, used_layers: &mut BTreeSet<ImageId>) -> ImageManagerResult<()> {
         used_layers.insert(hash.clone());
-        let layer = self.layers.get(hash).unwrap();
+        let layer = self.get_layer_by_hash(hash)?;
 
         for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { hash } => {
                     used_layers.insert(hash.clone());
 
-                    if let Some(parent_hash) = self.layers.get(&hash).unwrap().parent_hash.as_ref() {
-                        self.find_used_layers(&parent_hash, used_layers);
+                    if let Some(parent_hash) = self.get_layer_by_hash(hash)?.parent_hash.as_ref() {
+                        self.find_used_layers(&parent_hash, used_layers)?;
                     }
                 },
                 _ => {}
@@ -67,8 +74,10 @@ impl LayerManager {
         }
 
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
-            self.find_used_layers(&parent_hash, used_layers);
+            self.find_used_layers(&parent_hash, used_layers)?;
         }
+
+        Ok(())
     }
 
     pub fn images_iter(&self) -> impl Iterator<Item=&Image> {
@@ -98,5 +107,31 @@ impl LayerManager {
 
     pub fn remove_image_tag(&mut self, tag: &ImageTag) -> Option<Image> {
         self.images.remove(&tag)
+    }
+
+    pub fn size_of_reference(&self, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {
+        let layer = self.get_layer(reference)?;
+        let mut total_size = DataSize(0);
+
+        if recursive {
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                total_size += self.size_of_reference(&parent_hash.clone().to_ref(), true)?;
+            }
+        }
+
+        for operation in &layer.operations {
+            match operation {
+                LayerOperation::Image { hash } => {
+                    total_size += self.size_of_reference(&hash.clone().to_ref(), true)?;
+                },
+                LayerOperation::File { source_path, .. } => {
+                    let abs_source_path = self.config.base_folder.join(source_path);
+                    total_size += DataSize(std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
+                },
+                _ => {}
+            }
+        }
+
+        Ok(total_size)
     }
 }

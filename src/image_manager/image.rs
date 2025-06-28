@@ -34,7 +34,7 @@ impl ImageManager {
             printer: printer.clone(),
             changed: false,
 
-            layer_manager: LayerManager::new(),
+            layer_manager: LayerManager::new(config.clone()),
             build_manager: BuildManager::new(config.clone(), printer.clone()),
             unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
             registry_manager: RegistryManager::new(printer.clone()),
@@ -125,7 +125,7 @@ impl ImageManager {
 
         let mut used_layers = BTreeSet::new();
         for hash in self.get_hard_references() {
-            self.layer_manager.find_used_layers(hash, &mut used_layers);
+            self.layer_manager.find_used_layers(hash, &mut used_layers)?;
         }
 
         let mut tmp_layers = HashMap::new();
@@ -193,7 +193,7 @@ impl ImageManager {
         let mut images = Vec::new();
 
         for image in self.layer_manager.images_iter() {
-            images.push(self.get_image_metadata(&image, &Reference::ImageId(image.hash.clone()))?);
+            images.push(self.get_image_metadata(&image, &image.hash.clone().to_ref())?);
         }
 
         Ok(images)
@@ -215,37 +215,11 @@ impl ImageManager {
     }
 
     pub fn image_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
-        self.internal_image_size(reference, true)
+        self.layer_manager.size_of_reference(reference, true)
     }
 
     pub fn layer_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {
-        self.internal_image_size(reference, false)
-    }
-
-    fn internal_image_size(&self, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {
-        let layer = self.layer_manager.get_layer(reference)?;
-        let mut total_size = DataSize(0);
-
-        if recursive {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                total_size += self.internal_image_size(&Reference::ImageId(parent_hash.clone()), true)?;
-            }
-        }
-
-        for operation in &layer.operations {
-            match operation {
-                LayerOperation::Image { hash } => {
-                    total_size += self.internal_image_size(&Reference::ImageId(hash.clone()), true)?;
-                },
-                LayerOperation::File { source_path, .. } => {
-                    let abs_source_path = self.config.base_folder.join(source_path);
-                    total_size += DataSize(std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
-                },
-                _ => {}
-            }
-        }
-
-        Ok(total_size)
+        self.layer_manager.size_of_reference(reference, false)
     }
 
     pub fn list_content(&self, reference: &Reference) -> ImageManagerResult<Vec<String>> {
@@ -257,14 +231,14 @@ impl ImageManager {
         while let Some(current) = stack.pop() {
             let layer = self.layer_manager.get_layer(&current)?;
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(Reference::ImageId(parent_hash.clone()));
+                stack.push(parent_hash.clone().to_ref());
             }
 
             let mut local_files = Vec::new();
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(Reference::ImageId(hash.clone()));
+                        stack.push(hash.clone().to_ref());
                     }
                     LayerOperation::File { path, ..  } => {
                         local_files.push(path.clone());
@@ -302,17 +276,17 @@ impl ImageManager {
         let image_metadata = self.registry_manager.resolve_image(registry, tag).await?;
 
         let mut stack = Vec::new();
-        stack.push(Reference::ImageId(image_metadata.image.hash.clone()));
+        stack.push(image_metadata.image.hash.clone().to_ref());
 
         let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(Reference::ImageId(parent_hash.clone()));
+                stack.push(parent_hash.clone().to_ref());
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(Reference::ImageId(hash.clone()));
+                        stack.push(hash.clone().to_ref());
                     },
                     _ => {}
                 }
@@ -354,20 +328,20 @@ impl ImageManager {
         let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
 
         let mut stack = Vec::new();
-        stack.push(Reference::ImageId(top_layer.hash.clone()));
+        stack.push(top_layer.hash.clone().to_ref());
         while let Some(current) = stack.pop() {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
 
             let layer = self.get_layer(&current)?;
 
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(Reference::ImageId(parent_hash.clone()));
+                stack.push(parent_hash.clone().to_ref());
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(Reference::ImageId(hash.clone()));
+                        stack.push(hash.clone().to_ref());
                     },
                     _ => {}
                 }
