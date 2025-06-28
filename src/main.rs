@@ -60,7 +60,9 @@ enum CommandLineInput {
         #[structopt(long, help="The build context")]
         context: Option<PathBuf>,
         #[structopt(long, help="The build arguments on format key=value")]
-        arguments: Vec<String>
+        arguments: Vec<String>,
+        #[structopt(long, help="Forces a build, ignoring previously cached layers")]
+        force: bool,
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
@@ -182,7 +184,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
     let printer = ConsolePrinter::new();
 
     match command_line_input {
-        CommandLineInput::Build { file, tag, context, arguments } => {
+        CommandLineInput::Build { file, tag, context, arguments, force } => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
@@ -198,7 +200,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
             let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
             let context = context.unwrap_or_else(|| std::env::current_dir().unwrap());
-            let image = image_manager.build_image(&context, image_definition, &tag).map_err(|err| format!("{}", err))?;
+            let image = image_manager.build_image(&context, image_definition, &tag, force).map_err(|err| format!("{}", err))?;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
         }

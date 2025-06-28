@@ -262,7 +262,7 @@ fn test_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
@@ -302,7 +302,7 @@ fn test_unpack_exist() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -349,7 +349,7 @@ fn test_remove_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -395,7 +395,7 @@ fn test_unpack_replace1() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -442,7 +442,7 @@ fn test_unpack_replace2() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()).is_ok());
+    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,

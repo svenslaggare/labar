@@ -27,7 +27,8 @@ impl BuildManager {
                        layer_manager: &mut LayerManager,
                        build_context: &Path,
                        image_definition: ImageDefinition,
-                       tag: &ImageTag) -> ImageManagerResult<Image> {
+                       tag: &ImageTag,
+                       force: bool) -> ImageManagerResult<Image> {
         let mut parent_hash: Option<ImageId> = None;
 
         if let Some(base_image_reference) = image_definition.base_image {
@@ -47,7 +48,7 @@ impl BuildManager {
             let layer = self.create_layer(layer_manager, layer_definition, &parent_hash)?;
             let hash = layer.hash.clone();
 
-            self.build_layer(layer_manager, layer)?;
+            self.build_layer(layer_manager, layer, force)?;
 
             parent_hash = Some(hash);
         }
@@ -58,8 +59,8 @@ impl BuildManager {
         Ok(image)
     }
 
-    fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer) -> ImageManagerResult<bool> {
-        if layer_manager.layer_exist(&layer.hash) {
+    fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer, force: bool) -> ImageManagerResult<bool> {
+        if !force && layer_manager.layer_exist(&layer.hash) {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
         }
@@ -198,7 +199,13 @@ fn test_build() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
+    let result = build_manager.build_image(
+        &mut layer_manager,
+        Path::new(""),
+        image_definition,
+        &ImageTag::from_str("test").unwrap(),
+        false
+    );
     assert!(result.is_ok());
     let result = result.unwrap();
 
@@ -234,7 +241,13 @@ fn test_build_with_cache() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let first_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
+    let first_result = build_manager.build_image(
+        &mut layer_manager,
+        Path::new(""),
+        image_definition,
+        &ImageTag::from_str("test").unwrap(),
+        false
+    );
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
 
@@ -243,7 +256,13 @@ fn test_build_with_cache() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let second_result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap());
+    let second_result = build_manager.build_image(
+        &mut layer_manager,
+        Path::new(""),
+        image_definition,
+        &ImageTag::from_str("test").unwrap(),
+        false
+    );
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
 
@@ -279,14 +298,24 @@ fn test_build_with_image_ref() {
         &std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()
     ).unwrap();
     build_manager.build_image(
-        &mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap()
+        &mut layer_manager,
+        Path::new(""),
+        image_definition,
+        &ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    let result = build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("that").unwrap());
+    let result = build_manager.build_image(
+        &mut layer_manager,
+        Path::new(""),
+        image_definition,
+        &ImageTag::from_str("that").unwrap(),
+        false
+    );
     assert!(result.is_ok());
     let result = result.unwrap();
 
