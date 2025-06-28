@@ -103,7 +103,7 @@ impl BuildManager {
             serde_json::to_string_pretty(&layer)
                 .map_err(|err|
                     ImageManagerError::OtherError {
-                        message: format!("{}", err)
+                        message: format!("Failed to write manifest due to: {}", err)
                     }
                 )?
         )?;
