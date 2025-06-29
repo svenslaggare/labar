@@ -27,6 +27,7 @@ pub struct FileConfig {
     default_registry: Option<String>,
     registry_username: Option<String>,
     registry_password: Option<String>,
+    registry_use_ssl: bool
 }
 
 impl FileConfig {
@@ -54,6 +55,7 @@ impl Default for FileConfig {
             default_registry: None,
             registry_username: None,
             registry_password: None,
+            registry_use_ssl: false
         }
     }
 }
@@ -161,6 +163,8 @@ fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageM
     if let Some(registry_password) = file_config.registry_password.as_ref() {
         config.registry_password = registry_password.clone();
     }
+
+    config.registry_use_ssl = file_config.registry_use_ssl;
 
     ImageManager::from_state_file(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()))
 }
@@ -356,6 +360,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
                 println!("registry_username: {}", file_config.registry_username.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
                 println!("registry_password: {}", file_config.registry_password.as_ref().map(|x| "*".repeat(x.len())).unwrap_or("N/A".to_owned()));
+                println!("registry_use_ssl: {}", file_config.registry_use_ssl);
             }
 
             if let Some(edit) = edit {
@@ -380,6 +385,9 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                         }
                         "registry_password" => {
                             new_file_config.registry_password = value_opt;
+                        }
+                        "registry_use_ssl" => {
+                            new_file_config.registry_use_ssl = value == "yes" || value == "true";
                         }
                         _ => {
                             return Err(format!("Invalid key '{}'", key));

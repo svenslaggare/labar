@@ -65,7 +65,7 @@ To configure the registry, use the sample TOML configuration file below:
 data_path = "<HOME>/.labar-registry"
 address = "0.0.0.0:3000"
 users = [
-    ["guest", "84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec", ["List", "Download", "Upload"]]
+    ["guest", "84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec", ["List", "Download", "Upload", "Delete"]]
 ]
 ```
 

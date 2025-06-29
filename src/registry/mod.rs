@@ -8,15 +8,16 @@ use serde::Deserialize;
 use serde_json::json;
 use serde::de::DeserializeOwned;
 
+use futures::StreamExt;
+use tokio_util::io::ReaderStream;
+use tokio::io::AsyncWriteExt;
+
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::{Path, State, Request, FromRequest};
 use axum::routing::{delete, get, post};
-
-use futures::StreamExt;
-use tokio_util::io::ReaderStream;
-use tokio::io::AsyncWriteExt;
+use axum_server::tls_rustls::RustlsConfig;
 
 pub mod model;
 pub mod auth;
@@ -31,7 +32,14 @@ use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerManifest
 #[derive(Debug, Deserialize)]
 pub struct RegistryConfig {
     pub data_path: PathBuf,
+
     pub address: SocketAddr,
+
+    #[serde(default)]
+    pub use_ssl: bool,
+    pub ssl_cert_path: Option<PathBuf>,
+    pub ssl_key_path: Option<PathBuf>,
+
     #[serde(default)]
     pub users: UsersSpec
 }
@@ -48,6 +56,17 @@ impl RegistryConfig {
 }
 
 pub async fn run(config: RegistryConfig) {
+    let tls_config = if config.use_ssl {
+        Some(
+            RustlsConfig::from_pem_chain_file(
+                config.ssl_cert_path.as_ref().expect("Specify ssl_cert_path argument."),
+                config.ssl_key_path.as_ref().expect("Specify ssl_key_path argument."),
+            ).await.unwrap()
+        )
+    } else {
+        None
+    };
+
     let state = AppState::new(config);
 
     let app = Router::new()
@@ -62,8 +81,17 @@ pub async fn run(config: RegistryConfig) {
         .with_state(state.clone())
     ;
 
-    let listener = tokio::net::TcpListener::bind(state.config.address).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    if let Some(tls_config) = tls_config {
+        axum_server::bind_rustls(state.config.address, tls_config)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    } else {
+        axum_server::bind(state.config.address)
+            .serve(app.into_make_service())
+            .await
+            .unwrap();
+    }
 }
 
 pub struct AppState {

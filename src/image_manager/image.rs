@@ -625,11 +625,14 @@ fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &P
     RegistryConfig {
         data_path: tmp_registry_folder.to_path_buf(),
         address,
+        use_ssl: false,
+        ssl_cert_path: None,
+        ssl_key_path: None,
         users: vec![
             (
                 "guest".to_owned(),
                 crate::registry::auth::create_password_hash("guest"),
-                vec![AccessRight::List, AccessRight::Download, AccessRight::Upload]
+                vec![AccessRight::List, AccessRight::Download, AccessRight::Upload, AccessRight::Delete]
             )
         ]
     }

@@ -22,7 +22,9 @@ impl RegistryManager {
         RegistryManager {
             config,
             printer,
-            http_client: Client::new()
+            http_client: Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build().unwrap(),
         }
     }
 
@@ -146,17 +148,25 @@ impl RegistryManager {
     }
 
     fn build_get_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let full_url = format!("http://{}/{}", registry, url);
+        let full_url = format!("{}://{}/{}", self.http_mode(), registry, url);
         self.http_client.
             get(full_url)
             .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
     }
 
     fn build_post_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let full_url = format!("http://{}/{}", registry, url);
+        let full_url = format!("{}://{}/{}", self.http_mode(), registry, url);
         self.http_client
             .post(full_url)
             .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
+    }
+
+    fn http_mode(&self) -> &str {
+        if self.config.registry_use_ssl {
+            "https"
+        } else {
+            "http"
+        }
     }
 }
 
