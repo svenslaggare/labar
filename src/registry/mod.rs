@@ -99,7 +99,7 @@ async fn set_image(State(state): State<Arc<AppState>>,
 
     let spec: ImageSpec = decode_json(request).await?;
 
-    let _lock = create_write_lock(&state);
+    let _lock = create_write_lock(&state).await;
     let mut image_manager = create_image_manager(&state, &token);
 
     image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
@@ -173,7 +173,7 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
 
     let layer: Layer = decode_json(request).await?;
 
-    let _lock = create_write_lock(&state);
+    let _lock = create_write_lock(&state).await;
     let mut image_manager = create_image_manager(&state, &token);
 
     if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
@@ -207,7 +207,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                            request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
 
-    let _lock = create_write_lock(&state);
+    let _lock = create_write_lock(&state).await;
     let image_manager = create_image_manager(&state, &token);
 
     let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
@@ -240,8 +240,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     Err(AppError::LayerFileNotFound)
 }
 
-fn create_write_lock(state: &AppState) -> FileLock {
-    FileLock::new(state.config.image_manager_config().base_folder().join("write_lock"))
+async fn create_write_lock(state: &AppState) -> FileLock {
+    FileLock::new_async(state.config.image_manager_config().base_folder().join("write_lock")).await
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
