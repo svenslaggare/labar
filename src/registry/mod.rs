@@ -59,7 +59,9 @@ impl RegistryConfig {
 }
 
 pub async fn run(config: RegistryConfig) {
-    setup_logging().unwrap();
+    if let Err(err) = setup_logging() {
+        println!("Failed to setting up logging: {}", err);
+    }
 
     let tls_config = if config.use_ssl {
         Some(
