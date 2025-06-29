@@ -289,12 +289,19 @@ impl ImageManager {
         Ok(images)
     }
 
-    pub async fn pull(&mut self, tag: &ImageTag) -> ImageManagerResult<Image> {
+    pub async fn pull(&mut self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<Image> {
+        let mut tag = tag.clone();
+        if tag.registry().is_none() {
+            if let Some(default_registry) = default_registry {
+                tag = tag.set_registry(default_registry);
+            }
+        }
+
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
 
         self.printer.println(&format!("Pulling image {}", tag));
 
-        let image_metadata = self.registry_manager.resolve_image(registry, tag).await?;
+        let image_metadata = self.registry_manager.resolve_image(registry, &tag).await?;
 
         let mut stack = Vec::new();
         stack.push(image_metadata.image.hash.clone().to_ref());
@@ -341,12 +348,19 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub async fn push(&self, tag: &ImageTag) -> ImageManagerResult<()> {
+    pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<()> {
+        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
+
+        let mut tag = tag.clone();
+        if tag.registry().is_none() {
+            if let Some(default_registry) = default_registry {
+                tag = tag.set_registry(default_registry);
+            }
+        }
+
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
 
         self.printer.println(&format!("Pushing image {}", tag));
-
-        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
 
         let mut stack = Vec::new();
         stack.push(top_layer.hash.clone().to_ref());
@@ -373,7 +387,7 @@ impl ImageManager {
             self.registry_manager.upload_layer(self.config(), registry, layer).await?;
         }
 
-        self.registry_manager.upload_image(registry, &top_layer.hash, tag).await?;
+        self.registry_manager.upload_image(registry, &top_layer.hash, &tag).await?;
 
         self.printer.println("");
 
@@ -634,7 +648,7 @@ async fn test_push_pull() {
         let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
 
         // Push
-        let push_result = image_manager.push(&image.tag).await;
+        let push_result = image_manager.push(&image.tag, None).await;
         assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
 
         // List remote
@@ -648,7 +662,7 @@ async fn test_push_pull() {
         assert!(image_manager.remove_image(&image.tag).is_ok());
 
         // Pull
-        let pull_result = image_manager.pull(&image.tag).await;
+        let pull_result = image_manager.pull(&image.tag, None).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
@@ -708,7 +722,7 @@ async fn test_push_pull_with_ref() {
         let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
 
         // Push
-        let push_result = image_manager.push(&image.tag).await;
+        let push_result = image_manager.push(&image.tag, None).await;
         assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
 
         // List remote
@@ -723,7 +737,7 @@ async fn test_push_pull_with_ref() {
         assert!(image_manager.remove_image(&image_referred.tag).is_ok());
 
         // Pull
-        let pull_result = image_manager.pull(&image.tag).await;
+        let pull_result = image_manager.pull(&image.tag, None).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);

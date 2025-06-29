@@ -28,6 +28,12 @@ pub struct FileConfig {
 }
 
 impl FileConfig {
+    pub fn default_registry(&self) -> Option<&str> {
+        self.default_registry.as_ref().map(|x| x.as_str())
+    }
+}
+
+impl FileConfig {
     pub fn from_file(path: &Path) -> Result<FileConfig, String> {
         let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
         toml::from_str(&content).map_err(|err| format!("{}", err))
@@ -315,28 +321,12 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Push { tag } => {
             let _write_lock = create_write_lock();
             let image_manager = create_image_manager(&file_config, printer.clone());
-
-            let mut tag = tag;
-            if tag.registry().is_none() {
-                if let Some(default_registry) = file_config.default_registry.as_ref() {
-                    tag = tag.set_registry(default_registry);
-                }
-            }
-
-            image_manager.push(&tag).await.map_err(|err| format!("{}", err))?;
+            image_manager.push(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::Pull { tag } => {
             let _write_lock = create_write_lock();
             let mut image_manager = create_image_manager(&file_config, printer.clone());
-
-            let mut tag = tag;
-            if tag.registry().is_none() {
-                if let Some(default_registry) = file_config.default_registry.as_ref() {
-                    tag = tag.set_registry(default_registry);
-                }
-            }
-
-            image_manager.pull(&tag).await.map_err(|err| format!("{}", err))?;
+            image_manager.pull(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::ListImagesRegistry { registry } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
