@@ -191,7 +191,7 @@ fn print_images(images: &Vec<ImageMetadata>) {
             metadata.image.tag.full_repository(),
             metadata.image.tag.tag().to_owned(),
             metadata.image.hash.to_string(),
-            created.format("%Y-%m-%d %T").to_string(),
+            created.format(DATE_FORMAT).to_string(),
             metadata.size.to_string()
         ]);
     }
@@ -258,7 +258,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             println!("Image id: {}", inspect_result.top_layer.hash);
             println!("Tags: {}", inspect_result.image_tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
-            println!("Created: {}", inspect_result.top_layer.created_datetime().format("%Y-%m-%d %T"));
+            println!("Created: {}", inspect_result.top_layer.created_datetime().format(DATE_FORMAT));
             println!("Size: {}", inspect_result.size);
             println!();
             println!("Layers:");
@@ -274,7 +274,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             for layer in inspect_result.layers {
                 table_printer.add_row(vec![
                     layer.hash.to_string(),
-                    layer.created_datetime().format("%Y-%m-%d %T").to_string(),
+                    layer.created_datetime().format(DATE_FORMAT).to_string(),
                     layer.size.to_string(),
                 ]);
             }
@@ -307,7 +307,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     unpacking.destination.clone(),
                     image_tag.map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
                     unpacking.hash.to_string(),
-                    datetime.format("%Y-%m-%d %T").to_string()
+                    datetime.format(DATE_FORMAT).to_string()
                 ]);
             }
 
@@ -422,6 +422,8 @@ async fn main() -> Result<(), String> {
 fn get_config_file() -> PathBuf {
     dirs::home_dir().unwrap().join(".labar").join("config.toml")
 }
+
+const DATE_FORMAT: &str = "%Y-%m-%d %T";
 
 fn generate_completions() -> bool {
     if std::env::args().skip(1).next() == Some("generate-completions".to_owned()) {
