@@ -17,7 +17,6 @@ COPY testdata/rawdata/file1.txt file1.txt
 ## Unpacking images
 To unpack the image (make the content available), use the `labar unpack` command. This will unpack the folder structure into a new folder, but the actual files are linked into new directory, leading to no extra space used.
 
-
 ## Labar file reference
 Each operation creates its own layer. The following operations are supported:
 
@@ -48,3 +47,17 @@ Merge the refered to image into the current image.
 **Examples**:
 
 * `IMAGE test:latest`
+
+## Registry
+To distribute images, labar uses an HTTP based registry. This can be started using `labar run-registry` command.
+
+A simple TOML configuration file below:
+```
+data_path = "<HOME>/.labar-registry"
+address = "0.0.0.0:3000"
+users = [
+    ["guest", "84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec", ["List", "Download", "Upload"]]
+]
+```
+
+The specified password is a SHA256 hash of the actual password.
