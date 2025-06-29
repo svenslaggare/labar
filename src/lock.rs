@@ -48,13 +48,7 @@ impl FileLock {
                     let mut content = String::new();
                     if let Ok(_) = lock_file.read_to_string(&mut content) {
                         if let Ok(pid) = u32::from_str(&content) {
-                            let dead = if let Some(process) = self.system.process(Pid::from_u32(pid)) {
-                                process.status() == ProcessStatus::Run
-                            } else {
-                                true
-                            };
-
-                            if dead {
+                            if self.is_dead(pid) {
                                 #[allow(unused_must_use)] {
                                     std::fs::remove_file(&self.path);
                                 }
@@ -106,13 +100,7 @@ impl FileLock {
                     let mut content = String::new();
                     if let Ok(_) = lock_file.read_to_string(&mut content).await {
                         if let Ok(pid) = u32::from_str(&content) {
-                            let dead = if let Some(process) = self.system.process(Pid::from_u32(pid)) {
-                                process.status() == ProcessStatus::Run
-                            } else {
-                                true
-                            };
-
-                            if dead {
+                            if self.is_dead(pid) {
                                 #[allow(unused_must_use)] {
                                     tokio::fs::remove_file(&self.path).await;
                                 }
@@ -148,6 +136,14 @@ impl FileLock {
                     }
                 }
             }
+        }
+    }
+
+    fn is_dead(&self, pid: u32) -> bool {
+         if let Some(process) = self.system.process(Pid::from_u32(pid)) {
+            process.status() == ProcessStatus::Run
+        } else {
+            true
         }
     }
 }
