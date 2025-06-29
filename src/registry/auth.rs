@@ -3,6 +3,8 @@ use std::collections::{HashMap, HashSet};
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use sha2::{Digest, Sha256};
+use log::info;
+
 use serde::Deserialize;
 
 use axum::extract::Request;
@@ -74,6 +76,7 @@ pub fn check_access_right(access_provider: &(dyn AuthProvider + Send + Sync),
     if internal(access_provider, request, access_right)? {
         Ok(AuthToken)
     } else {
+        info!("Invalid auth specified.");
         Err(AppError::Unauthorized)
     }
 }

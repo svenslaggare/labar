@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::str::FromStr;
 
+use chrono::Local;
+use log::info;
+
 use serde::Deserialize;
 use serde_json::json;
 use serde::de::DeserializeOwned;
@@ -56,6 +59,8 @@ impl RegistryConfig {
 }
 
 pub async fn run(config: RegistryConfig) {
+    setup_logging().unwrap();
+
     let tls_config = if config.use_ssl {
         Some(
             RustlsConfig::from_pem_chain_file(
@@ -82,11 +87,13 @@ pub async fn run(config: RegistryConfig) {
     ;
 
     if let Some(tls_config) = tls_config {
+        info!("Running https://{}", state.config.address);
         axum_server::bind_rustls(state.config.address, tls_config)
             .serve(app.into_make_service())
             .await
             .unwrap();
     } else {
+        info!("Running http://{}", state.config.address);
         axum_server::bind(state.config.address)
             .serve(app.into_make_service())
             .await
@@ -132,7 +139,7 @@ async fn set_image(State(state): State<Arc<AppState>>,
     let mut image_manager = create_image_manager(&state, &token);
 
     image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
-
+    info!("Uploaded image: {} ({})", spec.tag, spec.hash);
     Ok(())
 }
 
@@ -159,6 +166,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 
     let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
     image_manager.remove_image(&tag)?;
+    info!("Removed image: {}", tag);
 
     Ok(Json(json!({ "status": "success" })))
 }
@@ -233,7 +241,9 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
     tokio::fs::create_dir_all(&folder).await?;
     layer.save_to_file_async(&folder).await?;
 
+    info!("Uploaded layer manifest: {}", layer.hash);
     image_manager.add_layer(layer);
+
     Ok(
         Json(
             json!(
@@ -276,6 +286,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             }
 
             tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+            info!("Uploaded layer file: {}:{}", layer.hash, file_index);
             return Ok(Json(json!({ "status": "uploaded" })));
         }
     }
@@ -309,4 +320,21 @@ fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
 async fn decode_json<T: DeserializeOwned>(request: Request) -> AppResult<T> {
     let value = Json::<T>::from_request(request, &()).await.map_err(|err| AppError::Other(err.into_response()))?;
     Ok(value.0)
+}
+
+fn setup_logging() -> Result<(), fern::InitError> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                 Local::now().format("%Y-%m-%d %T"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Info)
+        .chain(std::io::stdout())
+        .apply()?;
+    Ok(())
 }
