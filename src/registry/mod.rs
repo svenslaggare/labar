@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 use serde_json::json;
+use serde::de::DeserializeOwned;
 
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -14,7 +15,6 @@ use axum::extract::{Path, State, Request, FromRequest};
 use axum::routing::{get, post};
 
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
 
