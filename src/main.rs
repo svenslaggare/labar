@@ -394,6 +394,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 println!("New config:");
                 print_config(&new_file_config);
             } else {
+                println!("Config file: {}", get_config_file().display());
                 print_config(&file_config);
             }
         }
