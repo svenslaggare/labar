@@ -49,10 +49,10 @@ Merge the refered to image into the current image.
 * `IMAGE test:latest`
 
 ## Registry
-To distribute images, labar uses an HTTP based registry. This can be started using `labar run-registry` command.
+To distribute images, Labar uses an HTTP based registry. This can be started using `labar run-registry` command.
 
-A simple TOML configuration file below:
-```
+To configure the registry, use the sample TOML configuration file below:
+```toml
 data_path = "<HOME>/.labar-registry"
 address = "0.0.0.0:3000"
 users = [
