@@ -130,6 +130,11 @@ impl ImageTag {
         self.registry = Some(registry.to_owned());
         self
     }
+
+    pub fn set_tag(mut self, tag: &str) -> Self {
+        self.tag = tag.to_owned();
+        self
+    }
 }
 
 impl FromStr for ImageTag {

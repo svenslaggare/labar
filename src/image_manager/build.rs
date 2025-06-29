@@ -56,6 +56,12 @@ impl BuildManager {
         let image = Image::new(parent_hash.unwrap(), tag.to_owned());
         layer_manager.insert_or_replace_image(&image);
 
+        if image.tag.tag() != "latest" {
+            let mut latest_image = image.clone();
+            latest_image.tag = latest_image.tag.set_tag("latest");
+            layer_manager.insert_or_replace_image(&latest_image);
+        }
+
         Ok(image)
     }
 
