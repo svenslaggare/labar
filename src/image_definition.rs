@@ -2,6 +2,7 @@ use std::path::Path;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
+
 use regex::Regex;
 
 use crate::image::LinkType;
@@ -113,10 +114,11 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
                 expanded_operations.push(LayerOperationDefinition::Image { reference });
             }
             LayerOperationDefinition::File { path, source_path, link_type, writable } => {
-                let source_path_obj = build_context.join(Path::new(&source_path));
-                let source_path_obj = source_path_obj
-                    .strip_prefix(build_context).map_err(|_| ImageParseError::IsAbsolutePath(source_path.clone()))?;
-                let source_path_obj = build_context.join(Path::new(&source_path_obj));
+                let source_path_obj = Path::new(&source_path);
+                if source_path_obj.is_absolute() {
+                    return Err(ImageParseError::IsAbsolutePath(source_path.clone()));
+                }
+                let source_path_obj = build_context.join(source_path_obj);
 
                 let destination_path = Path::new(&path);
 
