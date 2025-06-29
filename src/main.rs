@@ -24,7 +24,9 @@ use crate::registry::RegistryConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileConfig {
-    default_registry: Option<String>
+    default_registry: Option<String>,
+    registry_username: Option<String>,
+    registry_password: Option<String>,
 }
 
 impl FileConfig {
@@ -49,7 +51,9 @@ impl FileConfig {
 impl Default for FileConfig {
     fn default() -> Self {
         FileConfig {
-            default_registry: None
+            default_registry: None,
+            registry_username: None,
+            registry_password: None,
         }
     }
 }
@@ -148,15 +152,24 @@ enum CommandLineInput {
     }
 }
 
-fn create_image_manager(_file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
-    ImageManager::from_state_file(printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()))
+fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
+    let mut config = ImageManagerConfig::new();
+    if let Some(registry_username) = file_config.registry_username.as_ref() {
+        config.registry_username = registry_username.clone();
+    }
+
+    if let Some(registry_password) = file_config.registry_password.as_ref() {
+        config.registry_password = registry_password.clone();
+    }
+
+    ImageManager::from_state_file(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()))
 }
 
-fn create_write_lock() -> FileLock {
+fn create_write_lock(_file_config: &FileConfig) -> FileLock {
     FileLock::new(ImageManagerConfig::new().base_folder().join("write_lock"))
 }
 
-fn create_unpack_lock() -> FileLock {
+fn create_unpack_lock(_file_config: &FileConfig) -> FileLock {
     FileLock::new(ImageManagerConfig::new().base_folder().join("unpack_lock"))
 }
 
@@ -191,7 +204,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
     match command_line_input {
         CommandLineInput::Build { file, tag, context, arguments, force } => {
-            let _write_lock = create_write_lock();
+            let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             let mut image_definition_context = ImageDefinitionContext::new();
@@ -211,14 +224,14 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
         }
         CommandLineInput::RemoveImage { tag } => {
-            let _write_lock = create_write_lock();
-            let _unpack_lock = create_unpack_lock();
+            let _write_lock = create_write_lock(&file_config);
+            let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::TagImage { reference, tag } => {
-            let _write_lock = create_write_lock();
+            let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             let image = image_manager.tag_image(&reference, &tag).map_err(|err| format!("{}", err))?;
@@ -301,30 +314,30 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             table_printer.print();
         }
         CommandLineInput::Unpack { reference, destination, replace } => {
-            let _unpack_lock = create_unpack_lock();
+            let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.unpack(&Path::new(&destination), &reference, replace).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
-            let _unpack_lock = create_unpack_lock();
+            let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.remove_unpacking(&Path::new(&path), force).map_err(|err| format!("{}", err))?;
         }
         CommandLineInput::Purge {} => {
-            let _write_lock = create_write_lock();
+            let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::Push { tag } => {
-            let _write_lock = create_write_lock();
+            let _write_lock = create_write_lock(&file_config);
             let image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.push(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::Pull { tag } => {
-            let _write_lock = create_write_lock();
+            let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.pull(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
         },

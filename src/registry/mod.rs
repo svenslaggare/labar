@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::str::FromStr;
@@ -9,27 +10,30 @@ use serde_json::json;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
-use axum::extract::{Path, State};
-use axum::extract::Request;
+use axum::extract::{Path, State, Request, FromRequest};
 use axum::routing::{get, post};
 
 use futures::StreamExt;
-use reqwest::StatusCode;
+use serde::de::DeserializeOwned;
 use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
 
 pub mod model;
+pub mod auth;
 
 use crate::image::{Layer, LayerOperation};
-use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerConfig, ImageManagerError};
+use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerConfig};
 use crate::lock::FileLock;
 use crate::reference::{ImageId, ImageTag, Reference};
-use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
+use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider, UsersSpec};
+use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
 
 #[derive(Debug, Deserialize)]
 pub struct RegistryConfig {
     pub data_path: PathBuf,
-    pub address: SocketAddr
+    pub address: SocketAddr,
+    #[serde(default)]
+    pub users: UsersSpec
 }
 
 impl RegistryConfig {
@@ -62,38 +66,53 @@ pub async fn run(config: RegistryConfig) {
 }
 
 pub struct AppState {
-    config: RegistryConfig
+    config: RegistryConfig,
+    access_provider: Box<dyn AuthProvider + Send + Sync>
 }
 
 impl AppState {
-    pub fn new(config: RegistryConfig) -> Arc<AppState> {
+    pub fn new(mut config: RegistryConfig) -> Arc<AppState> {
+        let access_provider = Box::new(MemoryAuthProvider::new(std::mem::take(&mut config.users)));
+
         Arc::new(
             AppState {
                 config,
+                access_provider
             }
         )
     }
 }
 
-async fn list_images(State(state): State<Arc<AppState>>) -> AppResult<impl IntoResponse> {
-    let image_manager = create_image_manager(&state);
+async fn list_images(State(state): State<Arc<AppState>>,
+                     request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+
+    let image_manager = create_image_manager(&state, &token);
     let images = image_manager.list_images()?;
 
-    Ok(Json(json!(images)))
+    Ok(Json(json!(images)).into_response())
 }
 
 async fn set_image(State(state): State<Arc<AppState>>,
-                   Json(spec): Json<ImageSpec>) -> AppResult<impl IntoResponse> {
+                   request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+
+    let spec: ImageSpec = decode_json(request).await?;
+
     let _lock = create_write_lock(&state);
-    let mut image_manager = create_image_manager(&state);
+    let mut image_manager = create_image_manager(&state, &token);
 
     image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
 
     Ok(())
 }
 
-async fn resolve_image(State(state): State<Arc<AppState>>, Path(tag): Path<String>) -> AppResult<impl IntoResponse> {
-    let image_manager = create_image_manager(&state);
+async fn resolve_image(State(state): State<Arc<AppState>>,
+                       Path(tag): Path<String>,
+                       request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+
+    let image_manager = create_image_manager(&state, &token);
 
     let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
     let image = image_manager.resolve_image(&tag)?;
@@ -102,8 +121,11 @@ async fn resolve_image(State(state): State<Arc<AppState>>, Path(tag): Path<Strin
 }
 
 async fn get_layer_manifest(State(state): State<Arc<AppState>>,
-                            Path(reference): Path<String>) -> AppResult<impl IntoResponse> {
-    let image_manager = create_image_manager(&state);
+                            Path(reference): Path<String>,
+                            request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+
+    let image_manager = create_image_manager(&state, &token);
 
     let layer_reference = ImageId::from_str(&reference).map_err(|err| AppError::InvalidImageReference(err))?;
     let layer_reference = Reference::ImageId(layer_reference);
@@ -112,8 +134,11 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
 }
 
 async fn download_layer(State(state): State<Arc<AppState>>,
-                        Path((layer, file_index)): Path<(String, usize)>) -> AppResult<impl IntoResponse> {
-    let image_manager = create_image_manager(&state);
+                        Path((layer, file_index)): Path<(String, usize)>,
+                        request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+
+    let image_manager = create_image_manager(&state, &token);
 
     let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
     let layer_reference = Reference::ImageId(layer_reference);
@@ -145,9 +170,13 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 }
 
 async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
-                               Json(layer): Json<Layer>) -> AppResult<impl IntoResponse> {
+                               request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+
+    let layer: Layer = decode_json(request).await?;
+
     let _lock = create_write_lock(&state);
-    let mut image_manager = create_image_manager(&state);
+    let mut image_manager = create_image_manager(&state, &token);
 
     if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
         return Ok(
@@ -180,8 +209,10 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
 async fn upload_layer_file(State(state): State<Arc<AppState>>,
                            Path((layer, file_index)): Path<(String, usize)>,
                            request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+
     let _lock = create_write_lock(&state);
-    let image_manager = create_image_manager(&state);
+    let image_manager = create_image_manager(&state, &token);
 
     let layer_reference = Reference::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
     let layer = image_manager.get_layer(&layer_reference)?;
@@ -212,80 +243,11 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     Err(AppError::LayerFileNotFound)
 }
 
-type AppResult<T> = Result<T, AppError>;
-
-enum AppError {
-    ImagerManager(ImageManagerError),
-    LayerFileNotFound,
-    FailedToUploadLayerFile(String),
-    InvalidImageReference(String),
-    IO(std::io::Error),
-}
-
-impl IntoResponse for AppError {
-    fn into_response(self) -> Response {
-        match self {
-            AppError::ImagerManager(err) => {
-                match err {
-                    err @ ImageManagerError::ImageNotFound { .. } => {
-                        (
-                            StatusCode::NOT_FOUND,
-                            Json(json!({ "error": format!("image not found due to: {}", err) }))
-                        ).into_response()
-                    }
-                    err => {
-                        (
-                            StatusCode::BAD_REQUEST,
-                            Json(json!({ "error": format!("{}", err) }))
-                        ).into_response()
-                    }
-                }
-            }
-            AppError::LayerFileNotFound => {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({ "error": "Layer file not found" }))
-                ).into_response()
-            }
-            AppError::FailedToUploadLayerFile(err) => {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Failed to upload layer file: {}", err) }))
-                ).into_response()
-            }
-            AppError::InvalidImageReference(err) => {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": format!("{}", err) }))
-                ).into_response()
-            }
-            AppError::IO(err) => {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("I/O error: {}", err) }))
-                ).into_response()
-            }
-        }
-    }
-}
-
-impl From<ImageManagerError> for AppError {
-    fn from(value: ImageManagerError) -> Self {
-        AppError::ImagerManager(value)
-    }
-}
-
-impl From<std::io::Error> for AppError {
-    fn from(value: std::io::Error) -> Self {
-        AppError::IO(value)
-    }
-}
-
 fn create_write_lock(state: &AppState) -> FileLock {
     FileLock::new(state.config.image_manager_config().base_folder().join("write_lock"))
 }
 
-fn create_image_manager(state: &AppState) -> ImageManager {
+fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
     let mut image_manager = ImageManager::with_config(
         state.config.image_manager_config(),
         EmptyPrinter::new()
@@ -302,4 +264,9 @@ fn create_image_manager(state: &AppState) -> ImageManager {
     }
 
     image_manager
+}
+
+async fn decode_json<T: DeserializeOwned>(request: Request) -> AppResult<T> {
+    let value = Json::<T>::from_request(request, &()).await.map_err(|err| AppError::Other(err.into_response()))?;
+    Ok(value.0)
 }

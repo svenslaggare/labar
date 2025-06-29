@@ -38,12 +38,12 @@ impl ImageManager {
             layer_manager: LayerManager::new(config.clone()),
             build_manager: BuildManager::new(config.clone(), printer.clone()),
             unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
-            registry_manager: RegistryManager::new(printer.clone()),
+            registry_manager: RegistryManager::new(config.clone(), printer.clone()),
         }
     }
 
-    pub fn from_state_file(printer: BoxPrinter) -> Result<ImageManager, String> {
-        let mut image_manager = ImageManager::new(printer);
+    pub fn from_state_file(config: ImageManagerConfig, printer: BoxPrinter) -> Result<ImageManager, String> {
+        let mut image_manager = ImageManager::with_config(config, printer);
         image_manager.load_state()?;
         Ok(image_manager)
     }
@@ -477,10 +477,10 @@ fn test_build() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_dir = helpers::get_temp_folder();
+    let tmp_folder = helpers::get_temp_folder();
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
@@ -508,7 +508,7 @@ fn test_build() {
     }
 
     #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
+        std::fs::remove_dir_all(&tmp_folder);
     }
 }
 
@@ -519,10 +519,10 @@ fn test_remove_image1() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_dir = helpers::get_temp_folder();
-    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let tmp_folder = helpers::get_temp_folder();
+    std::fs::create_dir_all(&tmp_folder).unwrap();
 
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -553,10 +553,10 @@ fn test_remove_image2() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_dir = helpers::get_temp_folder();
-    std::fs::create_dir_all(&tmp_dir).unwrap();
+    let tmp_folder = helpers::get_temp_folder();
+    std::fs::create_dir_all(&tmp_folder).unwrap();
 
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -590,10 +590,10 @@ fn test_list_content() {
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_dir = helpers::get_temp_folder();
+    let tmp_folder = helpers::get_temp_folder();
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
@@ -613,7 +613,25 @@ fn test_list_content() {
     }
 
     #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
+        std::fs::remove_dir_all(&tmp_folder);
+    }
+}
+
+#[cfg(test)]
+fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
+    use crate::registry::RegistryConfig;
+    use crate::registry::auth::AccessRight;
+
+    RegistryConfig {
+        data_path: tmp_registry_folder.to_path_buf(),
+        address,
+        users: vec![
+            (
+                "guest".to_owned(),
+                crate::registry::auth::create_password_hash("guest"),
+                vec![AccessRight::List, AccessRight::Download, AccessRight::Upload]
+            )
+        ]
     }
 }
 
@@ -623,22 +641,18 @@ async fn test_push_pull() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::registry::RegistryConfig;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let tmp_registry_dir = helpers::get_temp_folder();
+    let tmp_folder = helpers::get_temp_folder();
+    let tmp_registry_folder = helpers::get_temp_folder();
 
     let address: SocketAddr = "0.0.0.0:9567".parse().unwrap();
-    tokio::spawn(crate::registry::run(RegistryConfig {
-        data_path: tmp_registry_dir.clone(),
-        address
-    }));
+    tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
@@ -682,8 +696,8 @@ async fn test_push_pull() {
     }
 
     #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-        std::fs::remove_dir_all(&tmp_registry_dir);
+        std::fs::remove_dir_all(&tmp_folder);
+        std::fs::remove_dir_all(&tmp_registry_folder);
     }
 }
 
@@ -694,22 +708,18 @@ async fn test_push_pull_with_ref() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::registry::RegistryConfig;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let tmp_registry_dir = helpers::get_temp_folder();
+    let tmp_folder = helpers::get_temp_folder();
+    let tmp_registry_folder = helpers::get_temp_folder();
 
     let address: SocketAddr = "0.0.0.0:9568".parse().unwrap();
-    tokio::spawn(crate::registry::run(RegistryConfig {
-        data_path: tmp_registry_dir.clone(),
-        address
-    }));
+    tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
@@ -757,7 +767,7 @@ async fn test_push_pull_with_ref() {
     }
 
     #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-        std::fs::remove_dir_all(&tmp_registry_dir);
+        std::fs::remove_dir_all(&tmp_folder);
+        std::fs::remove_dir_all(&tmp_registry_folder);
     }
 }

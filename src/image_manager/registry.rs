@@ -12,15 +12,17 @@ use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerMa
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
 pub struct RegistryManager {
+    config: ImageManagerConfig,
+    printer: BoxPrinter,
     http_client: Client,
-    printer: BoxPrinter
 }
 
 impl RegistryManager {
-    pub fn new(printer: BoxPrinter) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> RegistryManager {
         RegistryManager {
-            http_client: Client::new(),
-            printer
+            config,
+            printer,
+            http_client: Client::new()
         }
     }
 
@@ -93,7 +95,7 @@ impl RegistryManager {
         let mut file_index = 0;
         for operation in &layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
-                let mut request = self.post_registry_response(registry, &format!("layers/{}/upload/{}", layer.hash, file_index)).build()?;
+                let mut request = self.build_post_request(registry, &format!("layers/{}/upload/{}", layer.hash, file_index)).build()?;
 
                 let file = tokio::fs::File::open(config.base_folder.join(source_path)).await?;
                 let body = Body::from(file);
@@ -132,20 +134,29 @@ impl RegistryManager {
         Ok(response)
     }
 
+    fn json_post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
+        let request = self.build_post_request(registry, url);
+        request.header(reqwest::header::CONTENT_TYPE, "application/json")
+    }
+
     async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<reqwest::Response> {
-        let full_url = format!("http://{}/{}", registry, url);
-        let response = self.http_client.execute(self.http_client.get(full_url).build()?).await?;
+        let request = self.build_get_request(registry, url);
+        let response = self.http_client.execute(request.build()?).await?;
         Ok(response)
     }
 
-    fn post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
+    fn build_get_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
         let full_url = format!("http://{}/{}", registry, url);
-        self.http_client.post(full_url)
+        self.http_client.
+            get(full_url)
+            .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
     }
 
-    fn json_post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let request = self.post_registry_response(registry, url);
-        request.header(reqwest::header::CONTENT_TYPE, "application/json")
+    fn build_post_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
+        let full_url = format!("http://{}/{}", registry, url);
+        self.http_client
+            .post(full_url)
+            .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
     }
 }
 

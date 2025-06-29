@@ -85,20 +85,24 @@ pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 
 #[derive(Clone)]
 pub struct ImageManagerConfig {
-    base_folder: PathBuf
+    base_folder: PathBuf,
+    pub registry_username: String,
+    pub registry_password: String
 }
 
 impl ImageManagerConfig {
     pub fn new() -> ImageManagerConfig {
         ImageManagerConfig {
-            base_folder: dirs::home_dir().unwrap().join(".labar")
+            base_folder: dirs::home_dir().unwrap().join(".labar"),
+            registry_username: "guest".to_owned(),
+            registry_password: "guest".to_owned()
         }
     }
 
     pub fn with_base_folder(base_folder: PathBuf) -> ImageManagerConfig {
-        ImageManagerConfig {
-            base_folder
-        }
+        let mut config = Self::new();
+        config.base_folder = base_folder;
+        config
     }
 
     pub fn base_folder(&self) -> PathBuf {
