@@ -12,7 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::{Path, State, Request, FromRequest};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 
 use futures::StreamExt;
 use tokio_util::io::ReaderStream;
@@ -54,6 +54,7 @@ pub async fn run(config: RegistryConfig) {
         .route("/images", get(list_images))
         .route("/images", post(set_image))
         .route("/images/{*tag}", get(resolve_image))
+        .route("/images/{*tag}", delete(remove_image))
         .route("/layers/{layer}/manifest", get(get_layer_manifest))
         .route("/layers/{layer}/download/{index}", get(download_layer))
         .route("/layers/manifest", post(upload_layer_manifest))
@@ -118,6 +119,20 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
     let image = image_manager.resolve_image(&tag)?;
 
     Ok(Json(json!(image)))
+}
+
+async fn remove_image(State(state): State<Arc<AppState>>,
+                      Path(tag): Path<String>,
+                      request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
+
+    let _lock = create_write_lock(&state).await;
+    let mut image_manager = create_image_manager(&state, &token);
+
+    let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
+    image_manager.remove_image(&tag)?;
+
+    Ok(Json(json!({ "status": "success" })))
 }
 
 async fn get_layer_manifest(State(state): State<Arc<AppState>>,

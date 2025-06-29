@@ -13,7 +13,8 @@ use crate::registry::model::{AppError, AppResult};
 pub enum AccessRight {
     List,
     Download,
-    Upload
+    Upload,
+    Delete
 }
 
 pub struct AuthToken;
