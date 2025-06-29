@@ -353,7 +353,9 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         }
         CommandLineInput::Config { edit } => {
             fn print_config(file_config: &FileConfig) {
-                println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"))
+                println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
+                println!("registry_username: {}", file_config.registry_username.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
+                println!("registry_password: {}", file_config.registry_password.as_ref().map(|x| "*".repeat(x.len())).unwrap_or("N/A".to_owned()));
             }
 
             if let Some(edit) = edit {
@@ -363,14 +365,21 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 if parts.len() == 2 {
                     let key = parts[0];
                     let value = parts[1];
+                    let value_opt = if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.to_owned())
+                    };
 
                     match key {
                         "default_registry" => {
-                            if !value.is_empty() {
-                                new_file_config.default_registry = Some(value.to_owned());
-                            } else {
-                                new_file_config.default_registry = None;
-                            }
+                            new_file_config.default_registry = value_opt;
+                        }
+                        "registry_username" => {
+                            new_file_config.registry_username = value_opt;
+                        }
+                        "registry_password" => {
+                            new_file_config.registry_password = value_opt;
                         }
                         _ => {
                             return Err(format!("Invalid key '{}'", key));
