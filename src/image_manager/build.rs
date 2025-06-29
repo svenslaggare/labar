@@ -68,10 +68,7 @@ impl BuildManager {
         self.printer.println(&format!("\t* Building layer: {}", layer.hash));
 
         let destination_base_path = self.config.get_layer_folder(&layer.hash);
-
-        #[allow(unused_must_use)] {
-            std::fs::create_dir_all(&destination_base_path);
-        }
+        std::fs::create_dir_all(&destination_base_path)?;
 
         for operation in &mut layer.operations {
             self.printer.println(&format!("\t* {}", operation));
@@ -99,16 +96,7 @@ impl BuildManager {
             }
         }
 
-        std::fs::write(
-            destination_base_path.join("manifest.json"),
-            serde_json::to_string_pretty(&layer)
-                .map_err(|err|
-                    ImageManagerError::OtherError {
-                        message: format!("Failed to write manifest due to: {}", err)
-                    }
-                )?
-        )?;
-
+        layer.save_to_file(&destination_base_path)?;
         layer_manager.add_layer(layer);
         Ok(true)
     }

@@ -127,8 +127,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
 
     let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = ImageId::from_str(&reference).map_err(|err| AppError::InvalidImageReference(err))?;
-    let layer_reference = Reference::ImageId(layer_reference);
+    let layer_reference = ImageId::from_str(&reference).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
     let layer = image_manager.get_layer(&layer_reference)?;
     Ok(Json(json!(layer)))
 }
@@ -140,8 +139,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 
     let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
-    let layer_reference = Reference::ImageId(layer_reference);
+    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
     let layer = image_manager.get_layer(&layer_reference)?;
 
     if let Some(operation) = layer.get_file_operation(file_index) {
@@ -190,9 +188,7 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
 
     let folder = image_manager.config().get_layer_folder(&layer.hash);
     tokio::fs::create_dir_all(&folder).await?;
-
-    let mut file = tokio::fs::File::create(folder.join("manifest.json")).await?;
-    file.write_all(serde_json::to_string_pretty(&layer).unwrap().as_bytes()).await?;
+    layer.save_to_file_async(&folder).await?;
 
     image_manager.add_layer(layer);
     Ok(
@@ -214,7 +210,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let _lock = create_write_lock(&state);
     let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = Reference::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?;
+    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
     let layer = image_manager.get_layer(&layer_reference)?;
 
     if let Some(operation) = layer.get_file_operation(file_index) {
@@ -230,6 +226,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                         file.write_all(chunk.as_ref()).await?;
                     }
                     Err(err) => {
+                        tokio::fs::remove_file(&temp_file_path).await?;
                         return Err(AppError::FailedToUploadLayerFile(err.to_string()));
                     }
                 }

@@ -5,6 +5,7 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers::DataSize;
+use crate::image_manager::ImageManagerError;
 use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -71,6 +72,34 @@ impl Layer {
             .map_err(|err| format!("{}", err))?;
 
         Ok(layer)
+    }
+
+    pub fn save_to_file(&self, base_path: &Path) -> Result<(), ImageManagerError> {
+        std::fs::write(
+            base_path.join("manifest.json"),
+            serde_json::to_string_pretty(&self)
+                .map_err(|err|
+                    ImageManagerError::OtherError {
+                        message: format!("Failed to write manifest due to: {}", err)
+                    }
+                )?
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn save_to_file_async(&self, base_path: &Path) -> Result<(), ImageManagerError> {
+        tokio::fs::write(
+            base_path.join("manifest.json"),
+            serde_json::to_string_pretty(&self)
+                .map_err(|err|
+                    ImageManagerError::OtherError {
+                        message: format!("Failed to write manifest due to: {}", err)
+                    }
+                )?
+        ).await?;
+
+        Ok(())
     }
 
     pub fn created_datetime(&self) -> DateTime<Local> {
