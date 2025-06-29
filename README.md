@@ -6,6 +6,15 @@ To make the content of an image available to the computer, it can be unpacked. T
 
 This approach makes it easy to do incremental changes to the archives and re-use of large files without needing to think about data duplication on the consumer side. It will just pull the layers, and if different images uses the same layers, they are not duplicated.
 
+## Building
+
+* Requires cargo (https://rustup.rs/).
+* Build with: `cargo build --release`
+* Build output in `target/release/labar`
+
+### Debian package
+A debian package can be built using the `build_deb.sh` command. This will also include bash auto-completions.
+
 ## Building images
 Run the `labar build` command to build an image. Images are defined in _labarfiles_ similar to Docker files.
 

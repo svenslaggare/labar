@@ -1,0 +1,36 @@
+name: Rust
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
+  release-build-ubuntu2204:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Release Build
+        run: cargo build --release --verbose
+      - name: Build Debian package
+        run: cargo install cargo-deb && ./build_deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: labar_linux_x86_64_ubuntu2204
+          path: target/release/labar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: labar_linux_x86_64_ubuntu2204_debian
+          path: target/debian/

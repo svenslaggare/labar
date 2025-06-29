@@ -3,6 +3,15 @@ name = "labar"
 version = "0.1.0"
 authors = ["Anton Jansson <anton_jansson@live.se>"]
 edition = "2021"
+description = "Layer based archive"
+license = "MIT"
+homepage = "https://github.com/svenslaggare/labar"
+
+[package.metadata.deb]
+assets = [
+    ["target/release/labar", "usr/bin/labar", "755"],
+    ["completions/labar.bash", "etc/bash_completion.d/labar", "644"]
+]
 
 [dependencies]
 regex = "1"

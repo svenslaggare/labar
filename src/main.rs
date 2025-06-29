@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Local};
 
 use serde::{Deserialize, Serialize};
-
+use structopt::clap::Shell;
 use structopt::StructOpt;
 use image::ImageMetadata;
 
@@ -405,6 +405,10 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
 #[tokio::main]
 async fn main() -> Result<(), String> {
+    if generate_completions() {
+        return Ok(());
+    }
+
     let file_config = FileConfig::from_file(&get_config_file()).unwrap_or(FileConfig::default());
     let command_line_input = CommandLineInput::from_args();
 
@@ -417,4 +421,15 @@ async fn main() -> Result<(), String> {
 
 fn get_config_file() -> PathBuf {
     dirs::home_dir().unwrap().join(".labar").join("config.toml")
+}
+
+fn generate_completions() -> bool {
+    if std::env::args().skip(1).next() == Some("generate-completions".to_owned()) {
+        let output_dir = "completions";
+        std::fs::create_dir_all(output_dir).unwrap();
+        CommandLineInput::clap().gen_completions("labar", Shell::Bash, output_dir);
+        true
+    } else {
+        false
+    }
 }
