@@ -108,8 +108,6 @@ pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 #[derive(Clone)]
 pub struct ImageManagerConfig {
     base_folder: PathBuf,
-    pub registry_username: String,
-    pub registry_password: String,
     pub registry_use_ssl: bool,
 }
 
@@ -117,8 +115,6 @@ impl ImageManagerConfig {
     pub fn new() -> ImageManagerConfig {
         ImageManagerConfig {
             base_folder: dirs::home_dir().unwrap().join(".labar"),
-            registry_username: "guest".to_owned(),
-            registry_password: "guest".to_owned(),
             registry_use_ssl: false
         }
     }

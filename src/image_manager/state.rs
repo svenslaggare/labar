@@ -51,11 +51,36 @@ impl StateManager {
             ()
         )?;
 
+        connection.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS logins(
+                registry TEXT PRIMARY KEY,
+                username TEXT,
+                password TEXT
+            );
+            "#,
+            ()
+        )?;
+
         Ok(
             StateManager {
                 connection,
             }
         )
+    }
+
+    pub fn add_login(&self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+        self.connection.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
+        self.connection.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
+        Ok(())
+    }
+
+    pub fn get_login(&self, registry: &str) -> SqlResult<Option<(String, String)>> {
+        self.connection.query_row(
+            "SELECT username, password FROM logins WHERE registry=?1",
+            [registry],
+            |row| Ok((row.get(0)?, row.get(1)?))
+        ).optional()
     }
 
     pub fn all_layers(&self) -> SqlResult<Vec<Layer>> {

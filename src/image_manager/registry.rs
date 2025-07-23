@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter};
 use std::path::Path;
-
+use std::sync::Arc;
 use futures::StreamExt;
 use reqwest::{Body, Client, StatusCode};
 
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
+use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
 
@@ -14,18 +15,27 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 pub struct RegistryManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
-    http_client: Client,
+    state_manager: Arc<StateManager>,
+    http_client: Client
 }
 
 impl RegistryManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> RegistryManager {
         RegistryManager {
             config,
             printer,
+            state_manager,
             http_client: Client::builder()
                 .danger_accept_invalid_certs(true)
                 .build().unwrap(),
         }
+    }
+
+    pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
+        let full_url = format!("{}://{}/verify", self.http_mode(), registry);
+        let response = self.http_client.execute(self.http_client.get(full_url).basic_auth(&username, Some(&password)).build()?).await?;
+        RegistryError::from_status_code(response.status(), "url: /verify".to_owned())?;
+        Ok(())
     }
 
     pub async fn list_images(&self, registry: &str) -> RegistryResult<Vec<ImageMetadata>> {
@@ -125,7 +135,7 @@ impl RegistryManager {
 
     async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<String> {
         let response = self.get_registry_response(registry, url).await?;
-        RegistryError::from_status_code(response.status(), format!("url: {}", url))?;
+        RegistryError::from_status_code(response.status(), format!("url: /{}", url))?;
         let response = response.text().await?;
         Ok(response)
     }
@@ -142,17 +152,25 @@ impl RegistryManager {
     }
 
     fn build_get_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
+        let (username, password) = self.get_login(registry);
+
         let full_url = format!("{}://{}/{}", self.http_mode(), registry, url);
         self.http_client.
             get(full_url)
-            .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
+            .basic_auth(&username, Some(&password))
     }
 
     fn build_post_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
+        let (username, password) = self.get_login(registry);
+
         let full_url = format!("{}://{}/{}", self.http_mode(), registry, url);
         self.http_client
             .post(full_url)
-            .basic_auth(&self.config.registry_username, Some(&self.config.registry_password))
+            .basic_auth(&username, Some(&password))
+    }
+
+    fn get_login(&self, registry: &str) -> (String, String) {
+        self.state_manager.get_login(registry).ok().flatten().unwrap_or_else(|| (String::new(), String::new()))
     }
 
     fn http_mode(&self) -> &str {
@@ -166,6 +184,7 @@ impl RegistryManager {
 
 #[derive(Debug)]
 pub enum RegistryError {
+    InvalidAuthentication,
     Http(reqwest::Error),
     HttpFailed { status_code: StatusCode, description: String },
     Deserialize(serde_json::Error),
@@ -176,6 +195,8 @@ impl RegistryError {
     pub fn from_status_code(status_code: StatusCode, description: String) -> RegistryResult<()> {
         if status_code.is_success() {
             Ok(())
+        } else if status_code == StatusCode::UNAUTHORIZED {
+            Err(RegistryError::InvalidAuthentication)
         } else {
             Err(RegistryError::HttpFailed { status_code, description })
         }
@@ -185,6 +206,7 @@ impl RegistryError {
 impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
             RegistryError::HttpFailed { status_code, description } => write!(f, "Http failed with status code: {} ({})", status_code, description),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),

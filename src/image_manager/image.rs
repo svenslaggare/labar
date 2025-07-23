@@ -19,6 +19,7 @@ pub struct ImageManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
 
+    state_manager: Arc<StateManager>,
     layer_manager: LayerManager,
     build_manager: BuildManager,
     unpack_manager: UnpackManager,
@@ -38,10 +39,11 @@ impl ImageManager {
                 config: config.clone(),
                 printer: printer.clone(),
 
+                state_manager: state_manager.clone(),
                 layer_manager: LayerManager::new(config.clone(), state_manager.clone()),
                 build_manager: BuildManager::new(config.clone(), printer.clone()),
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone(), state_manager.clone()),
-                registry_manager: RegistryManager::new(config.clone(), printer.clone()),
+                registry_manager: RegistryManager::new(config.clone(), printer.clone(), state_manager.clone()),
             }
         )
     }
@@ -239,6 +241,12 @@ impl ImageManager {
 
     pub fn list_unpackings(&self) -> ImageManagerResult<Vec<Unpacking>> {
         self.unpack_manager.unpackings()
+    }
+
+    pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
+        self.registry_manager.verify_login(registry, username, password).await?;
+        self.state_manager.add_login(registry, username, password)?;
+        Ok(())
     }
 
     pub async fn list_images_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {
@@ -609,6 +617,10 @@ async fn test_push_pull() {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
+        // Login
+        let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
+
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
@@ -676,6 +688,10 @@ async fn test_push_pull_with_ref() {
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
 

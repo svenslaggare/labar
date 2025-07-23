@@ -24,8 +24,6 @@ use crate::registry::RegistryConfig;
 #[serde(deny_unknown_fields)]
 pub struct FileConfig {
     default_registry: Option<String>,
-    registry_username: Option<String>,
-    registry_password: Option<String>,
     #[serde(default)]
     registry_use_ssl: bool
 }
@@ -53,8 +51,6 @@ impl Default for FileConfig {
     fn default() -> Self {
         FileConfig {
             default_registry: None,
-            registry_username: None,
-            registry_password: None,
             registry_use_ssl: false
         }
     }
@@ -134,6 +130,15 @@ enum CommandLineInput {
     Purge {
 
     },
+    #[structopt(about="Login into a remote registry")]
+    Login {
+        #[structopt(name="registry", help="The registry to login for")]
+        registry: String,
+        #[structopt(name="username", help="The username")]
+        username: String,
+        #[structopt(name="password", help="The password")]
+        password: String,
+    },
     #[structopt(about="Pulls an image from a remote registry")]
     Pull {
         #[structopt(name="tag", help="The image to pull")]
@@ -163,16 +168,7 @@ enum CommandLineInput {
 
 fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
     let mut config = ImageManagerConfig::new();
-    if let Some(registry_username) = file_config.registry_username.as_ref() {
-        config.registry_username = registry_username.clone();
-    }
-
-    if let Some(registry_password) = file_config.registry_password.as_ref() {
-        config.registry_password = registry_password.clone();
-    }
-
     config.registry_use_ssl = file_config.registry_use_ssl;
-
     ImageManager::with_config(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
 }
 
@@ -351,6 +347,10 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.push(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
         },
+        CommandLineInput::Login { registry, username, password } => {
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
+            image_manager.login(&registry, &username, &password).await.map_err(|err| format!("{}", err))?;
+        }
         CommandLineInput::Pull { tag } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
@@ -369,8 +369,6 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Config { edit } => {
             fn print_config(file_config: &FileConfig) {
                 println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
-                println!("registry_username: {}", file_config.registry_username.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
-                println!("registry_password: {}", file_config.registry_password.as_ref().map(|x| "*".repeat(x.len())).unwrap_or("N/A".to_owned()));
                 println!("registry_use_ssl: {}", file_config.registry_use_ssl);
             }
 
@@ -390,12 +388,6 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     match key {
                         "default_registry" => {
                             new_file_config.default_registry = value_opt;
-                        }
-                        "registry_username" => {
-                            new_file_config.registry_username = value_opt;
-                        }
-                        "registry_password" => {
-                            new_file_config.registry_password = value_opt;
                         }
                         "registry_use_ssl" => {
                             new_file_config.registry_use_ssl = value == "yes" || value == "true";

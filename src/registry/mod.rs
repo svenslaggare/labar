@@ -77,6 +77,7 @@ pub async fn run(config: RegistryConfig) {
     let state = AppState::new(config);
 
     let app = Router::new()
+        .route("/verify", get(verify))
         .route("/images", get(list_images))
         .route("/images", post(set_image))
         .route("/images/{*tag}", get(resolve_image))
@@ -119,6 +120,12 @@ impl AppState {
             }
         )
     }
+}
+
+async fn verify(State(state): State<Arc<AppState>>,
+                request: Request) -> AppResult<impl IntoResponse> {
+    let _token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+    Ok("")
 }
 
 async fn list_images(State(state): State<Arc<AppState>>,
