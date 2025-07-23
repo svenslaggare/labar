@@ -48,10 +48,6 @@ impl RegistryManager {
         let mut layer: Layer = serde_json::from_str(&response)?;
 
         let layer_folder = config.get_layer_folder(&layer.hash);
-        let manifest_file_path = layer_folder.join("manifest.json");
-        if manifest_file_path.exists() {
-            return Ok(layer);
-        }
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
@@ -73,8 +69,6 @@ impl RegistryManager {
             }
         }
 
-        // This will commit the layer to local file system
-        tokio::fs::write(&manifest_file_path, serde_json::to_string_pretty(&layer)?.as_bytes()).await?;
         Ok(layer)
     }
 

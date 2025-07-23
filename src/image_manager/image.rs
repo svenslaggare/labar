@@ -1,22 +1,23 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet};
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_definition::ImageDefinition;
-use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, State};
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
+use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, Unpacking};
 use crate::image_manager::build::BuildManager;
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
 use crate::image_manager::registry::RegistryManager;
+use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct ImageManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
-    changed: bool,
 
     layer_manager: LayerManager,
     build_manager: BuildManager,
@@ -25,96 +26,56 @@ pub struct ImageManager {
 }
 
 impl ImageManager {
-    pub fn new(printer: BoxPrinter) -> ImageManager {
+    pub fn new(printer: BoxPrinter) -> ImageManagerResult<ImageManager> {
         ImageManager::with_config(ImageManagerConfig::new(), printer)
     }
 
-    pub fn with_config(config: ImageManagerConfig, printer: BoxPrinter) -> ImageManager {
-        ImageManager {
-            config: config.clone(),
-            printer: printer.clone(),
-            changed: false,
+    pub fn with_config(config: ImageManagerConfig, printer: BoxPrinter) -> ImageManagerResult<ImageManager> {
+        let state_manager = Arc::new(StateManager::new(&config.base_folder)?);
 
-            layer_manager: LayerManager::new(config.clone()),
-            build_manager: BuildManager::new(config.clone(), printer.clone()),
-            unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
-            registry_manager: RegistryManager::new(config.clone(), printer.clone()),
-        }
-    }
+        Ok(
+            ImageManager {
+                config: config.clone(),
+                printer: printer.clone(),
 
-    pub fn from_state_file(config: ImageManagerConfig, printer: BoxPrinter) -> Result<ImageManager, String> {
-        let mut image_manager = ImageManager::with_config(config, printer);
-        image_manager.load_state()?;
-        Ok(image_manager)
+                layer_manager: LayerManager::new(config.clone(), state_manager.clone()),
+                build_manager: BuildManager::new(config.clone(), printer.clone()),
+                unpack_manager: UnpackManager::new(config.clone(), printer.clone(), state_manager.clone()),
+                registry_manager: RegistryManager::new(config.clone(), printer.clone()),
+            }
+        )
     }
 
     pub fn config(&self) -> &ImageManagerConfig {
         &self.config
     }
 
-    pub fn save_state(&mut self) -> Result<(), String> {
-        let layers = self.layer_manager.layers_iter().map(|layer| layer.hash.clone()).collect::<Vec<_>>();
-        let images = self.layer_manager.images_iter().cloned().collect::<Vec<_>>();
-
-        State { layers, images }.save_to_file(&self.config.base_folder().join("state.json"))?;
-        self.unpack_manager.save_to_file(&self.config.base_folder().join("unpackings.json"))?;
-
-        self.changed = false;
-        Ok(())
-    }
-
-    pub fn load_state(&mut self) -> Result<(), String> {
-        let state = State::from_file(&self.config.base_folder().join("state.json"))?;
-
-        for layer_hash in state.layers {
-            let layer = Layer::from_file(&self.config.get_layer_folder(&layer_hash).join("manifest.json"))?;
-            self.layer_manager.add_layer(layer);
-        }
-
-        for image in state.images {
-            self.layer_manager.insert_image(image);
-        }
-
-        self.unpack_manager.load_from_file(&self.config.base_folder().join("unpackings.json"))?;
-
-        Ok(())
-    }
-
-    pub fn state_exists(&self) -> bool {
-        self.config.base_folder().join("state.json").exists()
-    }
-
     pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &ImageTag, force: bool) -> ImageManagerResult<Image> {
         let image = self.build_manager.build_image(&mut self.layer_manager, build_context, image_definition, tag, force)?;
-        self.changed = true;
         Ok(image)
     }
 
     pub fn tag_image(&mut self, reference: &Reference, tag: &ImageTag) -> ImageManagerResult<Image> {
         let layer = self.layer_manager.get_layer(reference)?;
         let image = Image::new(layer.hash.clone(), tag.clone());
-        self.layer_manager.insert_or_replace_image(&image);
-        self.changed = true;
+        self.layer_manager.insert_or_replace_image(image.clone())?;
         Ok(image)
     }
 
     pub fn unpack(&mut self, unpack_dir: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {
         self.unpack_manager.unpack(&mut self.layer_manager, unpack_dir, reference, replace)?;
-        self.changed = true;
         Ok(())
     }
 
     pub fn remove_unpacking(&mut self, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
         self.unpack_manager.remove_unpacking(&mut self.layer_manager, unpack_dir, force)?;
-        self.changed = true;
         Ok(())
     }
 
     pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
-        if let Some(image) = self.layer_manager.remove_image_tag(tag) {
+        if let Some(image) = self.layer_manager.remove_image(tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
             self.garbage_collect()?;
-            self.changed = true;
             Ok(())
         } else {
             Err(ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
@@ -122,43 +83,34 @@ impl ImageManager {
     }
 
     pub fn garbage_collect(&mut self) -> ImageManagerResult<usize> {
-        let mut deleted_layers = 0;
+        let mut removed_layers = 0;
 
         let mut used_layers = BTreeSet::new();
-        for hash in self.get_hard_references() {
-            self.layer_manager.find_used_layers(hash, &mut used_layers)?;
+        for hash in self.get_hard_references()? {
+            self.layer_manager.find_used_layers(&hash, &mut used_layers)?;
         }
 
-        let mut tmp_layers = HashMap::new();
-        std::mem::swap(&mut tmp_layers, &mut self.layer_manager.layers);
-
-        tmp_layers.retain(|hash, layer| {
-            let keep = used_layers.contains(hash);
-
-            if !keep {
-                if let Err(err) = self.delete_layer(layer) {
+        for layer in self.layer_manager.all_layers()? {
+            if !used_layers.contains(&layer.hash) {
+                if let Err(err) = self.remove_layer(&layer) {
                     self.printer.println(&format!("Failed to remove layer: {}", err));
                 } else {
-                    deleted_layers += 1;
+                    removed_layers += 1;
                 }
             }
+        }
 
-            keep
-        });
-
-        std::mem::swap(&mut tmp_layers, &mut self.layer_manager.layers);
-
-        self.changed = true;
-        Ok(deleted_layers)
+        Ok(removed_layers)
     }
 
-    fn delete_layer(&self, layer: &Layer) -> ImageManagerResult<()> {
-        let mut reclaimed_size = 0;
+    fn remove_layer(&self, layer: &Layer) -> ImageManagerResult<()> {
+        self.layer_manager.remove_layer(&layer.hash)?;
 
+        let mut reclaimed_size = DataSize(0);
         for operation in &layer.operations {
             match operation {
                 LayerOperation::File { source_path, .. } => {
-                    reclaimed_size += std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0);
+                    reclaimed_size += DataSize(std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
                 },
                 _ => {}
             }
@@ -172,28 +124,27 @@ impl ImageManager {
                 }
             )?;
 
-        let reclaimed_size = DataSize(reclaimed_size as usize);
-        self.printer.println(&format!("Deleted layer: {} (reclaimed {})", layer.hash, reclaimed_size));
+        self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
         Ok(())
     }
 
-    fn get_hard_references(&self) -> Vec<&ImageId> {
+    fn get_hard_references(&self) -> ImageManagerResult<Vec<ImageId>> {
         let mut hard_references = Vec::new();
-        for image in self.layer_manager.images_iter() {
-            hard_references.push(&image.hash);
+        for image in self.layer_manager.images_iter()? {
+            hard_references.push(image.hash.clone());
         }
 
-        for unpacking in self.unpack_manager.unpackings() {
-            hard_references.push(&unpacking.hash);
+        for unpacking in self.unpack_manager.unpackings()? {
+            hard_references.push(unpacking.hash.clone());
         }
 
-        hard_references
+        Ok(hard_references)
     }
 
     pub fn list_images(&self) -> ImageManagerResult<Vec<ImageMetadata>> {
         let mut images = Vec::new();
 
-        for image in self.layer_manager.images_iter() {
+        for image in self.layer_manager.images_iter()? {
             images.push(self.get_image_metadata(&image, &image.hash.clone().to_ref())?);
         }
 
@@ -219,9 +170,10 @@ impl ImageManager {
         let top_layer = self.get_layer(&reference)?;
         let mut layers = Vec::new();
         for layer in self.get_layers(&reference)? {
+            let size = self.layer_size(&layer.hash.clone().to_ref())?;
             layers.push(InspectLayerResult {
                 layer,
-                size: self.layer_size(&layer.hash.clone().to_ref())?
+                size
             });
         }
 
@@ -280,7 +232,7 @@ impl ImageManager {
         Ok(files)
     }
 
-    pub fn list_unpackings(&self) -> &Vec<Unpacking> {
+    pub fn list_unpackings(&self) -> ImageManagerResult<Vec<Unpacking>> {
         self.unpack_manager.unpackings()
     }
 
@@ -338,12 +290,12 @@ impl ImageManager {
                 }
 
                 visit_layer(&mut stack, &layer);
-                self.add_layer(layer);
+                self.insert_layer(layer)?;
             }
         }
 
         let image = Image::new(top_level_hash.unwrap(), tag.clone());
-        self.insert_or_replace_image(image.clone());
+        self.insert_or_replace_image(image.clone())?;
 
         Ok(image)
     }
@@ -384,7 +336,7 @@ impl ImageManager {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
             let layer = self.get_layer(&current)?;
             visit_layer(&mut stack, &layer);
-            self.registry_manager.upload_layer(self.config(), registry, layer).await?;
+            self.registry_manager.upload_layer(self.config(), registry, &layer).await?;
         }
 
         self.registry_manager.upload_image(registry, &top_layer.hash, &tag).await?;
@@ -394,17 +346,17 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<&Layer> {
+    pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<Layer> {
         self.layer_manager.get_layer(reference)
     }
 
-    pub fn get_layers(&self, reference: &Reference) -> ImageManagerResult<Vec<&Layer>> {
+    pub fn get_layers(&self, reference: &Reference) -> ImageManagerResult<Vec<Layer>> {
         let mut stack = vec![self.layer_manager.fully_qualify_reference(reference)?.to_ref()];
 
         let mut layers = Vec::new();
         while let Some(current) = stack.pop() {
             let layer = self.get_layer(&current)?;
-            layers.push(layer);
+            layers.push(layer.clone());
 
             if let Some(parent) = layer.parent_hash.as_ref() {
                 stack.push(parent.clone().to_ref());
@@ -414,12 +366,12 @@ impl ImageManager {
         Ok(layers)
     }
 
-    pub fn add_layer(&mut self, layer: Layer) {
-        self.layer_manager.add_layer(layer);
-        self.changed = true;
+    pub fn insert_layer(&mut self, layer: Layer) -> ImageManagerResult<()> {
+        self.layer_manager.insert_layer(layer)?;
+        Ok(())
     }
 
-    pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<&Image> {
+    pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<Image> {
         self.layer_manager.get_image(tag)
     }
 
@@ -427,7 +379,7 @@ impl ImageManager {
         let image_id = self.layer_manager.fully_qualify_reference(reference)?;
 
         let mut tags = Vec::new();
-        for image in self.layer_manager.images_iter() {
+        for image in self.layer_manager.images_iter()? {
             if image.hash == image_id {
                 tags.push(image.tag.clone())
             }
@@ -436,37 +388,29 @@ impl ImageManager {
         Ok(tags)
     }
 
-    pub fn insert_or_replace_image(&mut self, image: Image) {
-        self.layer_manager.insert_or_replace_image(&image);
-        self.changed = true;
+    pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
+        self.layer_manager.insert_or_replace_image(image)?;
+        Ok(())
     }
 }
 
-impl Drop for ImageManager {
-    fn drop(&mut self) {
-        if self.changed {
-            self.save_state().unwrap();
-        }
-    }
-}
-
-pub struct InspectResult<'a> {
-    pub top_layer: &'a Layer,
+pub struct InspectResult {
+    pub top_layer: Layer,
     pub image_tags: Vec<ImageTag>,
     pub size: DataSize,
-    pub layers: Vec<InspectLayerResult<'a>>
+    pub layers: Vec<InspectLayerResult>
 }
 
-pub struct InspectLayerResult<'a> {
-    pub layer: &'a Layer,
+pub struct InspectLayerResult {
+    pub layer: Layer,
     pub size: DataSize
 }
 
-impl Deref for InspectLayerResult<'_> {
+impl Deref for InspectLayerResult {
     type Target = Layer;
 
     fn deref(&self) -> &Self::Target {
-        self.layer
+        &self.layer
     }
 }
 
@@ -482,7 +426,7 @@ fn test_build() {
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
 
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
         assert!(image_definition.is_ok());
@@ -528,7 +472,7 @@ fn test_remove_image1() {
     let mut image_manager = ImageManager::with_config(
         config,
         printer
-    );
+    ).unwrap();
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -544,6 +488,8 @@ fn test_remove_image1() {
     let images = images.unwrap();
 
     assert_eq!(0, images.len());
+
+    assert_eq!(0, image_manager.layer_manager.all_layers().unwrap().len());
 }
 
 #[test]
@@ -562,7 +508,7 @@ fn test_remove_image2() {
     let mut image_manager = ImageManager::with_config(
         config,
         printer
-    );
+    ).unwrap();
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -595,7 +541,7 @@ fn test_list_content() {
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
 
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
         image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).unwrap();
@@ -656,13 +602,14 @@ async fn test_push_pull() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
         let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
+        assert_eq!(Some(DataSize(974)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
@@ -723,7 +670,7 @@ async fn test_push_pull_with_ref() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
 
@@ -733,6 +680,7 @@ async fn test_push_pull_with_ref() {
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
         let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
         let push_result = image_manager.push(&image.tag, None).await;

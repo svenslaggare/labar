@@ -1,60 +1,56 @@
 use std::collections::HashSet;
 use std::fs::{File};
 use std::path::Path;
-use std::time::SystemTime;
+use std::sync::Arc;
 
+use chrono::{DateTime, Local};
+use rusqlite::Row;
 use serde::{Deserialize, Serialize};
 
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{BoxPrinter};
+use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
-    pub hash: ImageId,
     pub destination: String,
-    pub time: SystemTime
+    pub hash: ImageId,
+    pub time: DateTime<Local>
+}
+
+impl Unpacking {
+    pub fn from_row(row: &Row) -> rusqlite::Result<Unpacking> {
+        Ok(
+            Unpacking {
+                destination: row.get(0)?,
+                hash: row.get(1)?,
+                time: row.get(2)?
+            }
+        )
+    }
 }
 
 pub struct UnpackManager {
     config: ImageManagerConfig,
     printer: BoxPrinter,
-    unpackings: Vec<Unpacking>
+    state_manager: Arc<StateManager>
 }
 
 impl UnpackManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> UnpackManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> UnpackManager {
         UnpackManager {
             config,
             printer,
-            unpackings: Vec::new()
+            state_manager
         }
     }
 
-    pub fn load_from_file(&mut self, path: &Path) -> Result<(), String> {
-        let unpackings_content = std::fs::read_to_string(path)
-            .map_err(|err| format!("{}", err))?;
-
-        self.unpackings = serde_json::from_str(&unpackings_content)
-            .map_err(|err| format!("{}", err))?;
-
-        Ok(())
-    }
-
-    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
-        std::fs::write(
-            path,
-            serde_json::to_string_pretty(&self.unpackings)
-                .map_err(|err| format!("{}", err))?
-        ).map_err(|err| format!("{}", err))?;
-
-        Ok(())
-    }
-
-    pub fn unpackings(&self) -> &Vec<Unpacking> {
-        &self.unpackings
+    pub fn unpackings(&self) -> ImageManagerResult<Vec<Unpacking>> {
+        let unpackings = self.state_manager.all_unpackings()?;
+        Ok(unpackings)
     }
 
     pub fn unpack(&mut self, layer_manager: &LayerManager, unpack_folder: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {
@@ -71,7 +67,7 @@ impl UnpackManager {
 
         let unpack_folder_str = unpack_folder.canonicalize()?.to_str().unwrap().to_owned();
 
-        if self.unpackings.iter().any(|unpacking| unpacking.destination == unpack_folder_str) {
+        if self.state_manager.unpacking_exist_at(&unpack_folder_str)? {
             return Err(ImageManagerError::UnpackingExist { path: unpack_folder_str.clone() });
         }
 
@@ -84,11 +80,13 @@ impl UnpackManager {
         self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
         self.unpack_layer(layer_manager, &mut HashSet::new(), unpack_folder, &top_layer)?;
 
-        self.unpackings.push(Unpacking {
-            hash: top_layer.hash.clone(),
-            destination: unpack_folder_str,
-            time: SystemTime::now()
-        });
+        self.state_manager.insert_unpacking(
+            Unpacking {
+                hash: top_layer.hash.clone(),
+                destination: unpack_folder_str,
+                time: Local::now()
+            }
+        )?;
 
         Ok(())
     }
@@ -107,7 +105,7 @@ impl UnpackManager {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_hash = Reference::ImageId(parent_hash.clone());
             let parent_layer = layer_manager.get_layer(&parent_hash)?;
-            self.unpack_layer(layer_manager, already_unpacked, unpack_folder, parent_layer)?;
+            self.unpack_layer(layer_manager, already_unpacked, unpack_folder, &parent_layer)?;
         }
 
         let mut has_files = false;
@@ -118,7 +116,7 @@ impl UnpackManager {
                         layer_manager,
                         already_unpacked,
                         unpack_folder,
-                        layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
+                        &layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
                     )?;
                 },
                 LayerOperation::File { path, source_path, link_type, writable } => {
@@ -179,49 +177,46 @@ impl UnpackManager {
         Ok(())
     }
 
-    pub fn remove_unpacking(&mut self, layer_manager: &LayerManager, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
-        let unpack_dir_str = unpack_dir.canonicalize()?.to_str().unwrap().to_owned();
+    pub fn remove_unpacking(&mut self, layer_manager: &LayerManager, unpack_folder: &Path, force: bool) -> ImageManagerResult<()> {
+        let unpack_folder_str = unpack_folder.canonicalize()?.to_str().unwrap().to_owned();
 
-        let unpacking = self.unpackings.iter()
-            .find(|unpacking| unpacking.destination == unpack_dir_str)
-            .ok_or_else(|| ImageManagerError::UnpackingNotFound { path: unpack_dir_str.clone() })?;
+        let unpacking = self.state_manager.get_unpacking(&unpack_folder_str)?
+            .ok_or_else(|| ImageManagerError::UnpackingNotFound { path: unpack_folder_str.clone() })?;
 
-        self.printer.println(&format!("Clearing unpacking of {} at {}", unpacking.hash, unpack_dir_str));
+        self.printer.println(&format!("Clearing unpacking of {} at {}", unpacking.hash, unpack_folder_str));
         let unpacking_hash = Reference::ImageId(unpacking.hash.clone());
         let top_layer = layer_manager.get_layer(&unpacking_hash)?;
 
         if !force {
-            self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer)?;
+            self.remove_unpacked_layer(layer_manager, unpack_folder, &top_layer)?;
         } else {
-            if let Err(err) = self.remove_unpacked_layer(layer_manager, unpack_dir, top_layer) {
+            if let Err(err) = self.remove_unpacked_layer(layer_manager, unpack_folder, &top_layer) {
                 self.printer.println(&format!("Failed to clear unpacking due to: {}", err));
             }
         }
 
-        self.unpackings.retain(|unpacking| {
-            return unpacking.destination != unpack_dir_str;
-        });
+        self.state_manager.remove_unpacking(&unpack_folder_str)?;
 
         Ok(())
     }
 
-    fn remove_unpacked_layer(&self, layer_manager: &LayerManager, unpack_dir: &Path, layer: &Layer) -> ImageManagerResult<()> {
+    fn remove_unpacked_layer(&self, layer_manager: &LayerManager, unpack_folder: &Path, layer: &Layer) -> ImageManagerResult<()> {
         for operation in layer.operations.iter().rev() {
             match operation {
                 LayerOperation::Image { hash } => {
                     self.remove_unpacked_layer(
                         layer_manager,
-                        unpack_dir,
-                        layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
+                        unpack_folder,
+                        &layer_manager.get_layer(&Reference::ImageId(hash.clone()))?
                     )?;
                 },
                 LayerOperation::File { path, .. } => {
-                    let destination_path = unpack_dir.join(path);
+                    let destination_path = unpack_folder.join(path);
                     self.printer.println(&format!("\t* Deleting link of file {}", destination_path.to_str().unwrap()));
                     std::fs::remove_file(destination_path)?;
                 },
                 LayerOperation::Directory { path } => {
-                    let path = unpack_dir.join(path);
+                    let path = unpack_folder.join(path);
                     self.printer.println(&format!("\t* Deleting directory {}", path.to_str().unwrap()));
                     std::fs::remove_dir(path)?
                 },
@@ -231,10 +226,10 @@ impl UnpackManager {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_hash = Reference::ImageId(parent_hash.clone());
             let parent_layer = layer_manager.get_layer(&parent_hash)?;
-            self.remove_unpacked_layer(layer_manager, unpack_dir, parent_layer)?;
+            self.remove_unpacked_layer(layer_manager, unpack_folder, &parent_layer)?;
         }
 
-        println!();
+        self.printer.println("");
         Ok(())
     }
 }
@@ -254,9 +249,10 @@ fn test_unpack() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager.clone());
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -294,9 +290,10 @@ fn test_unpack_exist() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -341,9 +338,10 @@ fn test_remove_unpack() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -364,7 +362,7 @@ fn test_remove_unpack() {
         false
     );
 
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{}", result.unwrap_err());
     assert!(!tmp_dir.join("unpack").join("file1.txt").exists());
 
     #[allow(unused_must_use)] {
@@ -387,9 +385,10 @@ fn test_unpack_replace1() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -434,9 +433,10 @@ fn test_unpack_replace2() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -471,17 +471,18 @@ fn test_unpack_self_reference() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
+    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let hash = ImageId::from_str("3d197ee59b46d114379522e6f68340371f2f1bc1525cb4456caaf5b8430acea3").unwrap();
     let layer = Layer {
         parent_hash: None,
         hash: hash.clone(),
         operations: vec![LayerOperation::Image { hash: hash.clone() }],
-        created: SystemTime::now(),
+        created: Local::now(),
     };
-    layer_manager.add_layer(layer);
+    layer_manager.insert_layer(layer).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,

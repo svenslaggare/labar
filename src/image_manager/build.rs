@@ -1,9 +1,8 @@
 use std::path::{Path};
 use std::str::FromStr;
-
 use sha2::{Sha256, Digest};
 
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::layer::{LayerManager};
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
@@ -33,7 +32,7 @@ impl BuildManager {
 
         if let Some(base_image_reference) = image_definition.base_image {
             let hash = layer_manager.fully_qualify_reference(&base_image_reference)?;
-            if !layer_manager.layer_exist(&hash) {
+            if !layer_manager.layer_exist(&hash)? {
                 return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
             }
 
@@ -54,19 +53,19 @@ impl BuildManager {
         }
 
         let image = Image::new(parent_hash.unwrap(), tag.to_owned());
-        layer_manager.insert_or_replace_image(&image);
+        layer_manager.insert_or_replace_image(image.clone())?;
 
         if image.tag.tag() != "latest" {
             let mut latest_image = image.clone();
             latest_image.tag = latest_image.tag.set_tag("latest");
-            layer_manager.insert_or_replace_image(&latest_image);
+            layer_manager.insert_or_replace_image(latest_image)?;
         }
 
         Ok(image)
     }
 
     fn build_layer(&self, layer_manager: &mut LayerManager, mut layer: Layer, force: bool) -> ImageManagerResult<bool> {
-        if !force && layer_manager.layer_exist(&layer.hash) {
+        if !force && layer_manager.layer_exist(&layer.hash)? {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
         }
@@ -102,8 +101,7 @@ impl BuildManager {
             }
         }
 
-        layer.save_to_file(&destination_base_path)?;
-        layer_manager.add_layer(layer);
+        layer_manager.insert_layer(layer)?;
         Ok(true)
     }
 
@@ -121,7 +119,7 @@ impl BuildManager {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
                     let hash = layer_manager.fully_qualify_reference(reference)?;
-                    if !layer_manager.layer_exist(&hash) {
+                    if !layer_manager.layer_exist(&hash)? {
                         return Err(ImageManagerError::ImageNotFound { reference: reference.clone() });
                     }
 
@@ -178,15 +176,18 @@ fn create_hash(input: &str) -> String {
 
 #[test]
 fn test_build() {
+    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
+    use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
     let build_manager = BuildManager::new(config, printer);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -210,7 +211,7 @@ fn test_build() {
     let image = image.unwrap();
     assert_eq!(image.hash, result.hash);
 
-    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()), Some(result.hash));
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()).unwrap(), Some(result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
@@ -219,15 +220,18 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache() {
+    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
+    use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
     let build_manager = BuildManager::new(config, printer.clone());
 
     // Build first time
@@ -268,7 +272,7 @@ fn test_build_with_cache() {
     let image = image.unwrap();
     assert_eq!(image.hash, second_result.hash);
 
-    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()), Some(second_result.hash));
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()).unwrap(), Some(second_result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
@@ -277,15 +281,18 @@ fn test_build_with_cache() {
 
 #[test]
 fn test_build_with_image_ref() {
+    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
+    use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
     let build_manager = BuildManager::new(config, printer);
 
     let image_definition = ImageDefinition::parse_without_context(
@@ -320,7 +327,7 @@ fn test_build_with_image_ref() {
     let image = image.unwrap();
     assert_eq!(image.hash, result.hash);
 
-    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("that").unwrap()), Some(result.hash));
+    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("that").unwrap()).unwrap(), Some(result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);

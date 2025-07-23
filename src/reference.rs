@@ -1,7 +1,8 @@
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use regex::Regex;
-
+use rusqlite::ToSql;
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::{Error, Visitor};
 
@@ -73,6 +74,18 @@ impl FromStr for ImageId {
 impl Display for ImageId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl ToSql for ImageId {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.to_string()))
+    }
+}
+
+impl FromSql for ImageId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        Ok(ImageId(value.as_str()?.to_owned()))
     }
 }
 
@@ -194,6 +207,18 @@ impl<'de> Visitor<'de> for ImageTagVisitor {
 impl<'de> Deserialize<'de> for ImageTag {
     fn deserialize<D>(deserializer: D) -> Result<ImageTag, D::Error> where D: Deserializer<'de> {
         deserializer.deserialize_string(ImageTagVisitor)
+    }
+}
+
+impl ToSql for ImageTag {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.to_string()))
+    }
+}
+
+impl FromSql for ImageTag {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        ImageTag::from_str(&value.as_str()?).map_err(|_| FromSqlError::InvalidType)
     }
 }
 

@@ -20,6 +20,7 @@ pub enum ImageManagerError {
     FolderNotEmpty { path: String },
     NoRegistryDefined,
     SelfReferential,
+    Sql(rusqlite::Error),
     OtherError { message: String }
 }
 
@@ -38,6 +39,12 @@ impl From<std::io::Error> for ImageManagerError {
 impl From<RegistryError> for ImageManagerError {
     fn from(error: RegistryError) -> Self {
         ImageManagerError::RegistryError { error }
+    }
+}
+
+impl From<rusqlite::Error> for ImageManagerError {
+    fn from(value: rusqlite::Error) -> Self {
+        ImageManagerError::Sql(value)
     }
 }
 
@@ -74,6 +81,9 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::SelfReferential => {
                 write!(f, "This layer refers to itself")
             }
+            ImageManagerError::Sql(err) => {
+                write!(f, "SQL: {}", err)
+            }
             ImageManagerError::OtherError { message } => {
                 write!(f, "{}", message)
             },
@@ -107,21 +117,20 @@ impl ImageManagerConfig {
         config
     }
 
-    pub fn base_folder(&self) -> PathBuf {
-        self.base_folder.clone()
+    pub fn base_folder(&self) -> &Path {
+        &self.base_folder
     }
 
-    pub fn images_base_folder(&self) -> PathBuf {
-        self.base_folder().join("images")
+    pub fn layers_base_folder(&self) -> PathBuf {
+        self.base_folder().join("layers")
     }
 
     pub fn get_layer_folder(&self, hash: &ImageId) -> PathBuf {
-        self.images_base_folder().join(&Path::new(&hash.to_string()))
+        self.layers_base_folder().join(&Path::new(&hash.to_string()))
     }
 }
 
 pub use image::ImageManager;
-pub use state::State;
 pub use printing::{BoxPrinter, ConsolePrinter, EmptyPrinter, Printer};
 use crate::image_definition::ImageParseError;
 use crate::image_manager::registry::RegistryError;

@@ -1,59 +1,56 @@
-use std::collections::{HashMap, BTreeSet};
+use std::collections::{BTreeSet};
+use std::sync::Arc;
 
 use crate::helpers::DataSize;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image::{Layer, Image, LayerOperation};
+use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct LayerManager {
     config: ImageManagerConfig,
-    pub layers: HashMap<ImageId, Layer>,
-    images: HashMap<ImageTag, Image>,
+    state_manager: Arc<StateManager>
 }
 
 impl LayerManager {
-    pub fn new(config: ImageManagerConfig) -> LayerManager {
+    pub fn new(config: ImageManagerConfig, state_manager: Arc<StateManager>) -> LayerManager {
         LayerManager {
             config,
-            layers: HashMap::new(),
-            images: HashMap::new()
+            state_manager
         }
     }
 
-    pub fn layers_iter(&self) -> impl Iterator<Item=&Layer> {
-        self.layers.values()
+    pub fn all_layers(&self) -> ImageManagerResult<Vec<Layer>> {
+        let layers = self.state_manager.all_layers()?;
+        Ok(layers)
     }
 
-    pub fn fully_qualify_reference(&self, reference: &Reference) -> ImageManagerResult<ImageId> {
-        match reference {
-            Reference::ImageTag(tag) => {
-                if let Some(image_hash) = self.get_image_hash(tag) {
-                    return Ok(image_hash);
-                }
+    pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<Layer> {
+        self.get_layer_by_hash(&self.fully_qualify_reference(reference)?)
+            .map_err(|_| ImageManagerError::ImageNotFound { reference: reference.clone() })
+    }
 
-                Err(ImageManagerError::ImageNotFound { reference: reference.clone() })
-            }
-            Reference::ImageId(id) => {
-                Ok(id.clone())
-            }
+    fn get_layer_by_hash(&self, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let layer = self.state_manager.get_layer(hash)?;
+        layer.ok_or_else(|| ImageManagerError::LayerNotFound { image_id: hash.clone() })
+    }
+
+    pub fn layer_exist(&self, hash: &ImageId) -> ImageManagerResult<bool> {
+        Ok(self.state_manager.get_layer(&hash)?.is_some())
+    }
+
+    pub fn insert_layer(&mut self, layer: Layer) -> ImageManagerResult<()> {
+        self.state_manager.insert_layer(layer)?;
+        Ok(())
+    }
+
+    pub fn remove_layer(&self, hash: &ImageId) -> ImageManagerResult<()> {
+        let removed = self.state_manager.remove_layer(hash)?;
+        if !removed {
+            return Err(ImageManagerError::LayerNotFound { image_id: hash.clone() });
         }
-    }
 
-    pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<&Layer> {
-        self.layers.get(&self.fully_qualify_reference(reference)?)
-            .ok_or_else(|| ImageManagerError::ImageNotFound { reference: reference.clone() })
-    }
-
-    fn get_layer_by_hash(&self, hash: &ImageId) -> ImageManagerResult<&Layer> {
-        self.layers.get(hash).ok_or_else(|| ImageManagerError::LayerNotFound { image_id: hash.clone() })
-    }
-
-    pub fn layer_exist(&self, hash: &ImageId) -> bool {
-        self.layers.contains_key(hash)
-    }
-
-    pub fn add_layer(&mut self, layer: Layer) {
-        self.layers.insert(layer.hash.clone(), layer);
+        Ok(())
     }
 
     pub fn find_used_layers(&self, hash: &ImageId, used_layers: &mut BTreeSet<ImageId>) -> ImageManagerResult<()> {
@@ -80,33 +77,50 @@ impl LayerManager {
         Ok(())
     }
 
-    pub fn images_iter(&self) -> impl Iterator<Item=&Image> {
-        self.images.values()
-    }
+    pub fn fully_qualify_reference(&self, reference: &Reference) -> ImageManagerResult<ImageId> {
+        match reference {
+            Reference::ImageTag(tag) => {
+                if let Some(image_hash) = self.get_image_hash(tag)? {
+                    return Ok(image_hash);
+                }
 
-    pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<&Image> {
-        self.images.get(&tag)
-            .ok_or_else(|| ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
-    }
-
-    pub fn get_image_hash(&self, tag: &ImageTag) -> Option<ImageId> {
-        self.images.get(&tag).map(|image| image.hash.clone())
-    }
-
-    pub fn insert_image(&mut self, image: Image) {
-        self.images.insert(image.tag.clone(), image);
-    }
-
-    pub fn insert_or_replace_image(&mut self, image: &Image) {
-        if let Some(existing_image) = self.images.get_mut(&image.tag) {
-            *existing_image = image.clone();
-        } else {
-            self.images.insert(image.tag.clone(), image.clone());
+                Err(ImageManagerError::ImageNotFound { reference: reference.clone() })
+            }
+            Reference::ImageId(id) => {
+                Ok(id.clone())
+            }
         }
     }
 
-    pub fn remove_image_tag(&mut self, tag: &ImageTag) -> Option<Image> {
-        self.images.remove(&tag)
+    pub fn images_iter(&self) -> ImageManagerResult<impl Iterator<Item=Image>> {
+        Ok(self.state_manager.all_images()?.into_iter())
+    }
+
+    pub fn get_image(&self, tag: &ImageTag) -> ImageManagerResult<Image> {
+        let image = self.state_manager.get_image(tag)?;
+        image
+            .ok_or_else(|| ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
+    }
+
+    pub fn get_image_hash(&self, tag: &ImageTag) -> ImageManagerResult<Option<ImageId>> {
+        let image = self.state_manager.get_image(tag)?;
+        Ok(image.map(|image| image.hash.clone()))
+    }
+
+    pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
+        if self.state_manager.get_image(&image.tag)?.is_some() {
+            self.state_manager.replace_image(image)?;
+        } else {
+            self.state_manager.insert_image(image)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<Option<Image>> {
+        let image = self.state_manager.get_image(tag)?;
+        self.state_manager.remove_image(tag)?;
+        Ok(image)
     }
 
     pub fn size_of_reference(&self, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {

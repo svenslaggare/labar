@@ -1,11 +1,12 @@
 use std::fmt::{Display, Formatter};
-use std::path::Path;
-use std::time::SystemTime;
+
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
+use rusqlite::Row;
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
+
 use crate::helpers::DataSize;
-use crate::image_manager::ImageManagerError;
 use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -51,7 +52,7 @@ pub struct Layer {
     pub parent_hash: Option<ImageId>,
     pub hash: ImageId,
     pub operations: Vec<LayerOperation>,
-    pub created: SystemTime,
+    pub created: DateTime<Local>,
 }
 
 impl Layer {
@@ -60,46 +61,8 @@ impl Layer {
             parent_hash,
             hash,
             operations,
-            created: SystemTime::now()
+            created: Local::now()
         }
-    }
-
-    pub fn from_file(path: &Path) -> Result<Layer, String> {
-        let layer_content = std::fs::read_to_string(path)
-            .map_err(|err| format!("{}", err))?;
-
-        let layer: Layer = serde_json::from_str(&layer_content)
-            .map_err(|err| format!("{}", err))?;
-
-        Ok(layer)
-    }
-
-    pub fn save_to_file(&self, base_path: &Path) -> Result<(), ImageManagerError> {
-        std::fs::write(
-            base_path.join("manifest.json"),
-            serde_json::to_string_pretty(&self)
-                .map_err(|err|
-                    ImageManagerError::OtherError {
-                        message: format!("Failed to write manifest due to: {}", err)
-                    }
-                )?
-        )?;
-
-        Ok(())
-    }
-
-    pub async fn save_to_file_async(&self, base_path: &Path) -> Result<(), ImageManagerError> {
-        tokio::fs::write(
-            base_path.join("manifest.json"),
-            serde_json::to_string_pretty(&self)
-                .map_err(|err|
-                    ImageManagerError::OtherError {
-                        message: format!("Failed to write manifest due to: {}", err)
-                    }
-                )?
-        ).await?;
-
-        Ok(())
     }
 
     pub fn created_datetime(&self) -> DateTime<Local> {
@@ -122,6 +85,13 @@ impl Layer {
     }
 }
 
+impl FromSql for Layer {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let value = serde_json::Value::column_result(value)?;
+        serde_json::from_value::<Layer>(value).map_err(|_| FromSqlError::InvalidType)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Image {
     pub hash: ImageId,
@@ -135,11 +105,15 @@ impl Image {
             tag
         }
     }
+
+    pub fn from_row(row: &Row) -> rusqlite::Result<Image> {
+        Ok(Image::new(row.get(0)?, row.get(1)?))
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ImageMetadata {
     pub image: Image,
-    pub created: SystemTime,
+    pub created: DateTime<Local>,
     pub size: DataSize
 }

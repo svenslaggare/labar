@@ -1,7 +1,5 @@
 use std::path::{Path, PathBuf};
-
 use chrono::{DateTime, Local};
-
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
 use structopt::StructOpt;
@@ -23,10 +21,12 @@ use crate::reference::{ImageTag, Reference};
 use crate::registry::RegistryConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FileConfig {
     default_registry: Option<String>,
     registry_username: Option<String>,
     registry_password: Option<String>,
+    #[serde(default)]
     registry_use_ssl: bool
 }
 
@@ -166,7 +166,7 @@ fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageM
 
     config.registry_use_ssl = file_config.registry_use_ssl;
 
-    ImageManager::from_state_file(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()))
+    ImageManager::with_config(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
 }
 
 fn create_write_lock(_file_config: &FileConfig) -> FileLock {
@@ -288,7 +288,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::ListUnpackings {} => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let unpackings = image_manager.list_unpackings();
+            let unpackings = image_manager.list_unpackings().map_err(|err| format!("{}", err))?;
             let mut table_printer = TablePrinter::new(
                 vec![
                     "PATH".to_owned(),

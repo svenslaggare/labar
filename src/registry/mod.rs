@@ -190,15 +190,20 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
-    let image_manager = create_image_manager(&state, &token);
+    let (layer, base_folder) = {
+        let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
-    let layer = image_manager.get_layer(&layer_reference)?;
+        let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
+        let layer = image_manager.get_layer(&layer_reference)?;
+        let base_folder = image_manager.config().base_folder().to_path_buf();
+
+        (layer, base_folder)
+    };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
             let source_path = std::path::Path::new(source_path);
-            let abs_source_path = image_manager.config().base_folder().join(source_path);
+            let abs_source_path = base_folder.join(source_path);
 
             let file = tokio::fs::File::open(&abs_source_path).await?;
             let stream = ReaderStream::with_capacity(file, 4096);
@@ -239,12 +244,8 @@ async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
         );
     }
 
-    let folder = image_manager.config().get_layer_folder(&layer.hash);
-    tokio::fs::create_dir_all(&folder).await?;
-    layer.save_to_file_async(&folder).await?;
-
     info!("Uploaded layer manifest: {}", layer.hash);
-    image_manager.add_layer(layer);
+    image_manager.insert_layer(layer)?;
 
     Ok(
         Json(
@@ -263,15 +264,26 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
 
     let _lock = create_write_lock(&state).await;
-    let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
-    let layer = image_manager.get_layer(&layer_reference)?;
+    let (layer, base_folder) = {
+        let image_manager = create_image_manager(&state, &token);
+
+        let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
+        let layer = image_manager.get_layer(&layer_reference)?;
+        let base_folder = image_manager.config().base_folder().to_path_buf();
+
+        (layer, base_folder)
+    };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
-            let abs_source_path = image_manager.config().base_folder().join(source_path).to_str().unwrap().to_owned();
+            let abs_source_path = base_folder.join(source_path).to_str().unwrap().to_owned();
             let temp_file_path = abs_source_path.to_owned() + ".tmp";
+            let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
+            if let Some(parent) = temp_file_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+
             let mut file = tokio::fs::File::create(&temp_file_path).await?;
 
             let mut stream = request.into_body().into_data_stream();
@@ -301,20 +313,10 @@ async fn create_write_lock(state: &AppState) -> FileLock {
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
-    let mut image_manager = ImageManager::with_config(
+    let image_manager = ImageManager::with_config(
         state.config.image_manager_config(),
         EmptyPrinter::new()
-    );
-
-    let result = if image_manager.state_exists() {
-        image_manager.load_state()
-    } else {
-        image_manager.save_state()
-    };
-
-    if let Err(err) = result {
-        println!("Failed loading state: {}", err);
-    }
+    ).unwrap();
 
     image_manager
 }
