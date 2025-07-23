@@ -29,6 +29,7 @@ toml = "0.8"
 sha2 = "0.10"
 base16ct = { version = "0.2.0", features = ["alloc"] }
 base64 = "0.22"
+zip = "4"
 
 dirs = "6"
 

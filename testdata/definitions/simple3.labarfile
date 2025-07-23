@@ -1,0 +1,2 @@
+COPY testdata/rawdata/file1.txt test/file1.txt
+MKDIR test2

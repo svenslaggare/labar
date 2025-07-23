@@ -62,13 +62,18 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub fn unpack(&mut self, unpack_dir: &Path, reference: &Reference, replace: bool) -> ImageManagerResult<()> {
-        self.unpack_manager.unpack(&mut self.layer_manager, unpack_dir, reference, replace)?;
+    pub fn unpack(&mut self, reference: &Reference, unpack_folder: &Path, replace: bool) -> ImageManagerResult<()> {
+        self.unpack_manager.unpack(&mut self.layer_manager, reference, unpack_folder, replace)?;
         Ok(())
     }
 
-    pub fn remove_unpacking(&mut self, unpack_dir: &Path, force: bool) -> ImageManagerResult<()> {
-        self.unpack_manager.remove_unpacking(&mut self.layer_manager, unpack_dir, force)?;
+    pub fn remove_unpacking(&mut self, unpack_folder: &Path, force: bool) -> ImageManagerResult<()> {
+        self.unpack_manager.remove_unpacking(&mut self.layer_manager, unpack_folder, force)?;
+        Ok(())
+    }
+
+    pub fn extract(&self, reference: &Reference, archive_path: &Path) -> ImageManagerResult<()> {
+        self.unpack_manager.extract(&self.layer_manager, reference, archive_path)?;
         Ok(())
     }
 

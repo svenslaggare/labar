@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use zip::result::ZipError;
 
 mod layer;
 mod unpack;
@@ -14,6 +15,7 @@ pub enum ImageManagerError {
     LayerNotFound { image_id: ImageId },
     ImageNotFound { reference: Reference },
     FileIOError { message: String },
+    ZIPError(ZipError),
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
     RegistryError { error: RegistryError },
@@ -35,6 +37,13 @@ impl From<std::io::Error> for ImageManagerError {
         ImageManagerError::FileIOError { message: format!("{}", error) }
     }
 }
+
+impl From<ZipError> for ImageManagerError {
+    fn from(error: ZipError) -> Self {
+        ImageManagerError::ZIPError(error)
+    }
+}
+
 
 impl From<RegistryError> for ImageManagerError {
     fn from(error: RegistryError) -> Self {
@@ -62,6 +71,9 @@ impl std::fmt::Display for ImageManagerError {
             }
             ImageManagerError::FileIOError { message } => {
                 write!(f, "{}", message)
+            },
+            ImageManagerError::ZIPError(error) => {
+                write!(f, "{}", error)
             },
             ImageManagerError::UnpackingExist { path } => {
                 write!(f, "An unpacking already exist at {}", path)

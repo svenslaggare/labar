@@ -123,6 +123,13 @@ enum CommandLineInput {
         #[structopt(long, help="Force removes an unpacking, not guaranteeing that all files are removed, but entry removed")]
         force: bool,
     },
+    #[structopt(about="Extracts an image to an archive file")]
+    Extract {
+        #[structopt(name="reference", help="The image to extract")]
+        reference: Reference,
+        #[structopt(name="archive", help="The archive file to extract into")]
+        archive: String,
+    },
     #[structopt(about="Removes layers not used")]
     Purge {
 
@@ -321,13 +328,17 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.unpack(&Path::new(&destination), &reference, replace).map_err(|err| format!("{}", err))?;
+            image_manager.unpack(&reference, &Path::new(&destination), replace).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             image_manager.remove_unpacking(&Path::new(&path), force).map_err(|err| format!("{}", err))?;
+        }
+        CommandLineInput::Extract { reference, archive } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            image_manager.extract(&reference, Path::new(&archive)).map_err(|err| format!("{}", err))?;
         }
         CommandLineInput::Purge {} => {
             let _write_lock = create_write_lock(&file_config);
