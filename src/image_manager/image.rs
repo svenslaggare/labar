@@ -298,12 +298,13 @@ impl ImageManager {
             } else {
                 self.printer.println(&format!("\t* Downloading layer: {}", current));
                 let layer = self.registry_manager.download_layer(self.config(), registry, &current).await?;
+                self.insert_layer(layer.clone())?;
+
                 if top_level_hash.is_none() {
                     top_level_hash = Some(layer.hash.clone());
                 }
 
                 visit_layer(&mut stack, &layer);
-                self.insert_layer(layer)?;
             }
         }
 
