@@ -108,18 +108,25 @@ impl LayerManager {
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
-        if self.state_manager.get_image(&image.tag)?.is_some() {
+        self.state_manager.begin_transaction()?;
+
+        if self.state_manager.image_exists(&image.tag)? {
             self.state_manager.replace_image(image)?;
         } else {
             self.state_manager.insert_image(image)?;
         }
 
+        self.state_manager.end_transaction()?;
         Ok(())
     }
 
     pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<Option<Image>> {
+        self.state_manager.begin_transaction()?;
+
         let image = self.state_manager.get_image(tag)?;
         self.state_manager.remove_image(tag)?;
+
+        self.state_manager.end_transaction()?;
         Ok(image)
     }
 

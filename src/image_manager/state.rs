@@ -69,11 +69,21 @@ impl StateManager {
         )
     }
 
-    pub fn add_login(&self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+    pub fn begin_transaction(&self) -> SqlResult<()> {
         self.connection.execute("BEGIN TRANSACTION", ())?;
+        Ok(())
+    }
+
+    pub fn end_transaction(&self) -> SqlResult<()> {
+        self.connection.execute("COMMIT", ())?;
+        Ok(())
+    }
+
+    pub fn add_login(&self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+        self.begin_transaction()?;
         self.connection.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
         self.connection.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
-        self.connection.execute("COMMIT", ())?;
+        self.end_transaction()?;
         Ok(())
     }
 
@@ -128,9 +138,19 @@ impl StateManager {
     pub fn get_image(&self, tag: &ImageTag) -> SqlResult<Option<Image>> {
         self.connection.query_row(
             "SELECT hash, tag FROM images WHERE tag=?1",
-            [tag.to_string()],
+            [tag],
             |row| Image::from_row(&row)
         ).optional()
+    }
+
+    pub fn image_exists(&self, tag: &ImageTag) -> SqlResult<bool> {
+        let count = self.connection.query_one(
+            "SELECT COUNT(*) FROM images WHERE tag=?1",
+            [tag],
+            |row| row.get::<_, i64>(0)
+        )?;
+
+        Ok(count > 0)
     }
 
     pub fn insert_image(&self, image: Image) -> SqlResult<()> {

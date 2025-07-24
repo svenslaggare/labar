@@ -8,7 +8,7 @@ use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag, Reference};
-use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
+use crate::registry::model::{AppErrorResponse, ImageSpec, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
@@ -34,7 +34,7 @@ impl RegistryManager {
     pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
         let full_url = format!("{}://{}/verify", self.http_mode(), registry);
         let response = self.http_client.execute(self.http_client.get(full_url).basic_auth(&username, Some(&password)).build()?).await?;
-        RegistryError::from_status_code(response.status(), "url: /verify".to_owned())?;
+        RegistryError::from_response(response, "url: /verify".to_owned()).await?;
         Ok(())
     }
 
@@ -86,32 +86,50 @@ impl RegistryManager {
                               config: &ImageManagerConfig,
                               registry: &str,
                               layer: &Layer) -> RegistryResult<()> {
-        let mut request = self.json_post_registry_response(registry, "layers/manifest").build()?;
-
+        // Begin upload
+        let mut request = self.json_post_registry_response(registry, "layers/begin-upload").build()?;
         *request.body_mut() = Some(Body::from(serde_json::to_string(&layer)?));
         let response = self.http_client.execute(request).await?;
-        RegistryError::from_status_code(response.status(), "manifest".to_owned())?;
 
-        let upload_result: UploadLayerManifestResult = serde_json::from_str(&response.text().await?)?;
-        if let UploadLayerManifestStatus::AlreadyExist = upload_result.status {
+        let upload_response = RegistryError::from_response(response, "begin-upload".to_owned()).await?;
+        let upload_response: UploadLayerResponse = serde_json::from_str(&upload_response)?;
+        let upload_id = upload_response.upload_id.unwrap_or(String::new()).clone();
+
+        if UploadStatus::Started != upload_response.status {
             self.printer.println("\t\t* Layer already exist.");
             return Ok(());
         }
 
+        // Upload every file
         let mut file_index = 0;
         for operation in &layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
-                let mut request = self.build_post_request(registry, &format!("layers/{}/upload/{}", layer.hash, file_index)).build()?;
+                let mut request = self.build_post_request(registry, &format!("layers/{}/upload/{}", layer.hash, file_index))
+                    .header("UPLOAD_ID", upload_id.clone())
+                    .build()?;
 
                 let file = tokio::fs::File::open(config.base_folder.join(source_path)).await?;
                 let body = Body::from(file);
                 *request.body_mut() = Some(body);
 
                 let response = self.http_client.execute(request).await?;
-                RegistryError::from_status_code(response.status(), format!("file {}", file_index))?;
+                RegistryError::from_response(response, format!("file {}", file_index)).await?;
 
                 file_index += 1;
             }
+        }
+
+        // Commit upload
+        let request = self.json_post_registry_response(registry, "layers/end-upload")
+            .header("UPLOAD_ID", upload_id.clone())
+            .build()?;
+        let response = self.http_client.execute(request).await?;
+
+        let upload_response = RegistryError::from_response(response, "begin-upload".to_owned()).await?;
+        let upload_response: UploadLayerResponse = serde_json::from_str(&upload_response)?;
+
+        if UploadStatus::Finished != upload_response.status {
+            return Err(RegistryError::FailedToUpload);
         }
 
         Ok(())
@@ -128,15 +146,14 @@ impl RegistryManager {
         )?));
 
         let response = self.http_client.execute(request).await?;
-        RegistryError::from_status_code(response.status(), "image".to_owned())?;
+        RegistryError::from_response(response, "image".to_owned()).await?;
 
         Ok(())
     }
 
     async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<String> {
         let response = self.get_registry_response(registry, url).await?;
-        RegistryError::from_status_code(response.status(), format!("url: /{}", url))?;
-        let response = response.text().await?;
+        let response = RegistryError::from_response(response, format!("url: /{}", url)).await?;
         Ok(response)
     }
 
@@ -181,20 +198,31 @@ impl RegistryManager {
 #[derive(Debug)]
 pub enum RegistryError {
     InvalidAuthentication,
+    FailedToUpload,
+    Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
-    HttpFailed { status_code: StatusCode, description: String },
     Deserialize(serde_json::Error),
     IO(std::io::Error)
 }
 
 impl RegistryError {
-    pub fn from_status_code(status_code: StatusCode, description: String) -> RegistryResult<()> {
-        if status_code.is_success() {
-            Ok(())
-        } else if status_code == StatusCode::UNAUTHORIZED {
+    pub async fn from_response(response: reqwest::Response, operation: String) -> RegistryResult<String> {
+        if response.status().is_success() {
+            Ok(response.text().await?)
+        } else if response.status() == StatusCode::UNAUTHORIZED {
             Err(RegistryError::InvalidAuthentication)
         } else {
-            Err(RegistryError::HttpFailed { status_code, description })
+            let status_code = response.status();
+            let text = response.text().await?;
+            let error: AppErrorResponse = serde_json::from_str(&text)?;
+
+            Err(
+                RegistryError::Operation {
+                    status_code,
+                    message: error.error,
+                    operation
+                }
+            )
         }
     }
 }
@@ -203,8 +231,9 @@ impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
+            RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
+            RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
-            RegistryError::HttpFailed { status_code, description } => write!(f, "Http failed with status code: {} ({})", status_code, description),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),
             RegistryError::IO(err) => write!(f, "I/O: {}", err)
         }

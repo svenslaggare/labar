@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::str::FromStr;
-
+use std::time::Instant;
 use chrono::Local;
 use log::info;
 
@@ -14,6 +15,7 @@ use serde::de::DeserializeOwned;
 use futures::StreamExt;
 use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -21,6 +23,7 @@ use axum::body::Body;
 use axum::extract::{Path, State, Request, FromRequest};
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
+
 use rcgen::CertifiedKey;
 
 pub mod model;
@@ -28,10 +31,9 @@ pub mod auth;
 
 use crate::image::{Layer, LayerOperation};
 use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerConfig};
-use crate::lock::FileLock;
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider, UsersSpec};
-use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerManifestResult, UploadLayerManifestStatus};
+use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerResponse, UploadStatus};
 
 #[derive(Debug, Deserialize)]
 pub struct RegistryConfig {
@@ -39,13 +41,18 @@ pub struct RegistryConfig {
 
     pub address: SocketAddr,
 
-    #[serde(default)]
-    pub use_ssl: bool,
+    #[serde(default="default_pending_upload_expiration")]
+    pub pending_upload_expiration: f64,
+
     pub ssl_cert_path: Option<PathBuf>,
     pub ssl_key_path: Option<PathBuf>,
 
     #[serde(default)]
     pub users: UsersSpec
+}
+
+fn default_pending_upload_expiration() -> f64 {
+    30.0 * 60.0
 }
 
 impl RegistryConfig {
@@ -77,6 +84,7 @@ pub async fn run(config: RegistryConfig) {
                 info!("Generating SSL certificate...");
                 let subject_alt_names = vec!["localhost".to_string()];
                 let CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(subject_alt_names).unwrap();
+
                 std::fs::create_dir_all(&config.data_path).unwrap();
                 std::fs::write(&cert_path, cert.pem()).unwrap();
                 std::fs::write(&key_path, signing_key.serialize_pem()).unwrap();
@@ -100,7 +108,8 @@ pub async fn run(config: RegistryConfig) {
         .route("/images/{*tag}", delete(remove_image))
         .route("/layers/{layer}/manifest", get(get_layer_manifest))
         .route("/layers/{layer}/download/{index}", get(download_layer))
-        .route("/layers/manifest", post(upload_layer_manifest))
+        .route("/layers/begin-upload", post(begin_layer_upload))
+        .route("/layers/end-upload", post(end_layer_upload))
         .route("/layers/{layer}/upload/{index}", post(upload_layer_file))
         .with_state(state.clone())
     ;
@@ -114,7 +123,8 @@ pub async fn run(config: RegistryConfig) {
 
 pub struct AppState {
     config: RegistryConfig,
-    access_provider: Box<dyn AuthProvider + Send + Sync>
+    access_provider: Box<dyn AuthProvider + Send + Sync>,
+    pending_uploads: Mutex<PendingUploads>
 }
 
 impl AppState {
@@ -124,10 +134,19 @@ impl AppState {
         Arc::new(
             AppState {
                 config,
-                access_provider
+                access_provider,
+                pending_uploads: Mutex::new(HashMap::new())
             }
         )
     }
+}
+
+type PendingUploads = HashMap<ImageId, PendingUpload>;
+
+struct PendingUpload {
+    upload_id: String,
+    layer: Layer,
+    started: Instant
 }
 
 async fn verify(State(state): State<Arc<AppState>>,
@@ -152,10 +171,9 @@ async fn set_image(State(state): State<Arc<AppState>>,
 
     let spec: ImageSpec = decode_json(request).await?;
 
-    let _lock = create_write_lock(&state).await;
     let mut image_manager = create_image_manager(&state, &token);
-
     image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
+
     info!("Uploaded image: {} ({})", spec.tag, spec.hash);
     Ok(())
 }
@@ -165,9 +183,9 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
                        request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
 
-    let image_manager = create_image_manager(&state, &token);
-
     let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
+
+    let image_manager = create_image_manager(&state, &token);
     let image = image_manager.resolve_image(&tag)?;
 
     Ok(Json(json!(image)))
@@ -178,11 +196,11 @@ async fn remove_image(State(state): State<Arc<AppState>>,
                       request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
 
-    let _lock = create_write_lock(&state).await;
-    let mut image_manager = create_image_manager(&state, &token);
-
     let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
+
+    let mut image_manager = create_image_manager(&state, &token);
     image_manager.remove_image(&tag)?;
+
     info!("Removed image: {}", tag);
 
     Ok(Json(json!({ "status": "success" })))
@@ -240,33 +258,97 @@ async fn download_layer(State(state): State<Arc<AppState>>,
     Err(AppError::LayerFileNotFound)
 }
 
-async fn upload_layer_manifest(State(state): State<Arc<AppState>>,
-                               request: Request) -> AppResult<impl IntoResponse> {
+async fn begin_layer_upload(State(state): State<Arc<AppState>>,
+                            request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
 
     let layer: Layer = decode_json(request).await?;
 
-    let _lock = create_write_lock(&state).await;
-    let mut image_manager = create_image_manager(&state, &token);
+    let mut pending_uploads = state.pending_uploads.lock().await;
 
+    let image_manager = create_image_manager(&state, &token);
     if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
         return Ok(
             Json(json!(
-                UploadLayerManifestResult {
-                    status: UploadLayerManifestStatus::AlreadyExist
+                UploadLayerResponse {
+                    status: UploadStatus::AlreadyExist,
+                    upload_id: None
                 }
             ))
         );
     }
 
-    info!("Uploaded layer manifest: {}", layer.hash);
-    image_manager.insert_layer(layer)?;
+    if let Some(existing) = pending_uploads.get(&layer.hash) {
+        if existing.started.elapsed().as_secs_f64() < state.config.pending_upload_expiration {
+            return Ok(
+                Json(json!(
+                    UploadLayerResponse {
+                        status: UploadStatus::UploadingPending,
+                        upload_id: None
+                    }
+                ))
+            );
+        }
+    }
+
+    let upload_id = uuid::Uuid::new_v4().to_string();
+    let hash = layer.hash.clone();
+    pending_uploads.insert(
+        layer.hash.clone(),
+        PendingUpload {
+            upload_id: upload_id.clone(),
+            layer,
+            started: Instant::now()
+        }
+    );
+
+    info!("Beginning upload of layer {} (id: {})", hash, upload_id);
 
     Ok(
         Json(
             json!(
-                UploadLayerManifestResult {
-                    status: UploadLayerManifestStatus::Uploaded
+                UploadLayerResponse {
+                    status: UploadStatus::Started,
+                    upload_id: Some(upload_id.clone())
+                }
+            )
+        )
+    )
+}
+
+async fn end_layer_upload(State(state): State<Arc<AppState>>,
+                          request: Request) -> AppResult<impl IntoResponse> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+    let upload_id = get_upload_id(&request, &token)?;
+
+    let mut pending_uploads = state.pending_uploads.lock().await;
+    let pending_upload = remove_pending_upload_by_id(&mut pending_uploads, &upload_id)?;
+
+    let mut image_manager = create_image_manager(&state, &token);
+
+    if !pending_upload.layer.verify(image_manager.config().base_folder()) {
+        info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload.layer.hash, upload_id);
+
+        return Ok(
+            Json(json!(
+                UploadLayerResponse {
+                    status: UploadStatus::IncompleteUpload,
+                    upload_id: None
+                }
+            ))
+        );
+    }
+
+    image_manager.insert_layer(pending_upload.layer.clone())?;
+
+    info!("Finished upload of layer {} (id: {})", pending_upload.layer.hash, upload_id);
+
+    Ok(
+        Json(
+            json!(
+                UploadLayerResponse {
+                    status: UploadStatus::Finished,
+                    upload_id: None
                 }
             )
         )
@@ -277,15 +359,18 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                            Path((layer, file_index)): Path<(String, usize)>,
                            request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
-
-    let _lock = create_write_lock(&state).await;
+    let upload_id = get_upload_id(&request, &token)?;
 
     let (layer, base_folder) = {
-        let image_manager = create_image_manager(&state, &token);
+        let pending_uploads = state.pending_uploads.lock().await;
+        let pending_upload = get_pending_upload_by_id(&pending_uploads, &upload_id)?;
 
-        let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
-        let layer = image_manager.get_layer(&layer_reference)?;
-        let base_folder = image_manager.config().base_folder().to_path_buf();
+        if layer != pending_upload.layer.hash.to_string() {
+            return Err(AppError::LayerFileNotFound);
+        }
+
+        let layer = pending_upload.layer.clone();
+        let base_folder = state.config.image_manager_config().base_folder().to_path_buf();
 
         (layer, base_folder)
     };
@@ -293,9 +378,6 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
             let abs_source_path = base_folder.join(source_path);
-            if abs_source_path.exists() {
-                return Err(AppError::LayerFileAlreadyExists);
-            }
 
             let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
             let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
@@ -327,8 +409,32 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     Err(AppError::LayerFileNotFound)
 }
 
-async fn create_write_lock(state: &AppState) -> FileLock {
-    FileLock::new_async(state.config.image_manager_config().base_folder().join("write_lock")).await
+fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {
+    request.headers()
+        .get("UPLOAD_ID").map(|x| x.to_str().ok()).flatten()
+        .map(|x| x.to_owned())
+        .ok_or_else(|| AppError::UploadIdNotSpecified)
+}
+
+fn get_pending_upload_by_id<'a>(pending_uploads: &'a PendingUploads, upload_id: &str) -> AppResult<&'a PendingUpload> {
+    for pending_upload in pending_uploads.values() {
+        if pending_upload.upload_id == upload_id {
+            return Ok(pending_upload);
+        }
+    }
+
+    Err(AppError::InvalidUploadId)
+}
+
+fn remove_pending_upload_by_id(pending_uploads: &mut PendingUploads, upload_id: &str) -> AppResult<PendingUpload> {
+    for pending_upload in pending_uploads.values() {
+        if pending_upload.upload_id == upload_id {
+            let hash = pending_upload.layer.hash.clone();
+            return pending_uploads.remove(&hash).ok_or_else(|| AppError::InvalidUploadId);
+        }
+    }
+
+    Err(AppError::InvalidUploadId)
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {

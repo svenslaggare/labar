@@ -584,7 +584,7 @@ fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &P
     RegistryConfig {
         data_path: tmp_registry_folder.to_path_buf(),
         address,
-        use_ssl: false,
+        pending_upload_expiration: 30.0,
         ssl_cert_path: None,
         ssl_key_path: None,
         users: vec![

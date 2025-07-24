@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-
+use std::path::Path;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
@@ -82,6 +82,21 @@ impl Layer {
         }
 
         None
+    }
+
+    pub fn verify(&self, base_folder: &Path) -> bool {
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::File { source_path, .. } => {
+                    if !base_folder.join(source_path).exists() {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        true
     }
 }
 

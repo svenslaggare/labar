@@ -16,10 +16,17 @@ pub enum AppError {
     LayerFileNotFound,
     LayerFileAlreadyExists,
     FailedToUploadLayerFile(String),
+    UploadIdNotSpecified,
+    InvalidUploadId,
     InvalidImageReference(String),
     Unauthorized,
     IO(std::io::Error),
     Other(Response)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AppErrorResponse {
+    pub error: String
 }
 
 impl IntoResponse for AppError {
@@ -30,13 +37,13 @@ impl IntoResponse for AppError {
                     err @ ImageManagerError::ImageNotFound { .. } => {
                         (
                             StatusCode::NOT_FOUND,
-                            Json(json!({ "error": format!("Image not found due to: {}", err) }))
+                            Json(json!(AppErrorResponse { error: format!("Image not found due to: {}", err) }))
                         ).into_response()
                     }
                     err => {
                         (
                             StatusCode::BAD_REQUEST,
-                            Json(json!({ "error": format!("{}", err) }))
+                            Json(json!(AppErrorResponse { error: format!("{}", err) }))
                         ).into_response()
                     }
                 }
@@ -44,25 +51,37 @@ impl IntoResponse for AppError {
             AppError::LayerFileNotFound => {
                 (
                     StatusCode::NOT_FOUND,
-                    Json(json!({ "error": "Layer file not found" }))
+                    Json(json!(AppErrorResponse { error: "Layer file not found".to_owned() }))
                 ).into_response()
             }
             AppError::LayerFileAlreadyExists => {
                 (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": "The layer file already exists" }))
+                    Json(json!(AppErrorResponse { error: "The layer file already exists".to_owned() }))
                 ).into_response()
             }
             AppError::FailedToUploadLayerFile(err) => {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("Failed to upload layer file: {}", err) }))
+                    Json(json!(AppErrorResponse { error: format!("Failed to upload layer file: {}", err) }))
+                ).into_response()
+            }
+            AppError::UploadIdNotSpecified => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!(AppErrorResponse { error: "Upload id not specified".to_owned() }))
+                ).into_response()
+            }
+            AppError::InvalidUploadId => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!(AppErrorResponse { error: "Invalid upload id".to_owned() }))
                 ).into_response()
             }
             AppError::InvalidImageReference(err) => {
                 (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({ "error": format!("{}", err) }))
+                    Json(json!(AppErrorResponse { error: format!("{}", err) }))
                 ).into_response()
             }
             AppError::Unauthorized => {
@@ -74,7 +93,7 @@ impl IntoResponse for AppError {
             AppError::IO(err) => {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "error": format!("I/O error: {}", err) }))
+                    Json(json!(AppErrorResponse { error: format!("I/O error: {}", err)}))
                 ).into_response()
             }
             AppError::Other(response) => {
@@ -97,16 +116,23 @@ impl From<std::io::Error> for AppError {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct UploadLayerManifestResult {
-    pub status: UploadLayerManifestStatus
+pub struct UploadLayerResponse {
+    pub status: UploadStatus,
+    pub upload_id: Option<String>
 }
 
-#[derive(Serialize, Deserialize)]
-pub enum UploadLayerManifestStatus {
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+pub enum UploadStatus {
     #[serde(rename="already_exist")]
     AlreadyExist,
-    #[serde(rename="uploaded")]
-    Uploaded
+    #[serde(rename="upload_pending")]
+    UploadingPending,
+    #[serde(rename="started")]
+    Started,
+    #[serde(rename="finished")]
+    Finished,
+    #[serde(rename="incomplete_upload")]
+    IncompleteUpload
 }
 
 #[derive(Serialize, Deserialize)]
