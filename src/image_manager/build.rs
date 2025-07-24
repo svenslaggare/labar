@@ -1,24 +1,30 @@
 use std::path::{Path};
 use std::str::FromStr;
+use std::sync::Arc;
+
 use sha2::{Sha256, Digest};
 
+use crate::content::compute_content_hash;
 use crate::image_manager::layer::{LayerManager};
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::printing::BoxPrinter;
+use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag};
 
 pub struct BuildManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter
+    printer: BoxPrinter,
+    state_manager: Arc<StateManager>
 }
 
 impl BuildManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> BuildManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> BuildManager {
         BuildManager {
             config,
-            printer
+            printer,
+            state_manager
         }
     }
 
@@ -136,19 +142,31 @@ impl BuildManager {
                         );
                     }
 
+                    let modified_time = source_path_entry.metadata()?.modified()?;
+                    let modified_time_ms = modified_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+
+                    let content_hash = match self.state_manager.get_content_hash(source_path, modified_time_ms)? {
+                        Some(content_hash) => content_hash,
+                        None => {
+                            let content_hash = compute_content_hash(source_path_entry)?;
+                            self.state_manager.add_content_hash(source_path, modified_time_ms, &content_hash)?;
+                            content_hash
+                        }
+                    };
+
                     layer_operations.push(LayerOperation::File {
                         path: path.clone(),
                         source_path: source_path.clone(),
+                        content_hash,
                         link_type: *link_type,
                         writable: *writable
                     });
 
-                    let created_time = source_path_entry.metadata()?.modified()?;
                     hash_input += &format!(
                         "{}{}{}{}{}",
                         path,
                         source_path,
-                        created_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+                        modified_time_ms,
                         link_type,
                         writable
                     );
@@ -187,8 +205,8 @@ fn test_build() {
 
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
-    let build_manager = BuildManager::new(config, printer);
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
+    let build_manager = BuildManager::new(config, printer, state_manager.clone());
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
@@ -231,8 +249,8 @@ fn test_build_with_cache() {
 
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
-    let build_manager = BuildManager::new(config, printer.clone());
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
+    let build_manager = BuildManager::new(config, printer.clone(), state_manager.clone());
 
     // Build first time
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -292,8 +310,8 @@ fn test_build_with_image_ref() {
 
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager);
-    let build_manager = BuildManager::new(config, printer);
+    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
+    let build_manager = BuildManager::new(config, printer, state_manager.clone());
 
     let image_definition = ImageDefinition::parse_without_context(
         &std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()

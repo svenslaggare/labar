@@ -41,7 +41,7 @@ impl ImageManager {
 
                 state_manager: state_manager.clone(),
                 layer_manager: LayerManager::new(config.clone(), state_manager.clone()),
-                build_manager: BuildManager::new(config.clone(), printer.clone()),
+                build_manager: BuildManager::new(config.clone(), printer.clone(), state_manager.clone()),
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone(), state_manager.clone()),
                 registry_manager: RegistryManager::new(config.clone(), printer.clone(), state_manager.clone()),
             }

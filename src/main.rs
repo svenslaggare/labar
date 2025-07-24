@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
@@ -228,12 +229,13 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             }
 
             println!("Building image: {}", tag);
+            let start_time = Instant::now();
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
             let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
             let context = context.unwrap_or_else(|| std::env::current_dir().unwrap());
             let image = image_manager.build_image(&context, image_definition, &tag, force).map_err(|err| format!("{}", err))?;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
-            println!("Built image {} ({}) of size {:.2}", image.tag, image.hash, image_size);
+            println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }
         CommandLineInput::RemoveImage { tag } => {
             let _write_lock = create_write_lock(&file_config);
@@ -355,6 +357,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Login { registry, username, password } => {
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.login(&registry, &username, &password).await.map_err(|err| format!("{}", err))?;
+            println!("Logged into registry {}.", registry);
         }
         CommandLineInput::Pull { tag } => {
             let _write_lock = create_write_lock(&file_config);

@@ -62,6 +62,18 @@ impl StateManager {
             ()
         )?;
 
+        connection.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS content_hash_cache(
+                file TEXT,
+                modified INTEGER,
+                hash TEXT,
+                PRIMARY KEY (file, modified)
+            );
+            "#,
+            ()
+        )?;
+
         Ok(
             StateManager {
                 connection,
@@ -204,6 +216,19 @@ impl StateManager {
 
     pub fn remove_unpacking(&self, destination: &str) -> SqlResult<()> {
         self.connection.execute("DELETE FROM unpackings WHERE destination=?1", (&destination, ))?;
+        Ok(())
+    }
+
+    pub fn get_content_hash(&self, file: &str, modified: u64) -> SqlResult<Option<String>> {
+        self.connection.query_row(
+            "SELECT hash FROM content_hash_cache WHERE file=?1 AND modified=?2",
+            (file, modified),
+            |row| row.get(0)
+        ).optional()
+    }
+
+    pub fn add_content_hash(&self, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
+        self.connection.execute("INSERT INTO content_hash_cache (file, modified, hash) VALUES (?1, ?2, ?3)", (file, modified, hash))?;
         Ok(())
     }
 }

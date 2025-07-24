@@ -128,7 +128,7 @@ impl UnpackManager {
                         unpack_folder
                     )?;
                 },
-                LayerOperation::File { path, source_path, link_type, writable } => {
+                LayerOperation::File { path, source_path, link_type, writable, .. } => {
                     let abs_source_path = self.config.base_folder.join(source_path);
 
                     has_files = true;
@@ -276,7 +276,6 @@ impl UnpackManager {
 
                             writer.write_all(&buffer[..count])?;
                         }
-
                     }
                     LayerOperation::Directory { path } => {
                         writer.add_directory_from_path(path, SimpleFileOptions::default())?
@@ -312,7 +311,7 @@ fn test_unpack() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager.clone());
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -353,7 +352,7 @@ fn test_unpack_exist() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -401,7 +400,7 @@ fn test_remove_unpack() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -448,7 +447,7 @@ fn test_unpack_replace1() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -496,7 +495,7 @@ fn test_unpack_replace2() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
@@ -577,7 +576,7 @@ fn test_extract() {
     let printer = ConsolePrinter::new();
     let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager.clone());
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple3.labarfile").unwrap());

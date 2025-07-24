@@ -27,7 +27,7 @@ impl Display for LinkType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerOperation {
     Image { hash: ImageId },
-    File { path: String, source_path: String, link_type: LinkType, writable: bool },
+    File { path: String, source_path: String, content_hash: String, link_type: LinkType, writable: bool },
     Directory { path: String }
 }
 

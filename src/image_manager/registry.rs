@@ -1,8 +1,11 @@
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 use std::sync::Arc;
+
 use futures::StreamExt;
 use reqwest::{Body, Client, StatusCode};
+
+use crate::content::{ContentHash};
 use crate::helpers::DeferredFileDelete;
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
@@ -63,7 +66,7 @@ impl RegistryManager {
 
         let mut file_index = 0;
         for operation in &mut layer.operations {
-            if let LayerOperation::File { source_path, .. } = operation {
+            if let LayerOperation::File { source_path, content_hash, .. } = operation {
                 let local_source_path = config.base_folder.join(Path::new(source_path));
                 if !local_source_path.exists() {
                     let tmp_local_source_path = Path::new(&(local_source_path.to_str().unwrap().to_owned() + ".tmp")).to_owned();
@@ -75,8 +78,16 @@ impl RegistryManager {
                     let mut byte_stream = response.bytes_stream();
 
                     let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
+                    let mut content_hasher = ContentHash::new();
                     while let Some(item) = byte_stream.next().await {
-                        tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
+                        let data = item?;
+                        let mut data = data.as_ref();
+                        content_hasher.add(data);
+                        tokio::io::copy(&mut data, &mut file).await?;
+                    }
+
+                    if &content_hasher.finalize() != content_hash {
+                        return Err(RegistryError::InvalidContentHash);
                     }
 
                     tokio::fs::rename(&tmp_local_source_path, &local_source_path).await?;
@@ -209,6 +220,7 @@ impl RegistryManager {
 pub enum RegistryError {
     InvalidAuthentication,
     FailedToUpload,
+    InvalidContentHash,
     Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
     Deserialize(serde_json::Error),
@@ -242,6 +254,7 @@ impl Display for RegistryError {
         match self {
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
+            RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),

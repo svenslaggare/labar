@@ -25,6 +25,7 @@ use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
 
 use rcgen::CertifiedKey;
+use crate::content::ContentHash;
 
 pub mod model;
 pub mod auth;
@@ -376,7 +377,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
-        if let LayerOperation::File { source_path, .. } = operation {
+        if let LayerOperation::File { source_path, content_hash, .. } = operation {
             let abs_source_path = base_folder.join(source_path);
 
             let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
@@ -388,9 +389,11 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             let mut file = tokio::fs::File::create(&temp_file_path).await?;
 
             let mut stream = request.into_body().into_data_stream();
+            let mut content_hasher = ContentHash::new();
             while let Some(chunk) = stream.next().await {
                 match chunk {
                     Ok(chunk) => {
+                        content_hasher.add(chunk.as_ref());
                         file.write_all(chunk.as_ref()).await?;
                     }
                     Err(err) => {
@@ -398,6 +401,10 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                         return Err(AppError::FailedToUploadLayerFile(err.to_string()));
                     }
                 }
+            }
+
+            if &content_hasher.finalize() != content_hash {
+                return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
             }
 
             tokio::fs::rename(&temp_file_path, abs_source_path).await?;
