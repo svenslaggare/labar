@@ -4,7 +4,6 @@ use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
 use structopt::StructOpt;
-use image::ImageMetadata;
 
 pub mod helpers;
 pub mod lock;
@@ -16,9 +15,10 @@ pub mod reference;
 pub mod content;
 
 use crate::helpers::TablePrinter;
+use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{BoxPrinter, ConsolePrinter, ImageManager, ImageManagerConfig};
+use crate::image_manager::{BoxPrinter, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::RegistryConfig;
 
@@ -349,25 +349,25 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
-        CommandLineInput::Push { tag } => {
-            let _write_lock = create_write_lock(&file_config);
-            let image_manager = create_image_manager(&file_config, printer.clone());
-            image_manager.push(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
-        },
         CommandLineInput::Login { registry, username, password } => {
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.login(&registry, &username, &password).await.map_err(|err| format!("{}", err))?;
             println!("Logged into registry {}.", registry);
         }
+        CommandLineInput::Push { tag } => {
+            let _write_lock = create_write_lock(&file_config);
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            transform_registry_result(image_manager.push(&tag, file_config.default_registry()).await)?;
+        },
         CommandLineInput::Pull { tag } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
-            image_manager.pull(&tag, file_config.default_registry()).await.map_err(|err| format!("{}", err))?;
+            transform_registry_result(image_manager.pull(&tag, file_config.default_registry()).await)?;
         },
         CommandLineInput::ListImagesRegistry { registry } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let images = image_manager.list_images_registry(&registry).await.map_err(|err| format!("{}", err))?;
+            let images = transform_registry_result(image_manager.list_images_registry(&registry).await)?;
             print_images(&images);
         }
         CommandLineInput::RunRegistry { config_file } => {
@@ -440,6 +440,20 @@ async fn main() -> Result<(), String> {
 
 fn get_config_file() -> PathBuf {
     dirs::home_dir().unwrap().join(".labar").join("config.toml")
+}
+
+fn transform_registry_result<T>(result: ImageManagerResult<T>) -> Result<T, String> {
+    match result {
+        Ok(value) => {
+            Ok(value)
+        }
+        Err(ImageManagerError::RegistryError { error: RegistryError::InvalidAuthentication }) => {
+            Err("Not signed into registry. Please run the login command.".to_owned())
+        }
+        Err(err) => {
+            Err(err.to_string())
+        }
+    }
 }
 
 const DATE_FORMAT: &str = "%Y-%m-%d %T";

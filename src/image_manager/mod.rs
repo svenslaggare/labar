@@ -144,6 +144,6 @@ impl ImageManagerConfig {
 
 pub use image::ImageManager;
 pub use printing::{BoxPrinter, ConsolePrinter, EmptyPrinter, Printer};
-use crate::image_definition::ImageParseError;
-use crate::image_manager::registry::RegistryError;
-use crate::reference::{ImageId, Reference};
+pub use crate::image_definition::ImageParseError;
+pub use crate::image_manager::registry::RegistryError;
+pub use crate::reference::{ImageId, Reference};
