@@ -401,6 +401,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             }
 
             tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+
             info!("Uploaded layer file: {}:{}", layer.hash, file_index);
             return Ok(Json(json!({ "status": "uploaded" })));
         }

@@ -74,3 +74,31 @@ pub fn get_temp_folder() -> PathBuf {
 
     named_temp_folder.path().to_owned()
 }
+
+pub struct DeferredFileDelete {
+    path: PathBuf,
+    skip: bool
+}
+
+impl DeferredFileDelete {
+    pub fn new(path: PathBuf) -> DeferredFileDelete {
+        DeferredFileDelete {
+            path,
+            skip: false,
+        }
+    }
+
+    pub fn skip(&mut self) {
+        self.skip = true;
+    }
+}
+
+impl Drop for DeferredFileDelete {
+    fn drop(&mut self) {
+        if !self.skip {
+            if let Err(err) = std::fs::remove_file(&self.path) {
+                println!("Failed to delete file due to: {}", err);
+            }
+        }
+    }
+}

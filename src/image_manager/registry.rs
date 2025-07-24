@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 use futures::StreamExt;
 use reqwest::{Body, Client, StatusCode};
-
+use crate::helpers::DeferredFileDelete;
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::StateManager;
@@ -65,14 +65,24 @@ impl RegistryManager {
         for operation in &mut layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
                 let local_source_path = config.base_folder.join(Path::new(source_path));
-                self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
+                if !local_source_path.exists() {
+                    let tmp_local_source_path = Path::new(&(local_source_path.to_str().unwrap().to_owned() + ".tmp")).to_owned();
+                    let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
 
-                let response = self.get_registry_response(registry, &format!("layers/{}/download/{}", reference, file_index)).await?;
-                let mut byte_stream = response.bytes_stream();
+                    self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
 
-                let mut file = tokio::fs::File::create(local_source_path).await?;
-                while let Some(item) = byte_stream.next().await {
-                    tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
+                    let response = self.get_registry_response(registry, &format!("layers/{}/download/{}", reference, file_index)).await?;
+                    let mut byte_stream = response.bytes_stream();
+
+                    let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
+                    while let Some(item) = byte_stream.next().await {
+                        tokio::io::copy(&mut item?.as_ref(), &mut file).await?;
+                    }
+
+                    tokio::fs::rename(&tmp_local_source_path, &local_source_path).await?;
+                    deferred_delete.skip();
+                } else {
+                    self.printer.println(&format!("\t\t* Skipping downloading file {}.", source_path));
                 }
 
                 file_index += 1;
