@@ -292,6 +292,17 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
         }
     }
 
+    if !layer.verify_valid_paths(image_manager.config().base_folder()) {
+        return Ok(
+            Json(json!(
+                UploadLayerResponse {
+                    status: UploadStatus::InvalidPaths,
+                    upload_id: None
+                }
+            ))
+        );
+    }
+
     let upload_id = uuid::Uuid::new_v4().to_string();
     let hash = layer.hash.clone();
     pending_uploads.insert(

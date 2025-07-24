@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use zip::write::{SimpleFileOptions};
 use zip::ZipWriter;
-
+use crate::helpers::clean_path;
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
@@ -64,30 +64,31 @@ impl UnpackManager {
                   unpack_folder: &Path,
                   replace: bool) -> ImageManagerResult<()> {
         if replace && unpack_folder.exists() {
-            if let Err(err) = self.remove_unpacking(layer_manager, unpack_folder, true) {
+            if let Err(err) = self.remove_unpacking(layer_manager, &unpack_folder, true) {
                 self.printer.println(&format!("Failed removing packing due to: {}", err));
             }
         }
 
         let top_layer = layer_manager.get_layer(reference)?;
         if !unpack_folder.exists() {
-            std::fs::create_dir_all(unpack_folder)?;
+            std::fs::create_dir_all(&unpack_folder)?;
         }
 
-        let unpack_folder_str = unpack_folder.canonicalize()?.to_str().unwrap().to_owned();
+        let unpack_folder = unpack_folder.canonicalize()?;
+        let unpack_folder_str = unpack_folder.to_str().unwrap().to_owned();
 
         if self.state_manager.unpacking_exist_at(&unpack_folder_str)? {
             return Err(ImageManagerError::UnpackingExist { path: unpack_folder_str.clone() });
         }
 
         if unpack_folder.exists() {
-            if std::fs::read_dir(unpack_folder)?.count() > 0 {
+            if std::fs::read_dir(&unpack_folder)?.count() > 0 {
                 return Err(ImageManagerError::FolderNotEmpty { path: unpack_folder_str.clone() });
             }
         }
 
         self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
-        self.unpack_layer(layer_manager, &mut HashSet::new(), &top_layer, unpack_folder)?;
+        self.unpack_layer(layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
 
         self.state_manager.insert_unpacking(
             Unpacking {
@@ -114,7 +115,7 @@ impl UnpackManager {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_hash = parent_hash.clone().to_ref();
             let parent_layer = layer_manager.get_layer(&parent_hash)?;
-            self.unpack_layer(layer_manager, already_unpacked, &parent_layer, unpack_folder)?;
+            self.unpack_layer(layer_manager, already_unpacked, &parent_layer, &unpack_folder)?;
         }
 
         let mut has_files = false;
@@ -125,14 +126,21 @@ impl UnpackManager {
                         layer_manager,
                         already_unpacked,
                         &layer_manager.get_layer(&Reference::ImageId(hash.clone()))?,
-                        unpack_folder
+                        &unpack_folder
                     )?;
                 },
                 LayerOperation::File { path, source_path, link_type, writable, .. } => {
-                    let abs_source_path = self.config.base_folder.join(source_path);
+                    let abs_source_path = self.config.base_folder.canonicalize()?.join(source_path);
+                    if abs_source_path != clean_path(&abs_source_path) {
+                        return Err(ImageManagerError::InvalidUnpack);
+                    }
 
                     has_files = true;
                     let destination_path = unpack_folder.join(path);
+                    if destination_path != clean_path(&destination_path) {
+                        return Err(ImageManagerError::InvalidUnpack);
+                    }
+
                     self.printer.println(&format!("\t* Unpacking file {} -> {}", path, destination_path.to_str().unwrap()));
 
                     #[allow(unused_must_use)] {

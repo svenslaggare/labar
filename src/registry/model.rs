@@ -128,6 +128,8 @@ pub enum UploadStatus {
     AlreadyExist,
     #[serde(rename="upload_pending")]
     UploadingPending,
+    #[serde(rename="invalid_paths")]
+    InvalidPaths,
     #[serde(rename="started")]
     Started,
     #[serde(rename="finished")]

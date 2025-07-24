@@ -22,6 +22,7 @@ pub enum ImageManagerError {
     FolderNotEmpty { path: String },
     NoRegistryDefined,
     SelfReferential,
+    InvalidUnpack,
     Sql(rusqlite::Error),
     OtherError { message: String }
 }
@@ -92,6 +93,9 @@ impl std::fmt::Display for ImageManagerError {
             }
             ImageManagerError::SelfReferential => {
                 write!(f, "This layer refers to itself")
+            }
+            ImageManagerError::InvalidUnpack => {
+                write!(f, "Invalid unpack")
             }
             ImageManagerError::Sql(err) => {
                 write!(f, "SQL: {}", err)

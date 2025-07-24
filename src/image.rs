@@ -1,12 +1,13 @@
 use std::fmt::{Display, Formatter};
 use std::path::Path;
+
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 
 use rusqlite::Row;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ValueRef};
 
-use crate::helpers::DataSize;
+use crate::helpers::{clean_path, DataSize};
 use crate::reference::{ImageId, ImageTag};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -97,6 +98,28 @@ impl Layer {
         }
 
         true
+    }
+
+    pub fn verify_valid_paths(&self, base_folder: &Path) -> bool {
+        fn inner(base_folder: &Path, layer: &Layer) -> std::io::Result<bool> {
+            let base_folder = base_folder.canonicalize()?;
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::File { source_path, .. } => {
+                        let abs_source_path = base_folder.join(source_path);
+                        if abs_source_path != clean_path(&abs_source_path) {
+                            return Ok(false);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            Ok(true)
+        }
+
+        inner(base_folder, self).unwrap_or(false)
     }
 }
 

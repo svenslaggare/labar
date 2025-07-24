@@ -6,7 +6,7 @@ use futures::StreamExt;
 use reqwest::{Body, Client, StatusCode};
 
 use crate::content::{ContentHash};
-use crate::helpers::DeferredFileDelete;
+use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::StateManager;
@@ -67,9 +67,14 @@ impl RegistryManager {
         let mut file_index = 0;
         for operation in &mut layer.operations {
             if let LayerOperation::File { source_path, content_hash, .. } = operation {
-                let local_source_path = config.base_folder.join(Path::new(source_path));
+                let local_source_path = config.base_folder.canonicalize()?.join(Path::new(source_path));
+                if local_source_path != clean_path(&local_source_path) {
+                    return Err(RegistryError::InvalidLayer);
+                }
+
                 if !local_source_path.exists() {
                     let tmp_local_source_path = Path::new(&(local_source_path.to_str().unwrap().to_owned() + ".tmp")).to_owned();
+
                     let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
 
                     self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
@@ -116,9 +121,15 @@ impl RegistryManager {
         let upload_response: UploadLayerResponse = serde_json::from_str(&upload_response)?;
         let upload_id = upload_response.upload_id.unwrap_or(String::new()).clone();
 
-        if UploadStatus::Started != upload_response.status {
-            self.printer.println("\t\t* Layer already exist.");
-            return Ok(());
+        match upload_response.status {
+            UploadStatus::Started => {}
+            UploadStatus::InvalidPaths => {
+                return Err(RegistryError::FailedToUpload);
+            }
+            _ => {
+                self.printer.println("\t\t* Layer already exist.");
+                return Ok(());
+            }
         }
 
         // Upload every file
@@ -220,6 +231,7 @@ impl RegistryManager {
 pub enum RegistryError {
     InvalidAuthentication,
     FailedToUpload,
+    InvalidLayer,
     InvalidContentHash,
     Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
@@ -254,6 +266,7 @@ impl Display for RegistryError {
         match self {
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
+            RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),

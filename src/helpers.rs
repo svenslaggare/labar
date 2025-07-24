@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub struct TablePrinter {
@@ -73,6 +73,37 @@ pub fn get_temp_folder() -> PathBuf {
         .tempfile().unwrap();
 
     named_temp_folder.path().to_owned()
+}
+
+pub fn clean_path<P>(path: P) -> PathBuf
+where
+    P: AsRef<Path>,
+{
+    // From: https://github.com/danreeves/path-clean/
+    let mut out = Vec::new();
+
+    for comp in path.as_ref().components() {
+        match comp {
+            Component::CurDir => (),
+            Component::ParentDir => match out.last() {
+                Some(Component::RootDir) => (),
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                None
+                | Some(Component::CurDir)
+                | Some(Component::ParentDir)
+                | Some(Component::Prefix(_)) => out.push(comp),
+            },
+            comp => out.push(comp),
+        }
+    }
+
+    if !out.is_empty() {
+        out.iter().collect()
+    } else {
+        PathBuf::from(".")
+    }
 }
 
 pub struct DeferredFileDelete {
