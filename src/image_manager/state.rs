@@ -70,8 +70,10 @@ impl StateManager {
     }
 
     pub fn add_login(&self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+        self.connection.execute("BEGIN TRANSACTION", ())?;
         self.connection.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
         self.connection.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
+        self.connection.execute("COMMIT", ())?;
         Ok(())
     }
 
