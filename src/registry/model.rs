@@ -14,6 +14,7 @@ pub type AppResult<T> = Result<T, AppError>;
 pub enum AppError {
     ImagerManager(ImageManagerError),
     LayerFileNotFound,
+    LayerFileAlreadyExists,
     FailedToUploadLayerFile(String),
     InvalidImageReference(String),
     Unauthorized,
@@ -29,7 +30,7 @@ impl IntoResponse for AppError {
                     err @ ImageManagerError::ImageNotFound { .. } => {
                         (
                             StatusCode::NOT_FOUND,
-                            Json(json!({ "error": format!("image not found due to: {}", err) }))
+                            Json(json!({ "error": format!("Image not found due to: {}", err) }))
                         ).into_response()
                     }
                     err => {
@@ -44,6 +45,12 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::NOT_FOUND,
                     Json(json!({ "error": "Layer file not found" }))
+                ).into_response()
+            }
+            AppError::LayerFileAlreadyExists => {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "The layer file already exists" }))
                 ).into_response()
             }
             AppError::FailedToUploadLayerFile(err) => {

@@ -105,7 +105,7 @@ pub async fn run(config: RegistryConfig) {
         .with_state(state.clone())
     ;
 
-    info!("Running https://{}", state.config.address);
+    info!("Running at https://{}", state.config.address);
     axum_server::bind_rustls(state.config.address, tls_config)
         .serve(app.into_make_service())
         .await
@@ -292,8 +292,12 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
-            let abs_source_path = base_folder.join(source_path).to_str().unwrap().to_owned();
-            let temp_file_path = abs_source_path.to_owned() + ".tmp";
+            let abs_source_path = base_folder.join(source_path);
+            if abs_source_path.exists() {
+                return Err(AppError::LayerFileAlreadyExists);
+            }
+
+            let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
             let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
             if let Some(parent) = temp_file_path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
