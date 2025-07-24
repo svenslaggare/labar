@@ -53,7 +53,13 @@ impl ImageManager {
     }
 
     pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &ImageTag, force: bool) -> ImageManagerResult<Image> {
-        let image = self.build_manager.build_image(&mut self.layer_manager, build_context, image_definition, tag, force)?;
+        let image = self.build_manager.build_image(
+            &mut self.layer_manager,
+            build_context,
+            image_definition,
+            tag,
+            force
+        )?.image;
         Ok(image)
     }
 

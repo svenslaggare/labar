@@ -10,7 +10,7 @@ use crate::reference::Reference;
 
 pub type ImageParseResult<T> = Result<T, ImageParseError>;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ImageDefinition {
     pub base_image: Option<Reference>,
     pub layers: Vec<LayerDefinition>
@@ -39,7 +39,7 @@ impl ImageDefinition {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LayerDefinition {
     pub input_line: String,
     pub operations: Vec<LayerOperationDefinition>
@@ -63,7 +63,7 @@ impl LayerDefinition {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum LayerOperationDefinition {
     Image { reference: Reference },
     Directory { path: String },
