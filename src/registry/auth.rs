@@ -11,8 +11,9 @@ use axum::extract::Request;
 
 use crate::registry::model::{AppError, AppResult};
 
-#[derive(Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
 pub enum AccessRight {
+    Access,
     List,
     Download,
     Upload,
@@ -73,10 +74,10 @@ pub fn check_access_right(access_provider: &(dyn AuthProvider + Send + Sync),
         Ok(access_provider.has_access(username, &password, access_right)?)
     }
 
-    if internal(access_provider, request, access_right)? {
+    if internal(access_provider, request, access_right.clone())? {
         Ok(AuthToken)
     } else {
-        info!("Invalid auth specified.");
+        info!("Not authorized for {:?} access.", access_right);
         Err(AppError::Unauthorized)
     }
 }
@@ -119,17 +120,60 @@ impl AuthProvider for MemoryAuthProvider {
     fn has_access(&self, username: &str, password: &str, requested_access_right: AccessRight) -> AppResult<bool> {
         let entry = match self.users.get(username) {
             Some(user) => user,
-            None => return Ok(false)
+            None => {
+                info!("User '{}' does not exist.", username);
+                return Ok(false);
+            }
         };
 
         if entry.password != password {
+            info!("Invalid password for user: {}.", username);
             return Ok(false);
         }
 
-        Ok(entry.access_rights.contains(&requested_access_right))
+        if requested_access_right == AccessRight::Access {
+            return Ok(true);
+        }
+
+        if entry.access_rights.contains(&requested_access_right) {
+            Ok(true)
+        } else {
+            info!("User '{}' does not have {:?} access rights.", username, requested_access_right);
+            Ok(false)
+        }
     }
 }
 
 pub fn create_password_hash(password: &str) -> String {
     base16ct::lower::encode_string(&Sha256::digest(password.as_bytes()))
+}
+
+#[test]
+fn test_access_rights1() {
+    let provider = MemoryAuthProvider::new(vec![
+        (
+            "guest".to_owned(),
+            create_password_hash("guest"),
+            vec![AccessRight::List, AccessRight::Download]
+        )
+    ]);
+
+    assert_eq!(Some(true), provider.has_access("guest", &create_password_hash("guest"), AccessRight::Access).ok());
+    assert_eq!(Some(true), provider.has_access("guest", &create_password_hash("guest"), AccessRight::List).ok());
+    assert_eq!(Some(false), provider.has_access("guest", &create_password_hash("guest"), AccessRight::Delete).ok());
+    assert_eq!(Some(false), provider.has_access("guest", &create_password_hash("gueste"), AccessRight::List).ok());
+    assert_eq!(Some(false), provider.has_access("gueste", &create_password_hash("guest"), AccessRight::List).ok());
+}
+
+#[test]
+fn test_access_rights2() {
+    let provider = MemoryAuthProvider::new(vec![
+        (
+            "guest".to_owned(),
+            create_password_hash("guest"),
+            vec![]
+        )
+    ]);
+
+    assert_eq!(Some(true), provider.has_access("guest", &create_password_hash("guest"), AccessRight::Access).ok());
 }

@@ -11,6 +11,7 @@ use crate::reference::{ImageId, ImageTag};
 
 pub type AppResult<T> = Result<T, AppError>;
 
+#[derive(Debug)]
 pub enum AppError {
     ImagerManager(ImageManagerError),
     LayerFileNotFound,

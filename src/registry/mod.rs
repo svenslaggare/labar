@@ -151,7 +151,7 @@ struct PendingUpload {
 
 async fn verify(State(state): State<Arc<AppState>>,
                 request: Request) -> AppResult<impl IntoResponse> {
-    let _token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+    let _token = check_access_right(state.access_provider.deref(), &request, AccessRight::Access)?;
     Ok("")
 }
 
