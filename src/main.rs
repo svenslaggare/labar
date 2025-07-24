@@ -117,6 +117,8 @@ enum CommandLineInput {
         destination: String,
         #[structopt(long, help="Replaces the existing unpacking")]
         replace: bool,
+        #[structopt(long, help="Simulates what an unpacking would do")]
+        dry_run: bool
     },
     #[structopt(about="Removes an unpacking")]
     RemoveUnpacking {
@@ -327,11 +329,11 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             table_printer.print();
         }
-        CommandLineInput::Unpack { reference, destination, replace } => {
+        CommandLineInput::Unpack { reference, destination, replace, dry_run } => {
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.unpack(&reference, &Path::new(&destination), replace).map_err(|err| format!("{}", err))?;
+            image_manager.unpack(&reference, &Path::new(&destination), replace, dry_run).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock(&file_config);

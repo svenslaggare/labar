@@ -7,7 +7,7 @@ use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_definition::ImageDefinition;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::layer::{LayerManager};
-use crate::image_manager::unpack::{UnpackManager, Unpacking};
+use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, Unpacking};
 use crate::image_manager::build::BuildManager;
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
@@ -70,8 +70,13 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub fn unpack(&mut self, reference: &Reference, unpack_folder: &Path, replace: bool) -> ImageManagerResult<()> {
-        self.unpack_manager.unpack(&mut self.layer_manager, reference, unpack_folder, replace)?;
+    pub fn unpack(&mut self, reference: &Reference, unpack_folder: &Path, replace: bool, dry_run: bool) -> ImageManagerResult<()> {
+        if !dry_run {
+            self.unpack_manager.unpack(&mut self.layer_manager, reference, unpack_folder, replace)?;
+        } else {
+            self.unpack_manager.unpack_with(&DryRunUnpacker::new(self.printer.clone()), &mut self.layer_manager, reference, unpack_folder, replace)?;
+        }
+
         Ok(())
     }
 

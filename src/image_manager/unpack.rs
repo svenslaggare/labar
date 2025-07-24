@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs::{File};
 use std::io::{BufReader, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use zip::write::{SimpleFileOptions};
 use zip::ZipWriter;
+
 use crate::helpers::clean_path;
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
@@ -63,6 +64,21 @@ impl UnpackManager {
                   reference: &Reference,
                   unpack_folder: &Path,
                   replace: bool) -> ImageManagerResult<()> {
+        self.unpack_with(
+            &StandardUnpacker,
+            layer_manager,
+            reference,
+            unpack_folder,
+            replace
+        )
+    }
+
+    pub fn unpack_with(&mut self,
+                       unpacker: &impl Unpacker,
+                       layer_manager: &LayerManager,
+                       reference: &Reference,
+                       unpack_folder: &Path,
+                       replace: bool) -> ImageManagerResult<()> {
         if replace && unpack_folder.exists() {
             if let Err(err) = self.remove_unpacking(layer_manager, &unpack_folder, true) {
                 self.printer.println(&format!("Failed removing packing due to: {}", err));
@@ -71,10 +87,10 @@ impl UnpackManager {
 
         let top_layer = layer_manager.get_layer(reference)?;
         if !unpack_folder.exists() {
-            std::fs::create_dir_all(&unpack_folder)?;
+            unpacker.create_dir_all(unpack_folder)?;
         }
 
-        let unpack_folder = unpack_folder.canonicalize()?;
+        let unpack_folder = unpacker.canonicalize(unpack_folder)?;
         let unpack_folder_str = unpack_folder.to_str().unwrap().to_owned();
 
         if self.state_manager.unpacking_exist_at(&unpack_folder_str)? {
@@ -88,20 +104,23 @@ impl UnpackManager {
         }
 
         self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
-        self.unpack_layer(layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
+        self.unpack_layer(unpacker, layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
 
-        self.state_manager.insert_unpacking(
-            Unpacking {
-                hash: top_layer.hash.clone(),
-                destination: unpack_folder_str,
-                time: Local::now()
-            }
-        )?;
+        if unpacker.should_insert() {
+            self.state_manager.insert_unpacking(
+                Unpacking {
+                    hash: top_layer.hash.clone(),
+                    destination: unpack_folder_str,
+                    time: Local::now()
+                }
+            )?;
+        }
 
         Ok(())
     }
 
     fn unpack_layer(&self,
+                    unpacker: &impl Unpacker,
                     layer_manager: &LayerManager,
                     already_unpacked: &mut HashSet<ImageId>,
                     layer: &Layer,
@@ -115,7 +134,13 @@ impl UnpackManager {
         if let Some(parent_hash) = layer.parent_hash.as_ref() {
             let parent_hash = parent_hash.clone().to_ref();
             let parent_layer = layer_manager.get_layer(&parent_hash)?;
-            self.unpack_layer(layer_manager, already_unpacked, &parent_layer, &unpack_folder)?;
+            self.unpack_layer(
+                unpacker,
+                layer_manager,
+                already_unpacked,
+                &parent_layer,
+                &unpack_folder
+            )?;
         }
 
         let mut has_files = false;
@@ -123,6 +148,7 @@ impl UnpackManager {
             match operation {
                 LayerOperation::Image { hash } => {
                     self.unpack_layer(
+                        unpacker,
                         layer_manager,
                         already_unpacked,
                         &layer_manager.get_layer(&Reference::ImageId(hash.clone()))?,
@@ -145,43 +171,30 @@ impl UnpackManager {
 
                     #[allow(unused_must_use)] {
                         if let Some(parent_dir) = destination_path.parent() {
-                            std::fs::create_dir_all(parent_dir);
+                            unpacker.create_dir_all(parent_dir)?;
                         }
 
-                        std::fs::remove_file(&destination_path);
+                        unpacker.remove_file(&destination_path);
                     }
 
                     match link_type {
                         LinkType::Soft => {
-                            std::os::unix::fs::symlink(&abs_source_path, &destination_path)
-                                .map_err(|err|
-                                    ImageManagerError::FileIOError {
-                                        message: format!("Failed to unpack file {} due to: {}", path, err)
-                                    }
-                                )?;
+                            unpacker.create_soft_link(&abs_source_path, &destination_path)?;
                         },
                         LinkType::Hard => {
-                            std::fs::hard_link(&abs_source_path, &destination_path)
-                                .map_err(|err|
-                                    ImageManagerError::FileIOError {
-                                        message: format!("Failed to unpack file {} due to: {}", path, err)
-                                    }
-                                )?;
+                            unpacker.create_hard_link(&abs_source_path, &destination_path)?;
                         },
                     }
 
                     if !writable {
-                        let file = File::open(destination_path)?;
-                        let mut permissions = file.metadata()?.permissions();
-                        permissions.set_readonly(true);
-                        file.set_permissions(permissions)?;
+                        unpacker.set_readonly(&destination_path)?;
                     }
                 },
                 LayerOperation::Directory { path } => {
                     self.printer.println(&format!("\t* Creating directory {}", path));
 
                     #[allow(unused_must_use)] {
-                        std::fs::create_dir_all(unpack_folder.join(path));
+                        unpacker.create_dir_all(&unpack_folder.join(path))?;
                     }
                 },
             }
@@ -298,6 +311,113 @@ impl UnpackManager {
         inner(&self.config, layer_manager, &top_layer, &mut writer)?;
         writer.finish()?;
 
+        Ok(())
+    }
+}
+
+pub trait Unpacker {
+    fn should_insert(&self) -> bool;
+
+    fn canonicalize(&self, path: &Path) -> ImageManagerResult<PathBuf>;
+    fn create_dir_all(&self, path: &Path) -> ImageManagerResult<()>;
+    fn remove_file(&self, path: &Path) -> ImageManagerResult<()>;
+    fn create_soft_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()>;
+    fn create_hard_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()>;
+    fn set_readonly(&self, path: &Path) -> ImageManagerResult<()>;
+}
+
+pub struct StandardUnpacker;
+impl Unpacker for StandardUnpacker {
+    fn should_insert(&self) -> bool {
+        true
+    }
+
+    fn canonicalize(&self, path: &Path) -> ImageManagerResult<PathBuf> {
+        Ok(path.canonicalize()?)
+    }
+
+    fn create_dir_all(&self, path: &Path) -> ImageManagerResult<()> {
+        std::fs::create_dir_all(path)?;
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> ImageManagerResult<()> {
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    fn create_soft_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        std::os::unix::fs::symlink(&source, &target)
+            .map_err(|err|
+                ImageManagerError::FileIOError {
+                    message: format!("Failed to unpack file {} due to: {}", target.display(), err)
+                }
+            )?;
+        Ok(())
+    }
+
+    fn create_hard_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        std::fs::hard_link(&source, &target)
+            .map_err(|err|
+                ImageManagerError::FileIOError {
+                    message: format!("Failed to unpack file {} due to: {}", target.display(), err)
+                }
+            )?;
+        Ok(())
+    }
+
+    fn set_readonly(&self, path: &Path) -> ImageManagerResult<()> {
+        let file = File::open(path)?;
+        let mut permissions = file.metadata()?.permissions();
+        permissions.set_readonly(true);
+        file.set_permissions(permissions)?;
+        Ok(())
+    }
+}
+
+pub struct DryRunUnpacker {
+    printer: BoxPrinter
+}
+
+impl DryRunUnpacker {
+    pub fn new(printer: BoxPrinter) -> DryRunUnpacker {
+        DryRunUnpacker {
+            printer
+        }
+    }
+}
+
+impl Unpacker for DryRunUnpacker {
+    fn should_insert(&self) -> bool {
+        false
+    }
+
+    fn canonicalize(&self, path: &Path) -> ImageManagerResult<PathBuf> {
+        Ok(clean_path(path))
+    }
+
+    fn create_dir_all(&self, path: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Create directory {}", path.display()));
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Remove file {}", path.display()));
+        Ok(())
+    }
+
+    fn create_soft_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Creating soft link  {} -> {}", source.display(), target.display()));
+        Ok(())
+    }
+
+    fn create_hard_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Creating hard link  {} -> {}", source.display(), target.display()));
+        Ok(())
+    }
+
+    fn set_readonly(&self, path: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Setting {} to read only", path.display()));
         Ok(())
     }
 }
