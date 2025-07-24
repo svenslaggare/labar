@@ -13,7 +13,7 @@ use crate::registry::model::{ImageSpec, UploadLayerManifestResult, UploadLayerMa
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
 pub struct RegistryManager {
-    config: ImageManagerConfig,
+    _config: ImageManagerConfig,
     printer: BoxPrinter,
     state_manager: Arc<StateManager>,
     http_client: Client
@@ -22,11 +22,11 @@ pub struct RegistryManager {
 impl RegistryManager {
     pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> RegistryManager {
         RegistryManager {
-            config,
+            _config: config.clone(),
             printer,
             state_manager,
             http_client: Client::builder()
-                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_certs(config.accept_self_signed)
                 .build().unwrap(),
         }
     }
@@ -174,11 +174,7 @@ impl RegistryManager {
     }
 
     fn http_mode(&self) -> &str {
-        if self.config.registry_use_ssl {
-            "https"
-        } else {
-            "http"
-        }
+        "https"
     }
 }
 

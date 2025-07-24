@@ -24,8 +24,12 @@ use crate::registry::RegistryConfig;
 #[serde(deny_unknown_fields)]
 pub struct FileConfig {
     default_registry: Option<String>,
-    #[serde(default)]
-    registry_use_ssl: bool
+    #[serde(default="default_accept_self_signed")]
+    accept_self_signed: bool
+}
+
+fn default_accept_self_signed() -> bool {
+    true
 }
 
 impl FileConfig {
@@ -51,7 +55,7 @@ impl Default for FileConfig {
     fn default() -> Self {
         FileConfig {
             default_registry: None,
-            registry_use_ssl: false
+            accept_self_signed: true
         }
     }
 }
@@ -168,7 +172,7 @@ enum CommandLineInput {
 
 fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
     let mut config = ImageManagerConfig::new();
-    config.registry_use_ssl = file_config.registry_use_ssl;
+    config.accept_self_signed = file_config.accept_self_signed;
     ImageManager::with_config(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
 }
 
@@ -369,7 +373,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Config { edit } => {
             fn print_config(file_config: &FileConfig) {
                 println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
-                println!("registry_use_ssl: {}", file_config.registry_use_ssl);
+                println!("accept_self_signed: {}", file_config.accept_self_signed);
             }
 
             if let Some(edit) = edit {
@@ -389,8 +393,8 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                         "default_registry" => {
                             new_file_config.default_registry = value_opt;
                         }
-                        "registry_use_ssl" => {
-                            new_file_config.registry_use_ssl = value == "yes" || value == "true";
+                        "accept_self_signed" => {
+                            new_file_config.accept_self_signed = value == "yes" || value == "true";
                         }
                         _ => {
                             return Err(format!("Invalid key '{}'", key));

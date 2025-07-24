@@ -21,6 +21,7 @@ use axum::body::Body;
 use axum::extract::{Path, State, Request, FromRequest};
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
+use rcgen::CertifiedKey;
 
 pub mod model;
 pub mod auth;
@@ -63,16 +64,31 @@ pub async fn run(config: RegistryConfig) {
         println!("Failed to setting up logging: {}", err);
     }
 
-    let tls_config = if config.use_ssl {
-        Some(
-            RustlsConfig::from_pem_chain_file(
-                config.ssl_cert_path.as_ref().expect("Specify ssl_cert_path argument."),
-                config.ssl_key_path.as_ref().expect("Specify ssl_key_path argument."),
-            ).await.unwrap()
-        )
-    } else {
-        None
+    let (cert_path, key_path) = match (config.ssl_cert_path.as_ref(), config.ssl_key_path.as_ref()) {
+        (Some(cert_path), Some(key_path)) => {
+            info!("Using specified SSL certificate.");
+            (cert_path.clone(), key_path.clone())
+        }
+        _ => {
+            let cert_path = config.data_path.join("cert.pem");
+            let key_path = config.data_path.join("key.pem");
+
+            if !cert_path.exists() {
+                info!("Generating SSL certificate...");
+                let subject_alt_names = vec!["localhost".to_string()];
+                let CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(subject_alt_names).unwrap();
+                std::fs::create_dir_all(&config.data_path).unwrap();
+                std::fs::write(&cert_path, cert.pem()).unwrap();
+                std::fs::write(&key_path, signing_key.serialize_pem()).unwrap();
+            }
+
+            info!("Using auto-generated SSL certificate.");
+
+            (cert_path, key_path)
+        }
     };
+
+    let tls_config = RustlsConfig::from_pem_chain_file(cert_path, key_path).await.unwrap();
 
     let state = AppState::new(config);
 
@@ -89,19 +105,11 @@ pub async fn run(config: RegistryConfig) {
         .with_state(state.clone())
     ;
 
-    if let Some(tls_config) = tls_config {
-        info!("Running https://{}", state.config.address);
-        axum_server::bind_rustls(state.config.address, tls_config)
-            .serve(app.into_make_service())
-            .await
-            .unwrap();
-    } else {
-        info!("Running http://{}", state.config.address);
-        axum_server::bind(state.config.address)
-            .serve(app.into_make_service())
-            .await
-            .unwrap();
-    }
+    info!("Running https://{}", state.config.address);
+    axum_server::bind_rustls(state.config.address, tls_config)
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
 
 pub struct AppState {

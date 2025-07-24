@@ -108,14 +108,14 @@ pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 #[derive(Clone)]
 pub struct ImageManagerConfig {
     base_folder: PathBuf,
-    pub registry_use_ssl: bool,
+    pub accept_self_signed: bool
 }
 
 impl ImageManagerConfig {
     pub fn new() -> ImageManagerConfig {
         ImageManagerConfig {
             base_folder: dirs::home_dir().unwrap().join(".labar"),
-            registry_use_ssl: false
+            accept_self_signed: true
         }
     }
 
