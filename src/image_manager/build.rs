@@ -8,7 +8,7 @@ use crate::content::compute_content_hash;
 use crate::image_manager::layer::{LayerManager};
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
-use crate::image::{Image, Layer, LayerOperation, LinkType};
+use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::printing::BoxPrinter;
 use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, ImageTag};
@@ -211,6 +211,7 @@ impl BuildManager {
 #[derive(Debug)]
 pub struct BuildResult {
     pub image: Image,
+    #[allow(dead_code)]
     pub built_layers: usize
 }
 
@@ -334,6 +335,7 @@ fn test_build_with_cache2() {
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
+    use crate::image::{LinkType};
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
