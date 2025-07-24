@@ -126,6 +126,16 @@ impl StateManager {
         ).optional()
     }
 
+    pub fn layer_exists(&self, hash: &ImageId) -> SqlResult<bool> {
+        let count = self.connection.query_one(
+            "SELECT COUNT(*) FROM layers WHERE hash=?1",
+            [hash],
+            |row| row.get::<_, i64>(0)
+        )?;
+
+        Ok(count > 0)
+    }
+
     pub fn insert_layer(&self, layer: Layer) -> SqlResult<()> {
         self.connection.execute("INSERT INTO layers (hash, metadata) VALUES (?1, ?2)", (&layer.hash, &serde_json::to_value(&layer).unwrap()))?;
         Ok(())

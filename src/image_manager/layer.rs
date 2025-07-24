@@ -36,7 +36,7 @@ impl LayerManager {
     }
 
     pub fn layer_exist(&self, hash: &ImageId) -> ImageManagerResult<bool> {
-        Ok(self.state_manager.get_layer(&hash)?.is_some())
+        Ok(self.state_manager.layer_exists(&hash)?)
     }
 
     pub fn insert_layer(&mut self, layer: Layer) -> ImageManagerResult<()> {
