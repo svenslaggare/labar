@@ -17,7 +17,6 @@ use crate::helpers::clean_path;
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
-use crate::image_manager::build::BuildRequest;
 use crate::image_manager::printing::{BoxPrinter};
 use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, Reference};
@@ -433,6 +432,7 @@ fn test_unpack() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
@@ -482,6 +482,7 @@ fn test_unpack_exist() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
@@ -538,6 +539,7 @@ fn test_remove_unpack() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
@@ -593,6 +595,7 @@ fn test_unpack_replace1() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
@@ -649,6 +652,7 @@ fn test_unpack_replace2() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
@@ -738,6 +742,7 @@ fn test_extract() {
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::build::BuildRequest;
 
     let tmp_dir = helpers::get_temp_folder();
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());

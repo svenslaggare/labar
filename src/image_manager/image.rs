@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_definition::ImageDefinition;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, Unpacking};
@@ -439,6 +438,7 @@ fn test_build() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
 
@@ -486,6 +486,7 @@ fn test_remove_image1() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_folder).unwrap();
@@ -527,6 +528,7 @@ fn test_remove_image2() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_folder).unwrap();
@@ -576,6 +578,7 @@ fn test_list_content() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
 
@@ -641,6 +644,7 @@ async fn test_push_pull() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     let tmp_registry_folder = helpers::get_temp_folder();
@@ -718,6 +722,7 @@ async fn test_push_pull_with_ref() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
+    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     let tmp_registry_folder = helpers::get_temp_folder();
