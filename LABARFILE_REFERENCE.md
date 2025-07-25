@@ -1,5 +1,5 @@
 # Labar file reference
-Each operation creates its own layer. The supported operations are now specified.
+Images are defined in the _labarfile_ format. See [labar/testdata/parsing/success ](./labar/testdata/parsing/success) folder for examples. Each operation (as defined below) creates its own _layer_.
 
 ## COPY
 Copies a file from the build context into the image.

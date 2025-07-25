@@ -16,7 +16,7 @@ This approach makes it easy to do incremental changes to the archives and re-use
 A debian package can be built using the `build_deb.sh` command. This will also include bash auto-completions.
 
 ## Building images
-Run the `labar build` command to build an image. Images are defined in _labarfiles_ similar to Docker files.
+Run the `labar build` command to build an image. Images are defined in _labarfiles_ similar to Docker files, see this [file](./LABARFILE_REFERENCE.md) for a definition of the format. 
 
 The following definition would create an image that copies a file on the host into the image as `file1.txt`.
 ```
@@ -24,10 +24,7 @@ COPY testdata/rawdata/file1.txt file1.txt
 ```
 
 ## Unpacking images
-To unpack the image (make the content available), use the `labar unpack` command. This will unpack the folder structure into a new folder, but the actual files are linked into new directory, leading to no extra space used.
-
-## Labar file reference
-See this [file](./LABARFILE_REFERENCE.md) for a definition of the format.
+To unpack the image (to make the content available), use the `labar unpack` command. This will unpack the folder structure into a new folder, but the actual files are linked into new directory, leading to no extra space used.
 
 ## Registry
 To distribute images, Labar uses an HTTP based registry. This can be started using `labar run-registry` command.
