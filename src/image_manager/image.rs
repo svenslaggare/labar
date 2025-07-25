@@ -8,7 +8,7 @@ use crate::image_definition::ImageDefinition;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, Unpacking};
-use crate::image_manager::build::BuildManager;
+use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
 use crate::image_manager::registry::RegistryManager;
@@ -52,14 +52,8 @@ impl ImageManager {
         &self.config
     }
 
-    pub fn build_image(&mut self, build_context: &Path, image_definition: ImageDefinition, tag: &ImageTag, force: bool) -> ImageManagerResult<Image> {
-        let image = self.build_manager.build_image(
-            &mut self.layer_manager,
-            build_context,
-            image_definition,
-            tag,
-            force
-        )?.image;
+    pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<Image> {
+        let image = self.build_manager.build_image(&mut self.layer_manager, request)?.image;
         Ok(image)
     }
 
@@ -457,7 +451,12 @@ fn test_build() {
         assert!(image_definition.is_ok());
         let image_definition = image_definition.unwrap();
 
-        let result = image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false);
+        let result = image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        });
         assert!(result.is_ok());
         let result = result.unwrap();
 
@@ -503,7 +502,12 @@ fn test_remove_image1() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).unwrap();
+    image_manager.build_image(BuildRequest {
+        build_context: Path::new("").to_path_buf(),
+        image_definition,
+        tag: ImageTag::from_str("test").unwrap(),
+        force: false,
+    }).unwrap();
 
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
@@ -537,11 +541,23 @@ fn test_remove_image2() {
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
-    image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test").unwrap(), false).unwrap();
+    let image_definition = image_definition.unwrap();
+    image_manager.build_image(BuildRequest {
+        build_context: Path::new("").to_path_buf(),
+        image_definition,
+        tag: ImageTag::from_str("test").unwrap(),
+        force: false,
+    }).unwrap();
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
     assert!(image_definition.is_ok());
-    image_manager.build_image(Path::new(""), image_definition.unwrap(), &ImageTag::from_str("test2").unwrap(), false).unwrap();
+    let image_definition = image_definition.unwrap();
+    image_manager.build_image(BuildRequest {
+        build_context: Path::new("").to_path_buf(),
+        image_definition,
+        tag: ImageTag::from_str("test2").unwrap(),
+        force: false,
+    }).unwrap();
 
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
@@ -569,10 +585,20 @@ fn test_list_content() {
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
-        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).unwrap();
+        image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
-        image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("that").unwrap(), false).unwrap();
+        image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("that").unwrap(),
+            force: false,
+        }).unwrap();
 
         let files = image_manager.list_content(&Reference::from_str("that").unwrap());
         assert!(files.is_ok());
@@ -637,7 +663,12 @@ async fn test_push_pull() {
 
         // Build
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
-        let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
+        let image = image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: image_tag.clone(),
+            force: false,
+        }).unwrap();
         assert_eq!(Some(DataSize(974)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
@@ -709,10 +740,20 @@ async fn test_push_pull_with_ref() {
 
         // Build
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
-        let image_referred = image_manager.build_image(Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).unwrap();
+        let image_referred = image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }).unwrap();
 
         let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
-        let image = image_manager.build_image(Path::new(""), image_definition, &image_tag, false).unwrap();
+        let image = image_manager.build_image(BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: image_tag.clone(),
+            force: false,
+        }).unwrap();
         assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push

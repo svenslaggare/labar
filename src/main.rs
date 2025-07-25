@@ -19,7 +19,7 @@ use crate::helpers::TablePrinter;
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{BoxPrinter, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
+use crate::image_manager::{BoxPrinter, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password};
 use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
@@ -263,8 +263,15 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let start_time = Instant::now();
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
             let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
-            let context = context.unwrap_or_else(|| std::env::current_dir().unwrap());
-            let image = image_manager.build_image(&context, image_definition, &tag, force).map_err(|err| format!("{}", err))?;
+
+            let request = BuildRequest {
+                build_context: context.unwrap_or_else(|| std::env::current_dir().unwrap()),
+                image_definition,
+                tag,
+                force,
+            };
+
+            let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }

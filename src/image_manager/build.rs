@@ -1,4 +1,4 @@
-use std::path::{Path};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -30,13 +30,10 @@ impl BuildManager {
 
     pub fn build_image(&self,
                        layer_manager: &mut LayerManager,
-                       build_context: &Path,
-                       image_definition: ImageDefinition,
-                       tag: &ImageTag,
-                       force: bool) -> ImageManagerResult<BuildResult> {
+                       request: BuildRequest) -> ImageManagerResult<BuildResult> {
         let mut parent_hash: Option<ImageId> = None;
 
-        if let Some(base_image_reference) = image_definition.base_image {
+        if let Some(base_image_reference) = request.image_definition.base_image {
             let hash = layer_manager.fully_qualify_reference(&base_image_reference)?;
             if !layer_manager.layer_exist(&hash)? {
                 return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
@@ -45,24 +42,24 @@ impl BuildManager {
             parent_hash = Some(hash);
         }
 
-        let num_layers = image_definition.layers.len();
+        let num_layers = request.image_definition.layers.len();
         let mut built_layers = 0;
 
-        for (layer_index, layer_definition) in image_definition.layers.into_iter().enumerate() {
+        for (layer_index, layer_definition) in request.image_definition.layers.into_iter().enumerate() {
             self.printer.println(&format!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line));
 
-            let layer_definition = layer_definition.expand(build_context)?;
-            let layer = self.create_layer(layer_manager, build_context, layer_definition, &parent_hash)?;
+            let layer_definition = layer_definition.expand(&request.build_context)?;
+            let layer = self.create_layer(layer_manager, &request.build_context, layer_definition, &parent_hash)?;
             let hash = layer.hash.clone();
 
-            if self.build_layer(layer_manager, build_context, layer, force)? {
+            if self.build_layer(layer_manager, &request.build_context, layer, request.force)? {
                 built_layers += 1;
             }
 
             parent_hash = Some(hash);
         }
 
-        let image = Image::new(parent_hash.unwrap(), tag.to_owned());
+        let image = Image::new(parent_hash.unwrap(), request.tag.to_owned());
         layer_manager.insert_or_replace_image(image.clone())?;
 
         if image.tag.tag() != "latest" {
@@ -209,6 +206,14 @@ impl BuildManager {
 }
 
 #[derive(Debug)]
+pub struct BuildRequest {
+    pub build_context: PathBuf,
+    pub image_definition: ImageDefinition,
+    pub tag: ImageTag,
+    pub force: bool
+}
+
+#[derive(Debug)]
 pub struct BuildResult {
     pub image: Image,
     #[allow(dead_code)]
@@ -241,10 +246,12 @@ fn test_build() {
 
     let result = build_manager.build_image(
         &mut layer_manager,
-        Path::new(""),
-        image_definition,
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;
@@ -286,10 +293,12 @@ fn test_build_with_cache1() {
 
     let first_result = build_manager.build_image(
         &mut layer_manager,
-        Path::new(""),
-        image_definition,
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
@@ -301,10 +310,12 @@ fn test_build_with_cache1() {
 
     let second_result = build_manager.build_image(
         &mut layer_manager,
-        Path::new(""),
-        image_definition,
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
@@ -368,10 +379,12 @@ fn test_build_with_cache2() {
 
     let first_result = build_manager.build_image(
         &mut layer_manager,
-        &tmp_dir,
-        image_definition.clone(),
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: tmp_dir.clone(),
+            image_definition: image_definition.clone(),
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(first_result.is_ok(), "{}", first_result.unwrap_err());
     let first_result = first_result.unwrap();
@@ -380,10 +393,12 @@ fn test_build_with_cache2() {
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
     let second_result = build_manager.build_image(
         &mut layer_manager,
-        &tmp_dir,
-        image_definition.clone(),
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: tmp_dir.clone(),
+            image_definition: image_definition.clone(),
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
@@ -406,10 +421,12 @@ fn test_build_with_cache2() {
     std::fs::write(&tmp_content_file, "Hello, World!!").unwrap();
     let third_result = build_manager.build_image(
         &mut layer_manager,
-        &tmp_dir,
-        image_definition.clone(),
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: tmp_dir.clone(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     );
     assert!(third_result.is_ok());
     let third_result = third_result.unwrap();
@@ -444,10 +461,12 @@ fn test_build_with_image_ref() {
     ).unwrap();
     build_manager.build_image(
         &mut layer_manager,
-        Path::new(""),
-        image_definition,
-        &ImageTag::from_str("test").unwrap(),
-        false
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
     ).unwrap();
 
     let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
@@ -456,10 +475,12 @@ fn test_build_with_image_ref() {
 
     let result = build_manager.build_image(
         &mut layer_manager,
-        Path::new(""),
-        image_definition,
-        &ImageTag::from_str("that").unwrap(),
-        false
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("that").unwrap(),
+            force: false,
+        }
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;

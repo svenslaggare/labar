@@ -17,6 +17,7 @@ use crate::helpers::clean_path;
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
+use crate::image_manager::build::BuildRequest;
 use crate::image_manager::printing::{BoxPrinter};
 use crate::image_manager::state::StateManager;
 use crate::reference::{ImageId, Reference};
@@ -446,7 +447,15 @@ fn test_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
@@ -487,7 +496,15 @@ fn test_unpack_exist() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -535,7 +552,15 @@ fn test_remove_unpack() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -582,7 +607,15 @@ fn test_unpack_replace1() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     unpack_manager.unpack(
         &layer_manager,
@@ -630,7 +663,15 @@ fn test_unpack_replace2() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     let unpack_result = unpack_manager.unpack(
         &layer_manager,
@@ -711,7 +752,15 @@ fn test_extract() {
     assert!(image_definition.is_ok());
     let image_definition = image_definition.unwrap();
 
-    assert!(build_manager.build_image(&mut layer_manager, Path::new(""), image_definition, &ImageTag::from_str("test").unwrap(), false).is_ok());
+    assert!(build_manager.build_image(
+        &mut layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).is_ok());
 
     let archive_file = tmp_dir.join("extract.zip");
     let extract_result = unpack_manager.extract(
