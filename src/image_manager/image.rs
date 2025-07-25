@@ -666,14 +666,14 @@ async fn test_push_pull() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple4.labarfile").unwrap()).unwrap();
         let image = image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,
             tag: image_tag.clone(),
             force: false,
         }).unwrap();
-        assert_eq!(Some(DataSize(974)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
@@ -704,9 +704,9 @@ async fn test_push_pull() {
 
         // Check content
         let reference = Reference::ImageTag(image.tag.clone());
-        assert_eq!(Some(DataSize(974)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
-        assert_eq!(vec!["file1.txt".to_owned()], files);
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
 
     #[allow(unused_must_use)] {

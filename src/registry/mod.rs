@@ -72,7 +72,7 @@ pub async fn run(config: RegistryConfig) {
     let state = AppState::new(config);
 
     let app = Router::new()
-        .route("/verify", get(verify))
+        .route("/verify_login", get(verify_login))
         .route("/images", get(list_images))
         .route("/images", post(set_image))
         .route("/images/{*tag}", get(resolve_image))
@@ -120,8 +120,8 @@ struct PendingUpload {
     started: Instant
 }
 
-async fn verify(State(state): State<Arc<AppState>>,
-                request: Request) -> AppResult<impl IntoResponse> {
+async fn verify_login(State(state): State<Arc<AppState>>,
+                      request: Request) -> AppResult<impl IntoResponse> {
     let _token = check_access_right(state.access_provider.deref(), &request, AccessRight::Access)?;
     Ok("")
 }
