@@ -75,16 +75,12 @@ impl RegistryManager {
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
-        async fn download_file(printer: BoxPrinter,
-                               client: Arc<RegistryClient>,
-                               registry: String,
-                               reference: Reference,
-                               source_path: String,
+        async fn download_file(client: &RegistryClient,
+                               registry: &str,
+                               reference: &Reference,
                                local_source_path: PathBuf,
                                file_index: usize,
-                               content_hash: String) -> RegistryResult<()> {
-            printer.println(&format!("\t\t* Downloading file {}...", source_path));
-
+                               content_hash: &str) -> RegistryResult<()> {
             let tmp_local_source_path = Path::new(&(local_source_path.to_str().unwrap().to_owned() + ".tmp")).to_owned();
 
             let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
@@ -112,35 +108,40 @@ impl RegistryManager {
         }
 
         let mut file_index = 0;
-        let mut download_operations = Vec::new();
+        let mut file_operations = Vec::new();
         for operation in &mut layer.operations {
             if let LayerOperation::File { source_path, content_hash, .. } = operation {
+                file_operations.push((source_path.clone(), content_hash.clone(), file_index));
+                file_index += 1;
+            }
+        }
+
+        for chunk in file_operations.chunks(4) {
+            let mut download_operations = Vec::new();
+            for (source_path, content_hash, file_index) in chunk {
                 let local_source_path = config.base_folder.canonicalize()?.join(Path::new(source_path));
                 if local_source_path != clean_path(&local_source_path) {
                     return Err(RegistryError::InvalidLayer);
                 }
 
                 if !local_source_path.exists() {
-                    download_operations.push(tokio::spawn(download_file(
-                        self.printer.clone(),
-                        client.clone(),
-                        registry.to_owned(),
-                        reference.to_owned(),
-                        source_path.to_owned(),
-                        local_source_path.to_owned(),
-                        file_index,
-                        content_hash.to_owned()
-                    )));
+                    self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
+                    download_operations.push(download_file(
+                        &client,
+                        registry,
+                        reference,
+                        local_source_path,
+                        *file_index,
+                        content_hash
+                    ));
                 } else {
                     self.printer.println(&format!("\t\t* Skipping downloading file {}.", source_path));
                 }
-
-                file_index += 1;
             }
-        }
 
-        for result in futures::future::join_all(download_operations).await {
-            result.unwrap()?;
+            for result in futures::future::join_all(download_operations).await {
+                result?;
+            }
         }
 
         Ok(layer)
