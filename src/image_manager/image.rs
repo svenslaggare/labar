@@ -602,7 +602,7 @@ fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &P
         users: vec![
             (
                 "guest".to_owned(),
-                crate::registry::auth::create_password_hash("guest"),
+                crate::registry::auth::Password::from_plain_text("guest"),
                 vec![AccessRight::List, AccessRight::Download, AccessRight::Upload, AccessRight::Delete]
             )
         ]

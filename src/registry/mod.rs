@@ -1,14 +1,12 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::str::FromStr;
 use std::time::Instant;
+
 use chrono::Local;
 use log::info;
 
-use serde::Deserialize;
 use serde_json::json;
 use serde::de::DeserializeOwned;
 
@@ -25,47 +23,19 @@ use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
 
 use rcgen::CertifiedKey;
-use crate::content::ContentHash;
 
 pub mod model;
 pub mod auth;
+pub mod config;
 
+pub use crate::registry::config::RegistryConfig;
+
+use crate::content::ContentHash;
 use crate::image::{Layer, LayerOperation};
-use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerConfig};
+use crate::image_manager::{ImageManager, EmptyPrinter};
 use crate::reference::{ImageId, ImageTag, Reference};
-use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider, UsersSpec};
+use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider};
 use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerResponse, UploadStatus};
-
-#[derive(Debug, Deserialize)]
-pub struct RegistryConfig {
-    pub data_path: PathBuf,
-
-    pub address: SocketAddr,
-
-    #[serde(default="default_pending_upload_expiration")]
-    pub pending_upload_expiration: f64,
-
-    pub ssl_cert_path: Option<PathBuf>,
-    pub ssl_key_path: Option<PathBuf>,
-
-    #[serde(default)]
-    pub users: UsersSpec
-}
-
-fn default_pending_upload_expiration() -> f64 {
-    30.0 * 60.0
-}
-
-impl RegistryConfig {
-    pub fn load(filename: &std::path::Path) -> Result<RegistryConfig, String> {
-        let content = std::fs::read_to_string(filename).map_err(|err| format!("{}", err))?;
-        toml::from_str(&content).map_err(|err| format!("{}", err))
-    }
-
-    pub fn image_manager_config(&self) -> ImageManagerConfig {
-        ImageManagerConfig::with_base_folder(self.data_path.clone())
-    }
-}
 
 pub async fn run(config: RegistryConfig) {
     if let Err(err) = setup_logging() {

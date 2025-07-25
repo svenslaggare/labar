@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
 use structopt::StructOpt;
 
+
 pub mod helpers;
 pub mod lock;
 pub mod image_definition;
@@ -20,7 +21,8 @@ use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
 use crate::image_manager::{BoxPrinter, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::reference::{ImageTag, Reference};
-use crate::registry::RegistryConfig;
+use crate::registry::auth::{AccessRight, Password};
+use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -162,15 +164,42 @@ enum CommandLineInput {
         #[structopt(name="registry", help="The registry to list for")]
         registry: String
     },
-    #[structopt(about="Runs a labar registry")]
-    RunRegistry {
-        #[structopt(name="config_file", help="The toml configuration file of the registry")]
-        config_file: PathBuf
+    #[structopt(about="Manages a labar registry")]
+    Registry {
+        #[structopt(subcommand)]
+        command: RegistryCommandLineInput
     },
     #[structopt(about="Manages the configuration")]
     Config {
         #[structopt(long, help="Sets a configuration value (key=value)")]
         edit: Option<String>
+    }
+}
+
+#[derive(Debug, StructOpt)]
+enum RegistryCommandLineInput {
+    #[structopt(about="Runs a labar registry")]
+    Run {
+        #[structopt(name="config_file", help="The toml configuration file of the registry")]
+        config_file: PathBuf
+    },
+    #[structopt(about="Adds a new user to the registry")]
+    AddUser {
+        #[structopt(name="config_file", help="The toml configuration file of the registry")]
+        config_file: PathBuf,
+        #[structopt(help="The username")]
+        username: String,
+        #[structopt(help="The password")]
+        password: Password,
+        #[structopt(help="The list of access rights")]
+        access_rights: Vec<AccessRight>
+    },
+    #[structopt(about="Removes a new user to the registry")]
+    RemoveUser {
+        #[structopt(name="config_file", help="The toml configuration file of the registry")]
+        config_file: PathBuf,
+        #[structopt(help="The username")]
+        username: String
     }
 }
 
@@ -372,9 +401,19 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let images = transform_registry_result(image_manager.list_images_registry(&registry).await)?;
             print_images(&images);
         }
-        CommandLineInput::RunRegistry { config_file } => {
-            let registry_config = RegistryConfig::load(&config_file)?;
-            registry::run(registry_config).await;
+        CommandLineInput::Registry { command } => {
+            match command {
+                RegistryCommandLineInput::Run { config_file } => {
+                    let registry_config = RegistryConfig::load_from_file(&config_file)?;
+                    registry::run(registry_config).await;
+                }
+                RegistryCommandLineInput::AddUser { config_file, username, password, access_rights } => {
+                    config_file_add_user(&config_file, username, password, access_rights)?;
+                }
+                RegistryCommandLineInput::RemoveUser { config_file, username } => {
+                    config_file_remove_user(&config_file, username)?;
+                }
+            }
         }
         CommandLineInput::Config { edit } => {
             fn print_config(file_config: &FileConfig) {
