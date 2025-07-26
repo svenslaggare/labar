@@ -14,7 +14,7 @@ pub mod registry;
 pub mod reference;
 pub mod content;
 
-use crate::helpers::TablePrinter;
+use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
@@ -401,31 +401,19 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             }
 
             if let Some(edit) = edit {
-                let parts = edit.split('=').collect::<Vec<&str>>();
-
                 let mut new_file_config = file_config.clone();
-                if parts.len() == 2 {
-                    let key = parts[0];
-                    let value = parts[1];
-                    let value_opt = if value.is_empty() {
-                        None
-                    } else {
-                        Some(value.to_owned())
-                    };
-
-                    match key {
-                        "default_registry" => {
-                            new_file_config.default_registry = value_opt;
-                        }
-                        "accept_self_signed" => {
-                            new_file_config.accept_self_signed = value == "yes" || value == "true";
-                        }
-                        _ => {
-                            return Err(format!("Invalid key '{}'", key));
-                        }
+                let (key, value) = edit_key_value(&edit)?;
+                let value_str = value.unwrap_or("");
+                match key {
+                    "default_registry" => {
+                        new_file_config.default_registry = value.map(|x| x.to_owned());
                     }
-                } else {
-                    return Err("Expected key=value".to_owned());
+                    "accept_self_signed" => {
+                        new_file_config.accept_self_signed = value_str == "yes" || value_str == "true";
+                    }
+                    _ => {
+                        return Err(format!("Invalid key '{}'", key));
+                    }
                 }
 
                 new_file_config.save_to_file(&get_config_file())?;

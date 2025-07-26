@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
 use std::ops::{Add, AddAssign};
 use std::path::{Component, Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 
 pub struct TablePrinter {
@@ -75,9 +76,7 @@ pub fn get_temp_folder() -> PathBuf {
     named_temp_folder.path().to_owned()
 }
 
-pub fn clean_path<P>(path: P) -> PathBuf
-where
-    P: AsRef<Path>,
+pub fn clean_path<P>(path: P) -> PathBuf where P: AsRef<Path>,
 {
     // From: https://github.com/danreeves/path-clean/
     let mut out = Vec::new();
@@ -131,5 +130,23 @@ impl Drop for DeferredFileDelete {
                 println!("Failed to delete file due to: {}", err);
             }
         }
+    }
+}
+
+pub fn edit_key_value(input: &str) -> Result<(&str, Option<&str>), String> {
+    let parts = input.split('=').collect::<Vec<&str>>();
+
+    if parts.len() == 2 {
+        let key = parts[0];
+        let value = parts[1];
+        let value_opt = if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        };
+
+        Ok((key, value_opt))
+    } else {
+        Err("Expected key=value".to_owned())
     }
 }
