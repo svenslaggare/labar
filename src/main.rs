@@ -41,7 +41,7 @@ enum CommandLineInput {
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
-        #[structopt(name="tag", help="The tag to remove")]
+        #[structopt(name="tag", help="The tag of the image to remove")]
         tag: ImageTag
     },
     #[structopt(about="Tags an image")]
@@ -141,6 +141,13 @@ enum RegistryCommandLineInput {
     Run {
         #[structopt(name="config_file", help="The toml configuration file of the registry")]
         config_file: PathBuf
+    },
+    #[structopt(about="Removes an image from the registry")]
+    RemoveImage {
+        #[structopt(name="config_file", help="The toml configuration file of the registry")]
+        config_file: PathBuf,
+        #[structopt(name="tag", help="The tag of the image to remove")]
+        tag: ImageTag
     },
     #[structopt(about="Adds a new user to the registry")]
     AddUser {
@@ -372,6 +379,12 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 RegistryCommandLineInput::Run { config_file } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
                     registry::run(registry_config).await;
+                }
+                RegistryCommandLineInput::RemoveImage { config_file, tag } => {
+                    let registry_config = RegistryConfig::load_from_file(&config_file)?;
+
+                    let mut image_manager = ImageManager::with_config(registry_config.image_manager_config(), printer.clone()).unwrap();
+                    image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
                 }
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights } => {
                     config_file_add_user(&config_file, username, password, access_rights)?;
