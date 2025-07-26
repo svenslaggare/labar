@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
 use structopt::StructOpt;
 
-
 pub mod helpers;
 pub mod lock;
 pub mod image_definition;
@@ -23,46 +22,6 @@ use crate::image_manager::{BoxPrinter, BuildRequest, ConsolePrinter, ImageManage
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password};
 use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct FileConfig {
-    default_registry: Option<String>,
-    #[serde(default="default_accept_self_signed")]
-    accept_self_signed: bool
-}
-
-fn default_accept_self_signed() -> bool {
-    true
-}
-
-impl FileConfig {
-    pub fn default_registry(&self) -> Option<&str> {
-        self.default_registry.as_ref().map(|x| x.as_str())
-    }
-}
-
-impl FileConfig {
-    pub fn from_file(path: &Path) -> Result<FileConfig, String> {
-        let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
-        toml::from_str(&content).map_err(|err| format!("{}", err))
-    }
-
-    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
-        let content = toml::to_string(self).map_err(|err| format!("{}", err))?;
-        std::fs::write(path, content).map_err(|err| format!("{}", err))?;
-        Ok(())
-    }
-}
-
-impl Default for FileConfig {
-    fn default() -> Self {
-        FileConfig {
-            default_registry: None,
-            accept_self_signed: true
-        }
-    }
-}
 
 #[derive(Debug, StructOpt)]
 #[structopt(name="labar", about="Layer Based Archive")]
@@ -484,6 +443,46 @@ async fn main() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileConfig {
+    default_registry: Option<String>,
+    #[serde(default="default_accept_self_signed")]
+    accept_self_signed: bool
+}
+
+fn default_accept_self_signed() -> bool {
+    true
+}
+
+impl FileConfig {
+    pub fn default_registry(&self) -> Option<&str> {
+        self.default_registry.as_ref().map(|x| x.as_str())
+    }
+}
+
+impl FileConfig {
+    pub fn from_file(path: &Path) -> Result<FileConfig, String> {
+        let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
+        toml::from_str(&content).map_err(|err| format!("{}", err))
+    }
+
+    pub fn save_to_file(&self, path: &Path) -> Result<(), String> {
+        let content = toml::to_string(self).map_err(|err| format!("{}", err))?;
+        std::fs::write(path, content).map_err(|err| format!("{}", err))?;
+        Ok(())
+    }
+}
+
+impl Default for FileConfig {
+    fn default() -> Self {
+        FileConfig {
+            default_registry: None,
+            accept_self_signed: true
+        }
+    }
 }
 
 fn get_config_file() -> PathBuf {

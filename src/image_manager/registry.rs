@@ -3,7 +3,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{future, StreamExt};
 use reqwest::{Body, Client, Request, Response, StatusCode};
 
 use crate::content::{ContentHash};
@@ -139,7 +139,7 @@ impl RegistryManager {
                 }
             }
 
-            for result in futures::future::join_all(download_operations).await {
+            for result in future::join_all(download_operations).await {
                 result?;
             }
         }
