@@ -443,9 +443,9 @@ fn test_unpack() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager.clone());
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,
@@ -493,9 +493,9 @@ fn test_unpack_exist() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,
@@ -550,9 +550,9 @@ fn test_remove_unpack() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,
@@ -606,9 +606,9 @@ fn test_unpack_replace1() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,
@@ -663,9 +663,9 @@ fn test_unpack_replace2() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager);
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,
@@ -753,9 +753,9 @@ fn test_extract() {
     let build_manager = BuildManager::new(config.clone(), printer.clone(), state_manager.clone());
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone(), state_manager.clone());
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple3.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple3.labarfile")
+    ).unwrap();
 
     assert!(build_manager.build_image(
         &mut layer_manager,

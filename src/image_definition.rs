@@ -325,8 +325,13 @@ impl ImageDefinition {
         Ok(image_definition)
     }
 
-    pub fn parse_without_context(context: &str) -> ImageParseResult<ImageDefinition> {
-        ImageDefinition::parse(context, &ImageDefinitionContext::new())
+    pub fn parse_without_context(content: &str) -> ImageParseResult<ImageDefinition> {
+        ImageDefinition::parse(content, &ImageDefinitionContext::new())
+    }
+
+    pub fn parse_file_without_context(path: &Path) -> ImageParseResult<ImageDefinition> {
+        let content = std::fs::read_to_string(path)?;
+        ImageDefinition::parse(&content, &ImageDefinitionContext::new())
     }
 }
 

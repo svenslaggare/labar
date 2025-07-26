@@ -447,9 +447,9 @@ fn test_build() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-        assert!(image_definition.is_ok());
-        let image_definition = image_definition.unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/simple1.labarfile")
+        ).unwrap();
 
         let result = image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -499,9 +499,9 @@ fn test_remove_image1() {
         printer
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     image_manager.build_image(BuildRequest {
         build_context: Path::new("").to_path_buf(),
@@ -541,9 +541,9 @@ fn test_remove_image2() {
         printer
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
     image_manager.build_image(BuildRequest {
         build_context: Path::new("").to_path_buf(),
         image_definition,
@@ -551,9 +551,9 @@ fn test_remove_image2() {
         force: false,
     }).unwrap();
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
     image_manager.build_image(BuildRequest {
         build_context: Path::new("").to_path_buf(),
         image_definition,
@@ -587,7 +587,9 @@ fn test_list_content() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/simple1.labarfile")
+        ).unwrap();
         image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,
@@ -595,7 +597,9 @@ fn test_list_content() {
             force: false,
         }).unwrap();
 
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/with_image_ref.labarfile")
+        ).unwrap();
         image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,
@@ -666,7 +670,9 @@ async fn test_push_pull() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple4.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/simple4.labarfile")
+        ).unwrap();
         let image = image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,
@@ -744,7 +750,9 @@ async fn test_push_pull_with_ref() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
 
         // Build
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/simple1.labarfile")
+        ).unwrap();
         let image_referred = image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,
@@ -752,7 +760,9 @@ async fn test_push_pull_with_ref() {
             force: false,
         }).unwrap();
 
-        let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap()).unwrap();
+        let image_definition = ImageDefinition::parse_file_without_context(
+            Path::new("testdata/definitions/with_image_ref.labarfile")
+        ).unwrap();
         let image = image_manager.build_image(BuildRequest {
             build_context: Path::new("").to_path_buf(),
             image_definition,

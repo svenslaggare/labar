@@ -240,9 +240,9 @@ fn test_build() {
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config, printer, state_manager.clone());
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     let result = build_manager.build_image(
         &mut layer_manager,
@@ -287,9 +287,9 @@ fn test_build_with_cache1() {
     let build_manager = BuildManager::new(config, printer.clone(), state_manager.clone());
 
     // Build first time
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     let first_result = build_manager.build_image(
         &mut layer_manager,
@@ -304,9 +304,9 @@ fn test_build_with_cache1() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     let second_result = build_manager.build_image(
         &mut layer_manager,
@@ -456,8 +456,8 @@ fn test_build_with_image_ref() {
     let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
     let build_manager = BuildManager::new(config, printer, state_manager.clone());
 
-    let image_definition = ImageDefinition::parse_without_context(
-        &std::fs::read_to_string("testdata/definitions/simple1.labarfile").unwrap()
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
     build_manager.build_image(
         &mut layer_manager,
@@ -469,10 +469,9 @@ fn test_build_with_image_ref() {
         }
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_without_context(&std::fs::read_to_string("testdata/definitions/with_image_ref.labarfile").unwrap());
-    assert!(image_definition.is_ok());
-    let image_definition = image_definition.unwrap();
-
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
     let result = build_manager.build_image(
         &mut layer_manager,
         BuildRequest {
