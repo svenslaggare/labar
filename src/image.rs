@@ -85,7 +85,7 @@ impl Layer {
         None
     }
 
-    pub fn verify(&self, base_folder: &Path) -> bool {
+    pub fn verify_paths_exists(&self, base_folder: &Path) -> bool {
         for operation in &self.operations {
             match operation {
                 LayerOperation::File { source_path, .. } => {

@@ -303,7 +303,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 
     let mut image_manager = create_image_manager(&state, &token);
 
-    if !pending_upload.layer.verify(image_manager.config().base_folder()) {
+    if !pending_upload.layer.verify_paths_exists(image_manager.config().base_folder()) {
         info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload.layer.hash, upload_id);
 
         return Ok(
