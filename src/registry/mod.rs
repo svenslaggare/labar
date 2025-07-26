@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::str::FromStr;
 use std::time::Instant;
 
 use chrono::Local;
@@ -150,11 +149,9 @@ async fn set_image(State(state): State<Arc<AppState>>,
 }
 
 async fn resolve_image(State(state): State<Arc<AppState>>,
-                       Path(tag): Path<String>,
+                       Path(tag): Path<ImageTag>,
                        request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
-
-    let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
 
     let image_manager = create_image_manager(&state, &token);
     let image = image_manager.resolve_image(&tag)?;
@@ -163,11 +160,9 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
 }
 
 async fn remove_image(State(state): State<Arc<AppState>>,
-                      Path(tag): Path<String>,
+                      Path(tag): Path<ImageTag>,
                       request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
-
-    let tag = ImageTag::from_str(&tag).map_err(|err| AppError::InvalidImageReference(err))?;
 
     let mut image_manager = create_image_manager(&state, &token);
     image_manager.remove_image(&tag)?;
@@ -178,26 +173,26 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 }
 
 async fn get_layer_manifest(State(state): State<Arc<AppState>>,
-                            Path(reference): Path<String>,
+                            Path(hash): Path<ImageId>,
                             request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
     let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = ImageId::from_str(&reference).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
+    let layer_reference = hash.to_ref();
     let layer = image_manager.get_layer(&layer_reference)?;
     Ok(Json(json!(layer)))
 }
 
 async fn download_layer(State(state): State<Arc<AppState>>,
-                        Path((layer, file_index)): Path<(String, usize)>,
+                        Path((hash, file_index)): Path<(ImageId, usize)>,
                         request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
     let (layer, base_folder) = {
         let image_manager = create_image_manager(&state, &token);
 
-        let layer_reference = ImageId::from_str(&layer).map_err(|err| AppError::InvalidImageReference(err))?.to_ref();
+        let layer_reference = hash.to_ref();
         let layer = image_manager.get_layer(&layer_reference)?;
         let base_folder = image_manager.config().base_folder().to_path_buf();
 
@@ -338,7 +333,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 }
 
 async fn upload_layer_file(State(state): State<Arc<AppState>>,
-                           Path((layer, file_index)): Path<(String, usize)>,
+                           Path((layer_hash, file_index)): Path<(ImageId, usize)>,
                            request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
     let upload_id = get_upload_id(&request, &token)?;
@@ -347,7 +342,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
         let pending_uploads = state.pending_uploads.lock().await;
         let pending_upload = get_pending_upload_by_id(&pending_uploads, &upload_id)?;
 
-        if layer != pending_upload.layer.hash.to_string() {
+        if layer_hash != pending_upload.layer.hash {
             return Err(AppError::LayerFileNotFound);
         }
 
