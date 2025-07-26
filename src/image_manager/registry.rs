@@ -263,9 +263,9 @@ impl RegistryClient {
         request.header(reqwest::header::CONTENT_TYPE, "application/json")
     }
 
-    pub async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<reqwest::Response> {
+    pub async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<Response> {
         let request = self.build_get_request(registry, url);
-        let response = self.http_client.execute(request.build()?).await?;
+        let response = self.http_client.execute(request.build()?).await.map_err(|err| RegistryError::FailedToContactRegistry(err))?;
         Ok(response)
     }
 
@@ -286,6 +286,7 @@ impl RegistryClient {
 
 #[derive(Debug)]
 pub enum RegistryError {
+    FailedToContactRegistry(reqwest::Error),
     InvalidAuthentication,
     FailedToUpload,
     InvalidLayer,
@@ -297,7 +298,7 @@ pub enum RegistryError {
 }
 
 impl RegistryError {
-    pub async fn from_response(response: reqwest::Response, operation: String) -> RegistryResult<String> {
+    pub async fn from_response(response: Response, operation: String) -> RegistryResult<String> {
         if response.status().is_success() {
             Ok(response.text().await?)
         } else if response.status() == StatusCode::UNAUTHORIZED {
@@ -321,6 +322,7 @@ impl RegistryError {
 impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            RegistryError::FailedToContactRegistry(err) => write!(f, "Failed to contact the registry due to: {}", err),
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),

@@ -18,8 +18,8 @@ pub enum ImageManagerError {
     ZIPError(ZipError),
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
-    RegistryError { error: RegistryError },
     FolderNotEmpty { path: String },
+    RegistryError { error: RegistryError },
     NoRegistryDefined,
     SelfReferential,
     InvalidUnpack,
@@ -82,12 +82,12 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::UnpackingNotFound { path } => {
                 write!(f, "Could not find the unpacking at {}", path)
             },
-            ImageManagerError::RegistryError { error } => {
-                write!(f, "Registry error: {}", error)
-            }
             ImageManagerError::FolderNotEmpty { path } => {
                 write!(f, "The folder {} is not empty", path)
             },
+            ImageManagerError::RegistryError { error } => {
+                write!(f, "{}", error)
+            }
             ImageManagerError::NoRegistryDefined => {
                 write!(f, "No registry defined")
             }
