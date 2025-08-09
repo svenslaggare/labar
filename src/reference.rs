@@ -148,6 +148,10 @@ impl ImageTag {
         self.tag = tag.to_owned();
         self
     }
+
+    pub fn to_ref(self) -> Reference {
+        Reference::ImageTag(self)
+    }
 }
 
 impl FromStr for ImageTag {

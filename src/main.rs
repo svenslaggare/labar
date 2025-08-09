@@ -18,7 +18,7 @@ use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{BoxPrinter, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
+use crate::image_manager::{BoxPrinter, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password};
 use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
@@ -338,7 +338,14 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.unpack(&reference, &Path::new(&destination), replace, dry_run).map_err(|err| format!("{}", err))?;
+            let request = UnpackRequest {
+                reference,
+                unpack_folder: Path::new(&destination).to_path_buf(),
+                replace,
+                dry_run,
+            };
+
+            image_manager.unpack(request).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock(&file_config);

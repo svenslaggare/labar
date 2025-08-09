@@ -148,3 +148,4 @@ pub use crate::image_definition::ImageParseError;
 pub use crate::image_manager::registry::RegistryError;
 pub use crate::reference::{ImageId, Reference};
 pub use crate::image_manager::build::BuildRequest;
+pub use crate::image_manager::unpack::UnpackRequest;

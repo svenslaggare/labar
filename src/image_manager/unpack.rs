@@ -59,16 +59,12 @@ impl UnpackManager {
     pub fn unpack(&mut self,
                   session: &StateSession,
                   layer_manager: &LayerManager,
-                  reference: &Reference,
-                  unpack_folder: &Path,
-                  replace: bool) -> ImageManagerResult<()> {
+                  request: UnpackRequest) -> ImageManagerResult<()> {
         self.unpack_with(
             session,
             &StandardUnpacker,
             layer_manager,
-            reference,
-            unpack_folder,
-            replace
+            request
         )
     }
 
@@ -76,21 +72,19 @@ impl UnpackManager {
                        session: &StateSession,
                        unpacker: &impl Unpacker,
                        layer_manager: &LayerManager,
-                       reference: &Reference,
-                       unpack_folder: &Path,
-                       replace: bool) -> ImageManagerResult<()> {
-        if replace && unpack_folder.exists() {
-            if let Err(err) = self.remove_unpacking(&session, layer_manager, &unpack_folder, true) {
+                       request: UnpackRequest) -> ImageManagerResult<()> {
+        if request.replace && request.unpack_folder.exists() {
+            if let Err(err) = self.remove_unpacking(&session, layer_manager, &request.unpack_folder, true) {
                 self.printer.println(&format!("Failed removing packing due to: {}", err));
             }
         }
 
-        let top_layer = layer_manager.get_layer(&session, reference)?;
-        if !unpack_folder.exists() {
-            unpacker.create_dir_all(unpack_folder)?;
+        let top_layer = layer_manager.get_layer(&session, &request.reference)?;
+        if !request.unpack_folder.exists() {
+            unpacker.create_dir_all(&request.unpack_folder)?;
         }
 
-        let unpack_folder = unpacker.canonicalize(unpack_folder)?;
+        let unpack_folder = unpacker.canonicalize(&request.unpack_folder)?;
         let unpack_folder_str = unpack_folder.to_str().unwrap().to_owned();
 
         if session.unpacking_exist_at(&unpack_folder_str)? {
@@ -103,7 +97,7 @@ impl UnpackManager {
             }
         }
 
-        self.printer.println(&format!("Unpacking {} ({}) to {}", reference, top_layer.hash, unpack_folder_str));
+        self.printer.println(&format!("Unpacking {} ({}) to {}", &request.reference, top_layer.hash, unpack_folder_str));
         self.unpack_layer(&session, unpacker, layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
 
         if unpacker.should_insert() {
@@ -326,6 +320,13 @@ impl UnpackManager {
     }
 }
 
+pub struct UnpackRequest {
+    pub reference: Reference,
+    pub unpack_folder: PathBuf,
+    pub replace: bool,
+    pub dry_run: bool
+}
+
 pub trait Unpacker {
     fn should_insert(&self) -> bool;
 
@@ -474,9 +475,12 @@ fn test_unpack() {
     let unpack_result = unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     );
 
     assert!(unpack_result.is_ok());
@@ -528,17 +532,23 @@ fn test_unpack_exist() {
     unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     );
 
     assert!(unpack_result.is_err());
@@ -590,9 +600,12 @@ fn test_remove_unpack() {
     unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     ).unwrap();
 
     let session = state_manager.session().unwrap();
@@ -652,17 +665,23 @@ fn test_unpack_replace1() {
     unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        true
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: true,
+            dry_run: false,
+        }
     );
 
     assert!(unpack_result.is_ok());
@@ -714,9 +733,12 @@ fn test_unpack_replace2() {
     let unpack_result = unpack_manager.unpack(
         &session,
         &layer_manager,
-        &Reference::from_str("test").unwrap(),
-        &tmp_dir.join("unpack"),
-        true
+        UnpackRequest {
+            reference: Reference::from_str("test").unwrap(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: true,
+            dry_run: false,
+        }
     );
 
     assert!(unpack_result.is_ok());
@@ -757,9 +779,12 @@ fn test_unpack_self_reference() {
     let unpack_result = unpack_manager.unpack(
         &session,
         &layer_manager,
-        &hash.clone().to_ref(),
-        &tmp_dir.join("unpack"),
-        false
+        UnpackRequest {
+            reference: hash.clone().to_ref(),
+            unpack_folder: tmp_dir.join("unpack"),
+            replace: false,
+            dry_run: false,
+        }
     );
 
     assert!(unpack_result.is_err());

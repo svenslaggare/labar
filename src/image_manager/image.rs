@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::layer::{LayerManager};
-use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, Unpacking};
+use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
@@ -66,25 +66,21 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub fn unpack(&mut self, reference: &Reference, unpack_folder: &Path, replace: bool, dry_run: bool) -> ImageManagerResult<()> {
+    pub fn unpack(&mut self, request: UnpackRequest) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
 
-        if !dry_run {
+        if !request.dry_run {
             self.unpack_manager.unpack(
                 &session,
                 &mut self.layer_manager,
-                reference,
-                unpack_folder,
-                replace
+                request
             )?;
         } else {
             self.unpack_manager.unpack_with(
                 &session,
                 &DryRunUnpacker::new(self.printer.clone()),
                 &mut self.layer_manager,
-                reference,
-                unpack_folder,
-                replace
+                request
             )?;
         }
 
@@ -182,7 +178,7 @@ impl ImageManager {
         let mut images = Vec::new();
 
         for image in self.layer_manager.images_iter(&session)? {
-            images.push(self.get_image_metadata(&image, &image.hash.clone().to_ref())?);
+            images.push(self.get_image_metadata(&image)?);
         }
 
         Ok(images)
@@ -190,11 +186,13 @@ impl ImageManager {
 
     pub fn resolve_image(&self, tag: &ImageTag) -> ImageManagerResult<ImageMetadata> {
         let image = self.get_image(tag)?;
-        self.get_image_metadata(&image, &Reference::ImageTag(tag.clone()))
+        self.get_image_metadata(&image)
     }
 
-    fn get_image_metadata(&self, image: &Image, reference: &Reference) -> ImageManagerResult<ImageMetadata> {
+    fn get_image_metadata(&self, image: &Image) -> ImageManagerResult<ImageMetadata> {
         let session = self.state_manager.pooled_session()?;
+        let reference = image.tag.clone().to_ref();
+
         Ok(
             ImageMetadata {
                 image: image.clone(),
