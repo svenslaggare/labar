@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::image::{Image, Layer};
@@ -8,7 +10,8 @@ use crate::reference::{ImageId, ImageTag};
 pub type SqlResult<T> = rusqlite::Result<T>;
 
 pub struct StateManager {
-    pub connection: Connection
+    base_folder: PathBuf,
+    pool: Arc<StateSessionPool>
 }
 
 impl StateManager {
@@ -76,11 +79,34 @@ impl StateManager {
 
         Ok(
             StateManager {
-                connection,
+                base_folder: base_folder.to_path_buf(),
+                pool: Arc::new(StateSessionPool::new())
             }
         )
     }
 
+    pub fn session(&self) -> SqlResult<StateSession> {
+        Ok(
+            StateSession {
+                connection: Connection::open(self.base_folder.join("state.sqlite3"))?
+            }
+        )
+    }
+
+    pub fn pooled_session(&self) -> SqlResult<PooledStateSession> {
+        if let Some(session) = self.pool.pop() {
+            Ok(PooledStateSession::new(self.pool.clone(), session))
+        } else {
+            Ok(PooledStateSession::new(self.pool.clone(), self.session()?))
+        }
+    }
+}
+
+pub struct StateSession {
+    connection: Connection
+}
+
+impl StateSession {
     pub fn begin_transaction(&self) -> SqlResult<()> {
         self.connection.execute("BEGIN TRANSACTION", ())?;
         Ok(())
@@ -99,7 +125,7 @@ impl StateManager {
         Ok(())
     }
 
-    pub fn get_login(&self, registry: &str) -> SqlResult<Option<(String, String)>> {
+    pub fn get_login(&self,  registry: &str) -> SqlResult<Option<(String, String)>> {
         self.connection.query_row(
             "SELECT username, password FROM logins WHERE registry=?1",
             [registry],
@@ -118,7 +144,7 @@ impl StateManager {
         Ok(layers)
     }
 
-    pub fn get_layer(&self, hash: &ImageId) -> SqlResult<Option<Layer>> {
+    pub fn get_layer(&self,  hash: &ImageId) -> SqlResult<Option<Layer>> {
         self.connection.query_row(
             "SELECT metadata FROM layers WHERE hash=?1",
             [hash.to_string()],
@@ -126,7 +152,7 @@ impl StateManager {
         ).optional()
     }
 
-    pub fn layer_exists(&self, hash: &ImageId) -> SqlResult<bool> {
+    pub fn layer_exists(&self,  hash: &ImageId) -> SqlResult<bool> {
         let count = self.connection.query_one(
             "SELECT COUNT(*) FROM layers WHERE hash=?1",
             [hash],
@@ -220,7 +246,10 @@ impl StateManager {
     }
 
     pub fn insert_unpacking(&self, unpacking: Unpacking) -> SqlResult<()> {
-        self.connection.execute("INSERT INTO unpackings (destination, hash, time) VALUES (?1, ?2, ?3)", (&unpacking.destination, &unpacking.hash, &unpacking.time))?;
+        self.connection.execute(
+            "INSERT INTO unpackings (destination, hash, time) VALUES (?1, ?2, ?3)",
+            (&unpacking.destination, &unpacking.hash, &unpacking.time)
+        )?;
         Ok(())
     }
 
@@ -240,5 +269,55 @@ impl StateManager {
     pub fn add_content_hash(&self, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
         self.connection.execute("INSERT INTO content_hash_cache (file, modified, hash) VALUES (?1, ?2, ?3)", (file, modified, hash))?;
         Ok(())
+    }
+}
+
+pub struct PooledStateSession {
+    pool: Arc<StateSessionPool>,
+    session: Option<StateSession>
+}
+
+impl PooledStateSession {
+    fn new(pool: Arc<StateSessionPool>, session: StateSession) -> PooledStateSession {
+        PooledStateSession {
+            pool,
+            session: Some(session)
+        }
+    }
+}
+
+impl Drop for PooledStateSession {
+    fn drop(&mut self) {
+        if let Some(session) = self.session.take() {
+            self.pool.push(session);
+        }
+    }
+}
+
+impl Deref for PooledStateSession {
+    type Target = StateSession;
+
+    fn deref(&self) -> &Self::Target {
+        self.session.as_ref().unwrap()
+    }
+}
+
+struct StateSessionPool {
+    sessions: Mutex<Vec<StateSession>>
+}
+
+impl StateSessionPool {
+    pub fn new() -> StateSessionPool {
+        StateSessionPool {
+            sessions: Mutex::new(Vec::new())
+        }
+    }
+
+    pub fn push(&self, session: StateSession) {
+        self.sessions.lock().unwrap().push(session);
+    }
+
+    pub fn pop(&self) -> Option<StateSession> {
+        self.sessions.lock().unwrap().pop()
     }
 }

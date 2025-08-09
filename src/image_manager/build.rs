@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use sha2::{Sha256, Digest};
 
@@ -10,32 +9,31 @@ use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDe
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::printing::BoxPrinter;
-use crate::image_manager::state::StateManager;
+use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 
 pub struct BuildManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter,
-    state_manager: Arc<StateManager>
+    printer: BoxPrinter
 }
 
 impl BuildManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> BuildManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> BuildManager {
         BuildManager {
             config,
-            printer,
-            state_manager
+            printer
         }
     }
 
     pub fn build_image(&self,
+                       session: &StateSession,
                        layer_manager: &mut LayerManager,
                        request: BuildRequest) -> ImageManagerResult<BuildResult> {
         let mut parent_hash: Option<ImageId> = None;
 
         if let Some(base_image_reference) = request.image_definition.base_image {
-            let hash = layer_manager.fully_qualify_reference(&base_image_reference)?;
-            if !layer_manager.layer_exist(&hash)? {
+            let hash = layer_manager.fully_qualify_reference(session, &base_image_reference)?;
+            if !layer_manager.layer_exist(session, &hash)? {
                 return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
             }
 
@@ -49,10 +47,10 @@ impl BuildManager {
             self.printer.println(&format!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line));
 
             let layer_definition = layer_definition.expand(&request.build_context)?;
-            let layer = self.create_layer(layer_manager, &request.build_context, layer_definition, &parent_hash)?;
+            let layer = self.create_layer(session, layer_manager, &request.build_context, layer_definition, &parent_hash)?;
             let hash = layer.hash.clone();
 
-            if self.build_layer(layer_manager, &request.build_context, layer, request.force)? {
+            if self.build_layer(session, layer_manager, &request.build_context, layer, request.force)? {
                 built_layers += 1;
             }
 
@@ -60,12 +58,12 @@ impl BuildManager {
         }
 
         let image = Image::new(parent_hash.unwrap(), request.tag.to_owned());
-        layer_manager.insert_or_replace_image(image.clone())?;
+        layer_manager.insert_or_replace_image(session, image.clone())?;
 
         if image.tag.tag() != "latest" {
             let mut latest_image = image.clone();
             latest_image.tag = latest_image.tag.set_tag("latest");
-            layer_manager.insert_or_replace_image(latest_image)?;
+            layer_manager.insert_or_replace_image(session, latest_image)?;
         }
 
         Ok(
@@ -77,11 +75,12 @@ impl BuildManager {
     }
 
     fn build_layer(&self,
+                   session: &StateSession,
                    layer_manager: &mut LayerManager,
                    build_context: &Path,
                    mut layer: Layer,
                    force: bool) -> ImageManagerResult<bool> {
-        if !force && layer_manager.layer_exist(&layer.hash)? {
+        if !force && layer_manager.layer_exist(session, &layer.hash)? {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
         }
@@ -117,11 +116,12 @@ impl BuildManager {
             }
         }
 
-        layer_manager.insert_layer(layer)?;
+        layer_manager.insert_layer(session, layer)?;
         Ok(true)
     }
 
     fn create_layer(&self,
+                    session: &StateSession,
                     layer_manager: &LayerManager,
                     build_context: &Path,
                     layer_definition: LayerDefinition,
@@ -135,8 +135,8 @@ impl BuildManager {
         for operation_definition in &layer_definition.operations {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
-                    let hash = layer_manager.fully_qualify_reference(reference)?;
-                    if !layer_manager.layer_exist(&hash)? {
+                    let hash = layer_manager.fully_qualify_reference(session, reference)?;
+                    if !layer_manager.layer_exist(session, &hash)? {
                         return Err(ImageManagerError::ImageNotFound { reference: reference.clone() });
                     }
 
@@ -156,11 +156,11 @@ impl BuildManager {
                     let modified_time = source_path_entry.metadata()?.modified()?;
                     let modified_time_ms = modified_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
 
-                    let content_hash = match self.state_manager.get_content_hash(source_path, modified_time_ms)? {
+                    let content_hash = match session.get_content_hash(source_path, modified_time_ms)? {
                         Some(content_hash) => content_hash,
                         None => {
                             let content_hash = compute_content_hash(source_path_entry)?;
-                            self.state_manager.add_content_hash(source_path, modified_time_ms, &content_hash)?;
+                            session.add_content_hash(source_path, modified_time_ms, &content_hash)?;
                             content_hash
                         }
                     };
@@ -226,7 +226,6 @@ fn create_hash(input: &str) -> String {
 
 #[test]
 fn test_build() {
-    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
@@ -236,15 +235,17 @@ fn test_build() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config, printer, state_manager.clone());
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config, printer);
+    let session = state_manager.session().unwrap();
 
     let image_definition = ImageDefinition::parse_file_without_context(
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
 
     let result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -258,12 +259,13 @@ fn test_build() {
 
     assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
 
-    let image = layer_manager.get_layer(&Reference::from_str("test").unwrap());
+    let session = state_manager.session().unwrap();
+    let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, result.hash);
 
-    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()).unwrap(), Some(result.hash));
+    assert_eq!(layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(), Some(result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
@@ -272,7 +274,6 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache1() {
-    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
@@ -282,9 +283,10 @@ fn test_build_with_cache1() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config, printer.clone(), state_manager.clone());
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config, printer.clone());
+    let session = state_manager.session().unwrap();
 
     // Build first time
     let image_definition = ImageDefinition::parse_file_without_context(
@@ -292,6 +294,7 @@ fn test_build_with_cache1() {
     ).unwrap();
 
     let first_result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -309,6 +312,7 @@ fn test_build_with_cache1() {
     ).unwrap();
 
     let second_result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -324,13 +328,14 @@ fn test_build_with_cache1() {
     assert_eq!(first_result.image.hash, second_result.image.hash);
     assert_eq!(0, second_result.built_layers);
 
-    let image = layer_manager.get_layer(&Reference::from_str("test").unwrap());
+    let session = state_manager.session().unwrap();
+    let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, second_result.image.hash);
 
     assert_eq!(
-        layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()).unwrap(),
+        layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(),
         Some(second_result.image.hash)
     );
 
@@ -341,7 +346,6 @@ fn test_build_with_cache1() {
 
 #[test]
 fn test_build_with_cache2() {
-    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
@@ -352,9 +356,10 @@ fn test_build_with_cache2() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config, printer.clone(), state_manager.clone());
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config, printer.clone());
+    let session = state_manager.session().unwrap();
 
     let tmp_content_file = tmp_dir.join("test.txt");
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
@@ -378,6 +383,7 @@ fn test_build_with_cache2() {
     };
 
     let first_result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -392,6 +398,7 @@ fn test_build_with_cache2() {
     // Build second time
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
     let second_result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -407,19 +414,21 @@ fn test_build_with_cache2() {
     assert_eq!(first_result.image.hash, second_result.image.hash);
     assert_eq!(0, second_result.built_layers);
 
-    let image = layer_manager.get_layer(&Reference::from_str("test").unwrap());
+    let session = state_manager.session().unwrap();
+    let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, second_result.image.hash);
 
     assert_eq!(
-        layer_manager.get_image_hash(&ImageTag::from_str("test").unwrap()).unwrap(),
+        layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(),
         Some(second_result.image.hash)
     );
 
     // Build third time (change)
     std::fs::write(&tmp_content_file, "Hello, World!!").unwrap();
     let third_result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -442,7 +451,6 @@ fn test_build_with_cache2() {
 
 #[test]
 fn test_build_with_image_ref() {
-    use std::sync::Arc;
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
@@ -452,14 +460,16 @@ fn test_build_with_image_ref() {
     let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
 
     let printer = ConsolePrinter::new();
-    let state_manager = Arc::new(StateManager::new(&config.base_folder()).unwrap());
-    let mut layer_manager = LayerManager::new(config.clone(), state_manager.clone());
-    let build_manager = BuildManager::new(config, printer, state_manager.clone());
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config, printer);
+    let session = state_manager.session().unwrap();
 
     let image_definition = ImageDefinition::parse_file_without_context(
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
     build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -473,6 +483,7 @@ fn test_build_with_image_ref() {
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
     let result = build_manager.build_image(
+        &session,
         &mut layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),
@@ -486,12 +497,13 @@ fn test_build_with_image_ref() {
 
     assert_eq!(ImageTag::from_str("that").unwrap(), result.tag);
 
-    let image = layer_manager.get_layer(&Reference::from_str("that").unwrap());
+    let session = state_manager.session().unwrap();
+    let image = layer_manager.get_layer(&session, &Reference::from_str("that").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
     assert_eq!(image.hash, result.hash);
 
-    assert_eq!(layer_manager.get_image_hash(&ImageTag::from_str("that").unwrap()).unwrap(), Some(result.hash));
+    assert_eq!(layer_manager.get_image_hash(&session, &ImageTag::from_str("that").unwrap()).unwrap(), Some(result.hash));
 
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);

@@ -189,15 +189,11 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
-    let (layer, base_folder) = {
-        let image_manager = create_image_manager(&state, &token);
+    let image_manager = create_image_manager(&state, &token);
 
-        let layer_reference = hash.to_ref();
-        let layer = image_manager.get_layer(&layer_reference)?;
-        let base_folder = image_manager.config().base_folder().to_path_buf();
-
-        (layer, base_folder)
-    };
+    let layer_reference = hash.to_ref();
+    let layer = image_manager.get_layer(&layer_reference)?;
+    let base_folder = image_manager.config().base_folder().to_path_buf();
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         if let LayerOperation::File { source_path, .. } = operation {
@@ -422,12 +418,10 @@ fn remove_pending_upload_by_id(pending_uploads: &mut PendingUploads, upload_id: 
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
-    let image_manager = ImageManager::with_config(
+    ImageManager::with_config(
         state.config.image_manager_config(),
         EmptyPrinter::new()
-    ).unwrap();
-
-    image_manager
+    ).unwrap()
 }
 
 async fn decode_json<T: DeserializeOwned>(request: Request) -> AppResult<T> {

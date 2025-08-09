@@ -10,30 +10,28 @@ use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
-use crate::image_manager::state::StateManager;
+use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::model::{AppErrorResponse, ImageSpec, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
 pub struct RegistryManager {
-    _config: ImageManagerConfig,
-    printer: BoxPrinter,
-    state_manager: Arc<StateManager>
+    config: ImageManagerConfig,
+    printer: BoxPrinter
 }
 
 impl RegistryManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter, state_manager: Arc<StateManager>) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> RegistryManager {
         RegistryManager {
-            _config: config.clone(),
-            printer,
-            state_manager: state_manager.clone()
+            config: config.clone(),
+            printer
         }
     }
 
     pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
         let http_client = Client::builder()
-            .danger_accept_invalid_certs(self._config.accept_self_signed)
+            .danger_accept_invalid_certs(self.config.accept_self_signed)
             .build()?;
 
         let full_url = format!("https://{}/verify_login", registry);
@@ -46,16 +44,16 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn list_images(&self, registry: &str) -> RegistryResult<Vec<ImageMetadata>> {
-        let client = RegistryClient::new(&self._config, &self.state_manager, registry)?;
+    pub async fn list_images(&self, session: &StateSession, registry: &str) -> RegistryResult<Vec<ImageMetadata>> {
+        let client = RegistryClient::new(&self.config, session, registry)?;
 
         let response = client.get_registry_text_response(registry, "images").await?;
         let images: Vec<ImageMetadata> = serde_json::from_str(&response)?;
         Ok(images)
     }
 
-    pub async fn resolve_image(&self, registry: &str, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
-        let client = RegistryClient::new(&self._config, &self.state_manager, registry)?;
+    pub async fn resolve_image(&self, session: &StateSession, registry: &str, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
+        let client = RegistryClient::new(&self.config, session, registry)?;
 
         let response = client.get_registry_text_response(registry, &format!("images/{}", tag)).await?;
         let image: ImageMetadata = serde_json::from_str(&response)?;
@@ -63,15 +61,15 @@ impl RegistryManager {
     }
 
     pub async fn download_layer(&self,
-                                config: &ImageManagerConfig,
+                                session: &StateSession,
                                 registry: &str,
                                 reference: &Reference) -> RegistryResult<Layer> {
-        let client = Arc::new(RegistryClient::new(&self._config, &self.state_manager, registry)?);
+        let client = Arc::new(RegistryClient::new(&self.config, session, registry)?);
 
         let response = client.get_registry_text_response(registry, &format!("layers/{}/manifest", reference)).await?;
         let mut layer: Layer = serde_json::from_str(&response)?;
 
-        let layer_folder = config.get_layer_folder(&layer.hash);
+        let layer_folder = self.config.get_layer_folder(&layer.hash);
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
@@ -119,7 +117,7 @@ impl RegistryManager {
         for chunk in file_operations.chunks(4) {
             let mut download_operations = Vec::new();
             for (source_path, content_hash, file_index) in chunk {
-                let local_source_path = config.base_folder.canonicalize()?.join(Path::new(source_path));
+                let local_source_path = self.config.base_folder.canonicalize()?.join(Path::new(source_path));
                 if local_source_path != clean_path(&local_source_path) {
                     return Err(RegistryError::InvalidLayer);
                 }
@@ -148,10 +146,10 @@ impl RegistryManager {
     }
 
     pub async fn upload_layer(&self,
-                              config: &ImageManagerConfig,
+                              session: &StateSession,
                               registry: &str,
                               layer: &Layer) -> RegistryResult<()> {
-        let client = RegistryClient::new(&self._config, &self.state_manager, registry)?;
+        let client = RegistryClient::new(&self.config, session, registry)?;
 
         // Begin upload
         let mut request = client.json_post_registry_response(registry, "layers/begin-upload").build()?;
@@ -181,7 +179,7 @@ impl RegistryManager {
                     .header("UPLOAD_ID", upload_id.clone())
                     .build()?;
 
-                let file = tokio::fs::File::open(config.base_folder.join(source_path)).await?;
+                let file = tokio::fs::File::open(self.config.base_folder.join(source_path)).await?;
                 let body = Body::from(file);
                 *request.body_mut() = Some(body);
 
@@ -208,8 +206,10 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn upload_image(&self, registry: &str, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
-        let client = RegistryClient::new(&self._config, &self.state_manager, registry)?;
+    pub async fn upload_image(&self,
+                              session: &StateSession,
+                              registry: &str, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
+        let client = RegistryClient::new(&self.config, session, registry)?;
 
         let mut request = client.json_post_registry_response(registry, "images").build()?;
 
@@ -234,8 +234,10 @@ struct RegistryClient {
 }
 
 impl RegistryClient {
-    pub fn new(config: &ImageManagerConfig, state_manager: &StateManager, registry: &str) -> RegistryResult<RegistryClient> {
-        let (username, password) = state_manager.get_login(registry).ok().flatten().ok_or_else(|| RegistryError::InvalidAuthentication)?;
+    pub fn new(config: &ImageManagerConfig, session: &StateSession, registry: &str) -> RegistryResult<RegistryClient> {
+        let (username, password) = session.get_login(registry)
+            .ok().flatten()
+            .ok_or_else(|| RegistryError::InvalidAuthentication)?;
 
         Ok(
             RegistryClient {
