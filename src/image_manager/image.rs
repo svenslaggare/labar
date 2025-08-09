@@ -9,7 +9,7 @@ use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
-use crate::image_manager::registry::RegistryManager;
+use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{StateManager, StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 
@@ -290,7 +290,7 @@ impl ImageManager {
     pub async fn list_images_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {
         let session = self.state_manager.pooled_session()?;
 
-        let images = self.registry_manager.list_images(&session, registry).await?;
+        let images = self.registry_manager.list_images(&RegistrySession::new(&session, registry)?).await?;
         Ok(images)
     }
 
@@ -308,10 +308,97 @@ impl ImageManager {
 
         self.printer.println(&format!("Pulling image {}", tag));
 
-        let image_metadata = self.registry_manager.resolve_image(&session, registry, &tag).await?;
+        let image_metadata = self.registry_manager.resolve_image(
+            &RegistrySession::new(&session, registry)?,
+            &tag
+        ).await?;
+
+        self.pull_internal(
+            &RegistrySession::new(&session, registry)?,
+            &image_metadata.image.hash, &tag,
+            &mut DownloadResult::new()
+        ).await
+    }
+
+    pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<()> {
+        let session = self.state_manager.pooled_session()?;
+
+        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
+
+        let mut tag = tag.clone();
+        if tag.registry().is_none() {
+            if let Some(default_registry) = default_registry {
+                tag = tag.set_registry(default_registry);
+            }
+        }
+
+        let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        self.printer.println(&format!("Pushing image {}", tag));
 
         let mut stack = Vec::new();
-        stack.push(image_metadata.image.hash.clone().to_ref());
+        stack.push(top_layer.hash.clone().to_ref());
+
+        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.clone().to_ref());
+            }
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.clone().to_ref());
+                    },
+                    _ => {}
+                }
+            }
+        };
+
+        while let Some(current) = stack.pop() {
+            self.printer.println(&format!("\t* Pushing layer: {}", current));
+            let layer = self.get_layer(&current)?;
+            visit_layer(&mut stack, &layer);
+            self.registry_manager.upload_layer(&registry_session, &layer).await?;
+        }
+
+        self.registry_manager.upload_image(&registry_session, &top_layer.hash, &tag).await?;
+
+        self.printer.println("");
+
+        Ok(())
+    }
+
+    pub async fn sync(&mut self, registry: &str, local_registry: Option<&str>) -> ImageManagerResult<DownloadResult> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        let mut download_result = DownloadResult::new();
+
+        let images = self.registry_manager.list_images(&registry_session).await?;
+        for image in images {
+            let mut new_tag = image.image.tag.clone();
+            if let Some(local_registry) = local_registry {
+                new_tag = new_tag.set_registry(local_registry);
+            }
+
+            self.pull_internal(
+                &registry_session,
+                &image.image.hash,
+                &new_tag,
+                &mut download_result
+            ).await?;
+        }
+
+        Ok(download_result)
+    }
+
+    async fn pull_internal(&mut self,
+                           registry: &RegistrySession,
+                           hash: &ImageId, tag: &ImageTag,
+                           download_result: &mut DownloadResult) -> ImageManagerResult<Image> {
+        let mut stack = Vec::new();
+        stack.push(hash.clone().to_ref());
 
         let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
@@ -339,11 +426,13 @@ impl ImageManager {
                 visit_layer(&mut stack, &layer);
             } else {
                 self.printer.println(&format!("\t* Downloading layer: {}", current));
-                let layer = self.registry_manager.download_layer(&session, registry, &current).await?;
+                let layer = self.registry_manager.download_layer(&registry, &current).await?;
                 self.insert_layer(layer.clone())?;
+                download_result.downloaded_layers += 1;
 
                 if top_level_hash.is_none() {
                     top_level_hash = Some(layer.hash.clone());
+                    download_result.downloaded_images += 1;
                 }
 
                 visit_layer(&mut stack, &layer);
@@ -354,54 +443,6 @@ impl ImageManager {
         self.insert_or_replace_image(image.clone())?;
 
         Ok(image)
-    }
-
-    pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<()> {
-        let session = self.state_manager.pooled_session()?;
-
-        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
-
-        let mut tag = tag.clone();
-        if tag.registry().is_none() {
-            if let Some(default_registry) = default_registry {
-                tag = tag.set_registry(default_registry);
-            }
-        }
-
-        let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
-
-        self.printer.println(&format!("Pushing image {}", tag));
-
-        let mut stack = Vec::new();
-        stack.push(top_layer.hash.clone().to_ref());
-
-        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone().to_ref());
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone().to_ref());
-                    },
-                    _ => {}
-                }
-            }
-        };
-
-        while let Some(current) = stack.pop() {
-            self.printer.println(&format!("\t* Pushing layer: {}", current));
-            let layer = self.get_layer(&current)?;
-            visit_layer(&mut stack, &layer);
-            self.registry_manager.upload_layer(&session, registry, &layer).await?;
-        }
-
-        self.registry_manager.upload_image(&session, registry, &top_layer.hash, &tag).await?;
-
-        self.printer.println("");
-
-        Ok(())
     }
 
     pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<Layer> {
@@ -457,6 +498,20 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         self.layer_manager.insert_or_replace_image(&session, image)?;
         Ok(())
+    }
+}
+
+pub struct DownloadResult {
+    pub downloaded_images: usize,
+    pub downloaded_layers: usize
+}
+
+impl DownloadResult {
+    pub fn new() -> DownloadResult {
+        DownloadResult {
+            downloaded_images: 0,
+            downloaded_layers: 0,
+        }
     }
 }
 
@@ -681,6 +736,7 @@ fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &P
         pending_upload_expiration: 30.0,
         ssl_cert_path: None,
         ssl_key_path: None,
+        upstream: None,
         users: vec![
             (
                 "guest".to_owned(),

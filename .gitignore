@@ -3,7 +3,7 @@
 specs
 test.sh
 private
-registry.toml
+registry*.toml
 scripts
 completions
 certificate

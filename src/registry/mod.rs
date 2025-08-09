@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Local;
-use log::info;
+use log::{error, info};
 
 use serde_json::json;
 use serde::de::DeserializeOwned;
@@ -34,6 +34,7 @@ use crate::image::{Layer, LayerOperation};
 use crate::image_manager::{ImageManager, EmptyPrinter};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider};
+use crate::registry::config::RegistryUpstreamConfig;
 use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) {
@@ -83,6 +84,17 @@ pub async fn run(config: RegistryConfig) {
         .route("/layers/{layer}/upload/{index}", post(upload_layer_file))
         .with_state(state.clone())
     ;
+
+    let state_clone = state.clone();
+    tokio::spawn(async move {
+        if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
+            let mut interval = tokio::time::interval(Duration::from_secs_f64(upstream_config.sync_interval));
+            loop {
+                interval.tick().await;
+                sync_with_upstream(state_clone.clone(), &upstream_config).await;
+            }
+        }
+    });
 
     info!("Running at https://{}", state.config.address);
     axum_server::bind_rustls(state.config.address, tls_config)
@@ -387,6 +399,32 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     }
 
     Err(AppError::LayerFileNotFound)
+}
+
+async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpstreamConfig) {
+    let upstream_address = upstream_config.address.to_string();
+    info!("Syncing with upstream {}...", upstream_address);
+
+    async fn internal(state: Arc<AppState>,
+                      upstream_config: &RegistryUpstreamConfig,
+                      upstream_address: &str) -> Result<(), AppError> {
+        let t0 = Instant::now();
+        let mut image_manager = create_image_manager(&state, &AuthToken);
+        image_manager.login(&upstream_address, &upstream_config.username, &upstream_config.password).await?;
+        let result = image_manager.sync(&upstream_address, Some(&state.config.address.to_string())).await?;
+        info!(
+            "Downloaded {} images, {} layers from upstream in {:.1} seconds.",
+            result.downloaded_images,
+            result.downloaded_layers,
+            t0.elapsed().as_secs_f64()
+        );
+
+        Ok(())
+    }
+
+    if let Err(err) = internal(state.clone(), &upstream_config, &upstream_address).await {
+        error!("Syncing with upstream failed due to: {:?}.", err);
+    }
 }
 
 fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {

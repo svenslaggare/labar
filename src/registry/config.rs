@@ -19,12 +19,27 @@ pub struct RegistryConfig {
     pub ssl_cert_path: Option<PathBuf>,
     pub ssl_key_path: Option<PathBuf>,
 
+    pub upstream: Option<RegistryUpstreamConfig>,
+
     #[serde(default)]
     pub users: UsersSpec
 }
 
 fn default_pending_upload_expiration() -> f64 {
     30.0 * 60.0
+}
+
+#[derive(Debug, Serialize,  Deserialize)]
+pub struct RegistryUpstreamConfig {
+    pub address: SocketAddr,
+    pub username: String,
+    pub password: String,
+    #[serde(default="default_sync_interval")]
+    pub sync_interval: f64
+}
+
+fn default_sync_interval() -> f64 {
+    60.0
 }
 
 impl RegistryConfig {

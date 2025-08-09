@@ -44,29 +44,26 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn list_images(&self, session: &StateSession, registry: &str) -> RegistryResult<Vec<ImageMetadata>> {
-        let client = RegistryClient::new(&self.config, session, registry)?;
+    pub async fn list_images(&self, registry: &RegistrySession) -> RegistryResult<Vec<ImageMetadata>> {
+        let client = RegistryClient::new(&self.config, &registry)?;
 
-        let response = client.get_registry_text_response(registry, "images").await?;
+        let response = client.get_registry_text_response(&registry.registry, "images").await?;
         let images: Vec<ImageMetadata> = serde_json::from_str(&response)?;
         Ok(images)
     }
 
-    pub async fn resolve_image(&self, session: &StateSession, registry: &str, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
-        let client = RegistryClient::new(&self.config, session, registry)?;
+    pub async fn resolve_image(&self, registry: &RegistrySession, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
+        let client = RegistryClient::new(&self.config, registry)?;
 
-        let response = client.get_registry_text_response(registry, &format!("images/{}", tag)).await?;
+        let response = client.get_registry_text_response(&registry.registry, &format!("images/{}", tag)).await?;
         let image: ImageMetadata = serde_json::from_str(&response)?;
         Ok(image)
     }
 
-    pub async fn download_layer(&self,
-                                session: &StateSession,
-                                registry: &str,
-                                reference: &Reference) -> RegistryResult<Layer> {
-        let client = Arc::new(RegistryClient::new(&self.config, session, registry)?);
+    pub async fn download_layer(&self, registry: &RegistrySession, reference: &Reference) -> RegistryResult<Layer> {
+        let client = Arc::new(RegistryClient::new(&self.config, registry)?);
 
-        let response = client.get_registry_text_response(registry, &format!("layers/{}/manifest", reference)).await?;
+        let response = client.get_registry_text_response(&registry.registry, &format!("layers/{}/manifest", reference)).await?;
         let mut layer: Layer = serde_json::from_str(&response)?;
 
         let layer_folder = self.config.get_layer_folder(&layer.hash);
@@ -126,7 +123,7 @@ impl RegistryManager {
                     self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
                     download_operations.push(download_file(
                         &client,
-                        registry,
+                        &registry.registry,
                         reference,
                         local_source_path,
                         *file_index,
@@ -145,14 +142,11 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    pub async fn upload_layer(&self,
-                              session: &StateSession,
-                              registry: &str,
-                              layer: &Layer) -> RegistryResult<()> {
-        let client = RegistryClient::new(&self.config, session, registry)?;
+    pub async fn upload_layer(&self, registry: &RegistrySession, layer: &Layer) -> RegistryResult<()> {
+        let client = RegistryClient::new(&self.config, registry)?;
 
         // Begin upload
-        let mut request = client.json_post_registry_response(registry, "layers/begin-upload").build()?;
+        let mut request = client.json_post_registry_response(&registry.registry, "layers/begin-upload").build()?;
         *request.body_mut() = Some(Body::from(serde_json::to_string(&layer)?));
         let response = client.execute(request).await?;
 
@@ -175,7 +169,7 @@ impl RegistryManager {
         let mut file_index = 0;
         for operation in &layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
-                let mut request = client.build_post_request(registry, &format!("layers/{}/upload/{}", layer.hash, file_index))
+                let mut request = client.build_post_request(&registry.registry, &format!("layers/{}/upload/{}", layer.hash, file_index))
                     .header("UPLOAD_ID", upload_id.clone())
                     .build()?;
 
@@ -191,7 +185,7 @@ impl RegistryManager {
         }
 
         // Commit upload
-        let request = client.json_post_registry_response(registry, "layers/end-upload")
+        let request = client.json_post_registry_response(&registry.registry, "layers/end-upload")
             .header("UPLOAD_ID", upload_id.clone())
             .build()?;
         let response = client.execute(request).await?;
@@ -206,12 +200,10 @@ impl RegistryManager {
         Ok(())
     }
 
-    pub async fn upload_image(&self,
-                              session: &StateSession,
-                              registry: &str, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
-        let client = RegistryClient::new(&self.config, session, registry)?;
+    pub async fn upload_image(&self, registry: &RegistrySession, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
+        let client = RegistryClient::new(&self.config, registry)?;
 
-        let mut request = client.json_post_registry_response(registry, "images").build()?;
+        let mut request = client.json_post_registry_response(&registry.registry, "images").build()?;
 
         *request.body_mut() = Some(Body::from(serde_json::to_string(
             &ImageSpec {
@@ -227,6 +219,28 @@ impl RegistryManager {
     }
 }
 
+pub struct RegistrySession {
+    registry: String,
+    username: String,
+    password: String
+}
+
+impl RegistrySession {
+    pub fn new(session: &StateSession, registry: &str) -> RegistryResult<RegistrySession> {
+        let (username, password) = session.get_login(registry)
+            .ok().flatten()
+            .ok_or_else(|| RegistryError::InvalidAuthentication)?;
+
+        Ok(
+            RegistrySession {
+                registry: registry.to_owned(),
+                username,
+                password,
+            }
+        )
+    }
+}
+
 struct RegistryClient {
     http_client: Client,
     username: String,
@@ -234,18 +248,14 @@ struct RegistryClient {
 }
 
 impl RegistryClient {
-    pub fn new(config: &ImageManagerConfig, session: &StateSession, registry: &str) -> RegistryResult<RegistryClient> {
-        let (username, password) = session.get_login(registry)
-            .ok().flatten()
-            .ok_or_else(|| RegistryError::InvalidAuthentication)?;
-
+    pub fn new(config: &ImageManagerConfig, registry: &RegistrySession) -> RegistryResult<RegistryClient> {
         Ok(
             RegistryClient {
                 http_client: Client::builder()
                     .danger_accept_invalid_certs(config.accept_self_signed)
                     .build()?,
-                username,
-                password
+                username: registry.username.clone(),
+                password: registry.password.clone()
             }
         )
     }
