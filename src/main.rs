@@ -228,7 +228,10 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             println!("Building image: {}", tag);
             let start_time = Instant::now();
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
-            let image_definition = ImageDefinition::parse(&image_definition_content, &image_definition_context).map_err(|err| format!("Failed parsing build definition: {}", err))?;
+            let image_definition = ImageDefinition::parse(
+                &image_definition_content,
+                &image_definition_context
+            ).map_err(|err| format!("Failed parsing build definition: {}", err))?;
 
             let request = BuildRequest {
                 build_context: context.unwrap_or_else(|| std::env::current_dir().unwrap()),
