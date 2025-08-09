@@ -441,6 +441,7 @@ async fn main() -> Result<(), String> {
 
     if let Err(err) = main_run(file_config, command_line_input).await {
         println!("{}", err);
+        std::process::exit(1);
     }
 
     Ok(())
