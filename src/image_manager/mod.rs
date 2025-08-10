@@ -15,6 +15,7 @@ pub enum ImageManagerError {
     LayerNotFound { image_id: ImageId },
     ImageNotFound { reference: Reference },
     FileIOError { message: String },
+    FileNotInBuildContext { path: String },
     ZIPError(ZipError),
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
@@ -45,7 +46,6 @@ impl From<ZipError> for ImageManagerError {
     }
 }
 
-
 impl From<RegistryError> for ImageManagerError {
     fn from(error: RegistryError) -> Self {
         ImageManagerError::RegistryError { error }
@@ -73,6 +73,9 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::FileIOError { message } => {
                 write!(f, "{}", message)
             },
+            ImageManagerError::FileNotInBuildContext { path } => {
+                write!(f, "The file '{}' does not exist in the build content", path)
+            }
             ImageManagerError::ZIPError(error) => {
                 write!(f, "{}", error)
             },

@@ -147,8 +147,8 @@ impl BuildManager {
                     let source_path_entry = Path::new(&source_path);
                     if !source_path_entry.exists() {
                         return Err(
-                            ImageManagerError::FileIOError {
-                                message: format!("The file '{}' does not exist.", source_path)
+                            ImageManagerError::FileNotInBuildContext {
+                                path: source_path.clone()
                             }
                         );
                     }
@@ -166,7 +166,7 @@ impl BuildManager {
                     };
 
                     let relative_source_path = Path::new(source_path).strip_prefix(build_context)
-                        .map_err(|_| ImageManagerError::FileIOError { message: format!("The file '{}' does not exist in the build content", source_path) })?;
+                        .map_err(|_| ImageManagerError::FileNotInBuildContext { path: source_path.clone() })?;
                     let relative_source_path = relative_source_path.to_str().unwrap();
 
                     layer_operations.push(LayerOperation::File {
