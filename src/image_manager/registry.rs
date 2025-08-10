@@ -40,7 +40,7 @@ impl RegistryManager {
                 .get(full_url)
                 .basic_auth(&username, Some(&password)).build()?
         ).await?;
-        RegistryError::from_response(response, "url: /verify".to_owned()).await?;
+        RegistryError::from_response(response, "url: /verify_login".to_owned()).await?;
         Ok(())
     }
 
