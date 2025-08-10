@@ -27,7 +27,7 @@ impl BuildManager {
 
     pub fn build_image(&self,
                        session: &StateSession,
-                       layer_manager: &mut LayerManager,
+                       layer_manager: &LayerManager,
                        request: BuildRequest) -> ImageManagerResult<BuildResult> {
         let mut parent_hash: Option<ImageId> = None;
 
@@ -76,7 +76,7 @@ impl BuildManager {
 
     fn build_layer(&self,
                    session: &StateSession,
-                   layer_manager: &mut LayerManager,
+                   layer_manager: &LayerManager,
                    build_context: &Path,
                    mut layer: Layer,
                    force: bool) -> ImageManagerResult<bool> {

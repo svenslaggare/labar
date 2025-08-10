@@ -56,7 +56,7 @@ impl UnpackManager {
         Ok(session.all_unpackings()?)
     }
 
-    pub fn unpack(&mut self,
+    pub fn unpack(&self,
                   session: &StateSession,
                   layer_manager: &LayerManager,
                   request: UnpackRequest) -> ImageManagerResult<()> {
@@ -77,7 +77,7 @@ impl UnpackManager {
         }
     }
 
-    fn unpack_with(&mut self,
+    fn unpack_with(&self,
                    session: &StateSession,
                    unpacker: &impl Unpacker,
                    layer_manager: &LayerManager,
@@ -213,7 +213,7 @@ impl UnpackManager {
         Ok(())
     }
 
-    pub fn remove_unpacking(&mut self,
+    pub fn remove_unpacking(&self,
                             session: &StateSession,
                             layer_manager: &LayerManager,
                             unpack_folder: &Path, force: bool) -> ImageManagerResult<()> {
@@ -461,14 +461,14 @@ fn test_unpack() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     build_test_image(
         &session,
-        &mut layer_manager,
+        &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
@@ -507,14 +507,14 @@ fn test_unpack_exist() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     build_test_image(
         &session,
-        &mut layer_manager,
+        &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
@@ -564,14 +564,14 @@ fn test_remove_unpack() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     build_test_image(
         &session,
-        &mut layer_manager,
+        &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
@@ -618,14 +618,14 @@ fn test_unpack_replace1() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     build_test_image(
         &session,
-        &mut layer_manager,
+        &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
@@ -675,14 +675,14 @@ fn test_unpack_replace2() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
+    let layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config.clone(), printer.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     build_test_image(
         &session,
-        &mut layer_manager,
+        &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile")
     ).unwrap();
@@ -720,8 +720,8 @@ fn test_unpack_self_reference() {
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
-    let mut layer_manager = LayerManager::new(config.clone());
-    let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let layer_manager = LayerManager::new(config.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
     let hash = ImageId::from_str("3d197ee59b46d114379522e6f68340371f2f1bc1525cb4456caaf5b8430acea3").unwrap();
@@ -801,7 +801,7 @@ fn test_extract() {
 
 #[cfg(test)]
 fn build_test_image(session: &StateSession,
-                    layer_manager: &mut LayerManager,
+                    layer_manager: &LayerManager,
                     build_manager: &crate::image_manager::build::BuildManager,
                     path: &Path) -> Result<(), String> {
     use std::str::FromStr;
