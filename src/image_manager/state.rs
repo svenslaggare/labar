@@ -1,10 +1,11 @@
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::image::{Image, Layer};
+use crate::image_manager::ImageManagerResult;
 use crate::image_manager::unpack::Unpacking;
 use crate::reference::{ImageId, ImageTag};
 
@@ -112,21 +113,11 @@ pub struct StateSession {
 }
 
 impl StateSession {
-    pub fn begin_transaction(&self) -> SqlResult<()> {
-        self.connection.execute("BEGIN TRANSACTION", ())?;
-        Ok(())
-    }
-
-    pub fn end_transaction(&self) -> SqlResult<()> {
-        self.connection.execute("COMMIT", ())?;
-        Ok(())
-    }
-
-    pub fn add_login(&self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
-        self.begin_transaction()?;
-        self.connection.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
-        self.connection.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
-        self.end_transaction()?;
+    pub fn add_login(&mut self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
+        transaction.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -168,7 +159,10 @@ impl StateSession {
     }
 
     pub fn insert_layer(&self, layer: Layer) -> SqlResult<()> {
-        self.connection.execute("INSERT INTO layers (hash, metadata) VALUES (?1, ?2)", (&layer.hash, &serde_json::to_value(&layer).unwrap()))?;
+        self.connection.execute(
+            "INSERT INTO layers (hash, metadata) VALUES (?1, ?2)",
+            (&layer.hash, &serde_json::to_value(&layer).unwrap())
+        )?;
         Ok(())
     }
 
@@ -189,15 +183,24 @@ impl StateSession {
     }
 
     pub fn get_image(&self, tag: &ImageTag) -> SqlResult<Option<Image>> {
-        self.connection.query_row(
+        StateSession::get_image_internal(&self.connection, tag)
+    }
+
+    fn get_image_internal(connection: &Connection, tag: &ImageTag) -> SqlResult<Option<Image>> {
+        connection.query_row(
             "SELECT hash, tag FROM images WHERE tag=?1",
             [tag],
             |row| Image::from_row(&row)
         ).optional()
     }
 
+    #[allow(dead_code)]
     pub fn image_exists(&self, tag: &ImageTag) -> SqlResult<bool> {
-        let count = self.connection.query_one(
+        StateSession::image_exists_internal(&self.connection, tag)
+    }
+
+    fn image_exists_internal(connection: &Connection, tag: &ImageTag) -> SqlResult<bool> {
+        let count = connection.query_one(
             "SELECT COUNT(*) FROM images WHERE tag=?1",
             [tag],
             |row| row.get::<_, i64>(0)
@@ -206,19 +209,35 @@ impl StateSession {
         Ok(count > 0)
     }
 
+    #[allow(dead_code)]
     pub fn insert_image(&self, image: Image) -> SqlResult<()> {
-        self.connection.execute("INSERT INTO images (tag, hash) VALUES (?1, ?2)", (&image.tag, &image.hash))?;
+        StateSession::insert_image_internal(&self.connection, image)
+    }
+
+    fn insert_image_internal(connection: &Connection, image: Image) -> SqlResult<()> {
+        connection.execute("INSERT INTO images (tag, hash) VALUES (?1, ?2)", (&image.tag, &image.hash))?;
         Ok(())
     }
 
-    pub fn replace_image(&self, image: Image) -> SqlResult<()> {
-        self.connection.execute("UPDATE images SET hash=?2 WHERE tag=?1", (&image.tag, &image.hash))?;
+    pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
+        let transaction = self.connection.transaction()?;
+
+        if StateSession::image_exists_internal(&transaction, &image.tag)? {
+            transaction.execute("UPDATE images SET hash=?2 WHERE tag=?1", (&image.tag, &image.hash))?;
+        } else {
+            StateSession::insert_image_internal(&transaction, image)?;
+        }
+
+        transaction.commit()?;
         Ok(())
     }
 
-    pub fn remove_image(&self, tag: &ImageTag) -> SqlResult<()> {
-        self.connection.execute("DELETE FROM images WHERE tag=?1", (&tag, ))?;
-        Ok(())
+    pub fn remove_image(&mut self, tag: &ImageTag) -> SqlResult<Option<Image>> {
+        let transaction = self.connection.transaction()?;
+        let image = StateSession::get_image_internal(&transaction, tag)?;
+        transaction.execute("DELETE FROM images WHERE tag=?1", (&tag, ))?;
+        transaction.commit()?;
+        Ok(image)
     }
 
     pub fn all_unpackings(&self) -> SqlResult<Vec<Unpacking>> {
@@ -304,6 +323,12 @@ impl Deref for PooledStateSession {
 
     fn deref(&self) -> &Self::Target {
         self.session.as_ref().unwrap()
+    }
+}
+
+impl DerefMut for PooledStateSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.session.as_mut().unwrap()
     }
 }
 

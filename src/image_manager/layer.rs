@@ -106,26 +106,13 @@ impl LayerManager {
         Ok(image.map(|image| image.hash.clone()))
     }
 
-    pub fn insert_or_replace_image(&self, session: &StateSession, image: Image) -> ImageManagerResult<()> {
-        session.begin_transaction()?;
-
-        if session.image_exists(&image.tag)? {
-            session.replace_image(image)?;
-        } else {
-            session.insert_image(image)?;
-        }
-
-        session.end_transaction()?;
+    pub fn insert_or_replace_image(&self, session: &mut StateSession, image: Image) -> ImageManagerResult<()> {
+        session.insert_or_replace_image(image)?;
         Ok(())
     }
 
-    pub fn remove_image(&self, session: &StateSession, tag: &ImageTag) -> ImageManagerResult<Option<Image>> {
-        session.begin_transaction()?;
-
-        let image = session.get_image(tag)?;
-        session.remove_image(tag)?;
-
-        session.end_transaction()?;
+    pub fn remove_image(&self, session: &mut StateSession, tag: &ImageTag) -> ImageManagerResult<Option<Image>> {
+        let image = session.remove_image(tag)?;
         Ok(image)
     }
 

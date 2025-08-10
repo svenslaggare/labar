@@ -26,7 +26,7 @@ impl BuildManager {
     }
 
     pub fn build_image(&self,
-                       session: &StateSession,
+                       session: &mut StateSession,
                        layer_manager: &LayerManager,
                        request: BuildRequest) -> ImageManagerResult<BuildResult> {
         let mut parent_hash: Option<ImageId> = None;
@@ -238,10 +238,10 @@ fn test_build() {
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
     let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer);
-    let session = state_manager.session().unwrap();
+    let mut session = state_manager.session().unwrap();
 
     let result = build_test_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
@@ -279,11 +279,11 @@ fn test_build_with_cache1() {
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
     let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer.clone());
-    let session = state_manager.session().unwrap();
+    let mut session = state_manager.session().unwrap();
 
     // Build first time
     let first_result = build_test_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
@@ -294,7 +294,7 @@ fn test_build_with_cache1() {
 
     // Build second time
     let second_result = build_test_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
@@ -338,7 +338,7 @@ fn test_build_with_cache2() {
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
     let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer.clone());
-    let session = state_manager.session().unwrap();
+    let mut session = state_manager.session().unwrap();
 
     let tmp_content_file = tmp_dir.join("test.txt");
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
@@ -362,7 +362,7 @@ fn test_build_with_cache2() {
     };
 
     let first_result = build_manager.build_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -377,7 +377,7 @@ fn test_build_with_cache2() {
     // Build second time
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
     let second_result = build_manager.build_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -393,7 +393,7 @@ fn test_build_with_cache2() {
     assert_eq!(first_result.image.hash, second_result.image.hash);
     assert_eq!(0, second_result.built_layers);
 
-    let session = state_manager.session().unwrap();
+    let mut session = state_manager.session().unwrap();
     let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
     assert!(image.is_ok());
     let image = image.unwrap();
@@ -407,7 +407,7 @@ fn test_build_with_cache2() {
     // Build third time (change)
     std::fs::write(&tmp_content_file, "Hello, World!!").unwrap();
     let third_result = build_manager.build_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         BuildRequest {
             build_context: tmp_dir.clone(),
@@ -442,10 +442,10 @@ fn test_build_with_image_ref() {
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
     let mut layer_manager = LayerManager::new(config.clone());
     let build_manager = BuildManager::new(config, printer);
-    let session = state_manager.session().unwrap();
+    let mut session = state_manager.session().unwrap();
 
     build_test_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
@@ -453,7 +453,7 @@ fn test_build_with_image_ref() {
     ).unwrap();
 
     let result = build_test_image(
-        &session,
+        &mut session,
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/with_image_ref.labarfile"),
@@ -478,7 +478,7 @@ fn test_build_with_image_ref() {
 }
 
 #[cfg(test)]
-fn build_test_image(session: &StateSession,
+fn build_test_image(session: &mut StateSession,
                     layer_manager: &mut LayerManager,
                     build_manager: &BuildManager,
                     path: &Path,
@@ -489,7 +489,7 @@ fn build_test_image(session: &StateSession,
     let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
 
     build_manager.build_image(
-        &session,
+        session,
         layer_manager,
         BuildRequest {
             build_context: Path::new("").to_path_buf(),

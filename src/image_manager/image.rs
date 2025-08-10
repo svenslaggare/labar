@@ -51,18 +51,18 @@ impl ImageManager {
     }
 
     pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<Image> {
-        let session = self.state_manager.pooled_session()?;
+        let mut session = self.state_manager.pooled_session()?;
 
-        let image = self.build_manager.build_image(&session, &mut self.layer_manager, request)?.image;
+        let image = self.build_manager.build_image(&mut session, &mut self.layer_manager, request)?.image;
         Ok(image)
     }
 
     pub fn tag_image(&mut self, reference: &Reference, tag: &ImageTag) -> ImageManagerResult<Image> {
-        let session = self.state_manager.pooled_session()?;
+        let mut session = self.state_manager.pooled_session()?;
 
         let layer = self.layer_manager.get_layer(&session, reference)?;
         let image = Image::new(layer.hash.clone(), tag.clone());
-        self.layer_manager.insert_or_replace_image(&session, image.clone())?;
+        self.layer_manager.insert_or_replace_image(&mut session, image.clone())?;
         Ok(image)
     }
 
@@ -85,9 +85,9 @@ impl ImageManager {
     }
 
     pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
-        let session = self.state_manager.pooled_session()?;
+        let mut session = self.state_manager.pooled_session()?;
 
-        if let Some(image) = self.layer_manager.remove_image(&session, tag)? {
+        if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
             self.garbage_collect()?;
             Ok(())
@@ -263,7 +263,7 @@ impl ImageManager {
     }
 
     pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
-        let session = self.state_manager.pooled_session()?;
+        let mut session = self.state_manager.pooled_session()?;
 
         self.registry_manager.verify_login(registry, username, password).await?;
         session.add_login(registry, username, password)?;
@@ -471,8 +471,8 @@ impl ImageManager {
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
-        let session = self.state_manager.pooled_session()?;
-        self.layer_manager.insert_or_replace_image(&session, image)?;
+        let mut session = self.state_manager.pooled_session()?;
+        self.layer_manager.insert_or_replace_image(&mut session, image)?;
         Ok(())
     }
 }
