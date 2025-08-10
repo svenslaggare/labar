@@ -439,12 +439,9 @@ fn test_unpack() {
     use std::str::FromStr;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -457,20 +454,12 @@ fn test_unpack() {
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &session,
@@ -496,12 +485,9 @@ fn test_unpack_exist() {
     use std::str::FromStr;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -514,20 +500,12 @@ fn test_unpack_exist() {
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     unpack_manager.unpack(
         &session,
@@ -564,12 +542,9 @@ fn test_remove_unpack() {
     use std::str::FromStr;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -582,20 +557,12 @@ fn test_remove_unpack() {
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     unpack_manager.unpack(
         &session,
@@ -629,12 +596,9 @@ fn test_unpack_replace1() {
     use std::str::FromStr;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -647,20 +611,12 @@ fn test_unpack_replace1() {
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     unpack_manager.unpack(
         &session,
@@ -697,12 +653,9 @@ fn test_unpack_replace2() {
     use std::str::FromStr;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -715,20 +668,12 @@ fn test_unpack_replace2() {
     let mut unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile")
+    ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &session,
@@ -800,12 +745,9 @@ fn test_extract() {
     use zip::ZipArchive;
 
     use crate::helpers;
-    use crate::reference::ImageTag;
-    use crate::image_definition::ImageDefinition;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::build::BuildRequest;
     use crate::image_manager::state::StateManager;
 
     let tmp_dir = helpers::get_temp_folder();
@@ -818,20 +760,12 @@ fn test_extract() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple3.labarfile")
-    ).unwrap();
-
-    assert!(build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).is_ok());
+        &build_manager,
+        Path::new("testdata/definitions/simple3.labarfile")
+    ).unwrap();
 
     let archive_file = tmp_dir.join("extract.zip");
     let extract_result = unpack_manager.extract(
@@ -851,4 +785,30 @@ fn test_extract() {
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
     }
+}
+
+#[cfg(test)]
+fn build_test_image(session: &StateSession,
+                    layer_manager: &mut LayerManager,
+                    build_manager: &crate::image_manager::build::BuildManager,
+                    path: &Path) -> Result<(), String> {
+    use std::str::FromStr;
+    use crate::image_definition::ImageDefinition;
+    use crate::image_manager::BuildRequest;
+    use crate::reference::ImageTag;
+
+    let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
+
+    build_manager.build_image(
+        &session,
+        layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: ImageTag::from_str("test").unwrap(),
+            force: false,
+        }
+    ).map_err(|err| err.to_string())?;
+
+    Ok(())
 }

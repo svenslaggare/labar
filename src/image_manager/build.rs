@@ -240,19 +240,12 @@ fn test_build() {
     let build_manager = BuildManager::new(config, printer);
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    let result = build_manager.build_image(
+    let result = build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;
@@ -289,37 +282,23 @@ fn test_build_with_cache1() {
     let session = state_manager.session().unwrap();
 
     // Build first time
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    let first_result = build_manager.build_image(
+    let first_result = build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     );
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
 
     // Build second time
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-
-    let second_result = build_manager.build_image(
+    let second_result = build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     );
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
@@ -465,32 +444,20 @@ fn test_build_with_image_ref() {
     let build_manager = BuildManager::new(config, printer);
     let session = state_manager.session().unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-    build_manager.build_image(
+    build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
-    ).unwrap();
-    let result = build_manager.build_image(
+    let result = build_test_image(
         &session,
         &mut layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("that").unwrap(),
-            force: false,
-        }
+        &build_manager,
+        Path::new("testdata/definitions/with_image_ref.labarfile"),
+        ImageTag::from_str("that").unwrap()
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;
@@ -508,4 +475,27 @@ fn test_build_with_image_ref() {
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_dir);
     }
+}
+
+#[cfg(test)]
+fn build_test_image(session: &StateSession,
+                    layer_manager: &mut LayerManager,
+                    build_manager: &BuildManager,
+                    path: &Path,
+                    image_tag: ImageTag) -> Result<BuildResult, String> {
+    use crate::image_definition::ImageDefinition;
+    use crate::image_manager::BuildRequest;
+
+    let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
+
+    build_manager.build_image(
+        &session,
+        layer_manager,
+        BuildRequest {
+            build_context: Path::new("").to_path_buf(),
+            image_definition,
+            tag: image_tag,
+            force: false,
+        }
+    ).map_err(|err| err.to_string())
 }

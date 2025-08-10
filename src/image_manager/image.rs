@@ -539,7 +539,6 @@ fn test_build() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
 
@@ -548,16 +547,11 @@ fn test_build() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/simple1.labarfile")
-        ).unwrap();
-
-        let result = image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        });
+        let result = build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple1.labarfile"),
+            ImageTag::from_str("test").unwrap()
+        );
         assert!(result.is_ok());
         let result = result.unwrap();
 
@@ -587,7 +581,6 @@ fn test_remove_image1() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_folder).unwrap();
@@ -600,16 +593,11 @@ fn test_remove_image1() {
         printer
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
+    build_test_image(
+        &mut image_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
-
-    image_manager.build_image(BuildRequest {
-        build_context: Path::new("").to_path_buf(),
-        image_definition,
-        tag: ImageTag::from_str("test").unwrap(),
-        force: false,
-    }).unwrap();
 
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
@@ -630,7 +618,6 @@ fn test_remove_image2() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     std::fs::create_dir_all(&tmp_folder).unwrap();
@@ -643,25 +630,17 @@ fn test_remove_image2() {
         printer
     ).unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
+    build_test_image(
+        &mut image_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
-    image_manager.build_image(BuildRequest {
-        build_context: Path::new("").to_path_buf(),
-        image_definition,
-        tag: ImageTag::from_str("test").unwrap(),
-        force: false,
-    }).unwrap();
 
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new("testdata/definitions/simple1.labarfile")
+    build_test_image(
+        &mut image_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test2").unwrap()
     ).unwrap();
-    image_manager.build_image(BuildRequest {
-        build_context: Path::new("").to_path_buf(),
-        image_definition,
-        tag: ImageTag::from_str("test2").unwrap(),
-        force: false,
-    }).unwrap();
 
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
@@ -680,7 +659,6 @@ fn test_list_content() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
 
@@ -689,25 +667,17 @@ fn test_list_content() {
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/simple1.labarfile")
+        build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple1.labarfile"),
+            ImageTag::from_str("test").unwrap()
         ).unwrap();
-        image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }).unwrap();
 
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/with_image_ref.labarfile")
+        build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/with_image_ref.labarfile"),
+            ImageTag::from_str("that").unwrap()
         ).unwrap();
-        image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("that").unwrap(),
-            force: false,
-        }).unwrap();
 
         let files = image_manager.list_content(&Reference::from_str("that").unwrap());
         assert!(files.is_ok());
@@ -723,27 +693,7 @@ fn test_list_content() {
     }
 }
 
-#[cfg(test)]
-fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
-    use crate::registry::RegistryConfig;
-    use crate::registry::auth::AccessRight;
 
-    RegistryConfig {
-        data_path: tmp_registry_folder.to_path_buf(),
-        address,
-        pending_upload_expiration: 30.0,
-        ssl_cert_path: None,
-        ssl_key_path: None,
-        upstream: None,
-        users: vec![
-            (
-                "guest".to_owned(),
-                crate::registry::auth::Password::from_plain_text("guest"),
-                vec![AccessRight::List, AccessRight::Download, AccessRight::Upload, AccessRight::Delete]
-            )
-        ]
-    }
-}
 
 #[tokio::test]
 async fn test_push_pull() {
@@ -751,7 +701,6 @@ async fn test_push_pull() {
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     let tmp_registry_folder = helpers::get_temp_folder();
@@ -773,15 +722,11 @@ async fn test_push_pull() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/simple4.labarfile")
+        let image = build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            image_tag.clone()
         ).unwrap();
-        let image = image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: image_tag.clone(),
-            force: false,
-        }).unwrap();
         assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
@@ -826,12 +771,11 @@ async fn test_push_pull() {
 
 #[tokio::test]
 async fn test_push_pull_with_ref() {
-    use std::net::SocketAddr;
     use std::str::FromStr;
+    use std::net::SocketAddr;
 
     use crate::helpers;
     use crate::image_manager::ConsolePrinter;
-    use crate::image_definition::ImageDefinition;
 
     let tmp_folder = helpers::get_temp_folder();
     let tmp_registry_folder = helpers::get_temp_folder();
@@ -853,25 +797,17 @@ async fn test_push_pull_with_ref() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
 
         // Build
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/simple1.labarfile")
+        let image_referred = build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple1.labarfile"),
+            ImageTag::from_str("test").unwrap()
         ).unwrap();
-        let image_referred = image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }).unwrap();
 
-        let image_definition = ImageDefinition::parse_file_without_context(
-            Path::new("testdata/definitions/with_image_ref.labarfile")
+        let image = build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/with_image_ref.labarfile"),
+            image_tag.clone()
         ).unwrap();
-        let image = image_manager.build_image(BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: image_tag.clone(),
-            force: false,
-        }).unwrap();
         assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         // Push
@@ -912,5 +848,44 @@ async fn test_push_pull_with_ref() {
     #[allow(unused_must_use)] {
         std::fs::remove_dir_all(&tmp_folder);
         std::fs::remove_dir_all(&tmp_registry_folder);
+    }
+}
+
+#[cfg(test)]
+fn build_test_image(image_manager: &mut ImageManager,
+                    path: &Path, image_tag: ImageTag) -> Result<Image, String> {
+    use crate::image_definition::ImageDefinition;
+
+    let image_definition = ImageDefinition::parse_file_without_context(
+        Path::new(path)
+    ).map_err(|err| err.to_string())?;
+
+    image_manager.build_image(BuildRequest {
+        build_context: Path::new("").to_path_buf(),
+        image_definition,
+        tag: image_tag,
+        force: false,
+    }).map_err(|err| err.to_string())
+}
+
+#[cfg(test)]
+fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
+    use crate::registry::RegistryConfig;
+    use crate::registry::auth::AccessRight;
+
+    RegistryConfig {
+        data_path: tmp_registry_folder.to_path_buf(),
+        address,
+        pending_upload_expiration: 30.0,
+        ssl_cert_path: None,
+        ssl_key_path: None,
+        upstream: None,
+        users: vec![
+            (
+                "guest".to_owned(),
+                crate::registry::auth::Password::from_plain_text("guest"),
+                vec![AccessRight::List, AccessRight::Download, AccessRight::Upload, AccessRight::Delete]
+            )
+        ]
     }
 }
