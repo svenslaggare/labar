@@ -286,16 +286,14 @@ impl ImageManager {
         }
 
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
+        let registry_session = RegistrySession::new(&session, registry)?;
 
         self.printer.println(&format!("Pulling image {}", tag));
 
-        let image_metadata = self.registry_manager.resolve_image(
-            &RegistrySession::new(&session, registry)?,
-            &tag
-        ).await?;
+        let image_metadata = self.registry_manager.resolve_image(&registry_session, &tag).await?;
 
         self.pull_internal(
-            &RegistrySession::new(&session, registry)?,
+            &registry_session,
             &image_metadata.image.hash, &tag,
             &mut DownloadResult::new()
         ).await
