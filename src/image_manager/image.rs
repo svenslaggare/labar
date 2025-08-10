@@ -282,9 +282,7 @@ impl ImageManager {
 
         let mut tag = tag.clone();
         if tag.registry().is_none() {
-            if let Some(default_registry) = default_registry {
-                tag = tag.set_registry(default_registry);
-            }
+            tag = tag.set_registry_opt(default_registry);
         }
 
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
@@ -310,9 +308,7 @@ impl ImageManager {
 
         let mut tag = tag.clone();
         if tag.registry().is_none() {
-            if let Some(default_registry) = default_registry {
-                tag = tag.set_registry(default_registry);
-            }
+            tag = tag.set_registry_opt(default_registry);
         }
 
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
@@ -363,11 +359,7 @@ impl ImageManager {
 
         let images = self.registry_manager.list_images(&registry_session).await?;
         for image in images {
-            let mut new_tag = image.image.tag.clone();
-            if let Some(local_registry) = local_registry {
-                new_tag = new_tag.set_registry(local_registry);
-            }
-
+            let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
             self.pull_internal(
                 &registry_session,
                 &image.image.hash,

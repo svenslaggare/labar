@@ -1,6 +1,7 @@
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::image::{Image, Layer};
@@ -20,7 +21,7 @@ impl StateManager {
             std::fs::create_dir_all(base_folder).map_err(|_| rusqlite::Error::InvalidPath(base_folder.to_path_buf()))?;
         }
 
-        let connection = Connection::open(base_folder.join("state.sqlite3"))?;
+        let connection = StateManager::open_connection(base_folder)?;
         connection.execute(
             r#"
             CREATE TABLE IF NOT EXISTS layers(
@@ -80,7 +81,7 @@ impl StateManager {
         Ok(
             StateManager {
                 base_folder: base_folder.to_path_buf(),
-                pool: Arc::new(StateSessionPool::new())
+                pool: Arc::new(StateSessionPool::new(vec![StateSession { connection }]))
             }
         )
     }
@@ -88,13 +89,17 @@ impl StateManager {
     pub fn session(&self) -> SqlResult<StateSession> {
         Ok(
             StateSession {
-                connection: Connection::open(self.base_folder.join("state.sqlite3"))?
+                connection: StateManager::open_connection(&self.base_folder)?
             }
         )
     }
 
+    fn open_connection(base_folder: &Path) -> SqlResult<Connection> {
+        Connection::open(base_folder.join("state.sqlite3"))
+    }
+
     pub fn pooled_session(&self) -> SqlResult<PooledStateSession> {
-        if let Some(session) = self.pool.pop() {
+        if let Some(session) = self.pool.get_session() {
             Ok(PooledStateSession::new(self.pool.clone(), session))
         } else {
             Ok(PooledStateSession::new(self.pool.clone(), self.session()?))
@@ -289,7 +294,7 @@ impl PooledStateSession {
 impl Drop for PooledStateSession {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
-            self.pool.push(session);
+            self.pool.return_session(session);
         }
     }
 }
@@ -307,17 +312,17 @@ struct StateSessionPool {
 }
 
 impl StateSessionPool {
-    pub fn new() -> StateSessionPool {
+    pub fn new(initial: Vec<StateSession>) -> StateSessionPool {
         StateSessionPool {
-            sessions: Mutex::new(Vec::new())
+            sessions: Mutex::new(initial)
         }
     }
 
-    pub fn push(&self, session: StateSession) {
+    pub fn return_session(&self, session: StateSession) {
         self.sessions.lock().unwrap().push(session);
     }
 
-    pub fn pop(&self) -> Option<StateSession> {
+    pub fn get_session(&self) -> Option<StateSession> {
         self.sessions.lock().unwrap().pop()
     }
 }

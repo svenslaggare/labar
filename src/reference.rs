@@ -144,6 +144,14 @@ impl ImageTag {
         self
     }
 
+    pub fn set_registry_opt(self, registry: Option<&str>) -> Self {
+        if let Some(registry) = registry {
+            self.set_registry(registry)
+        } else {
+            self
+        }
+    }
+
     pub fn set_tag(mut self, tag: &str) -> Self {
         self.tag = tag.to_owned();
         self
