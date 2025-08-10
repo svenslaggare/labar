@@ -88,13 +88,18 @@ pub async fn run(config: RegistryConfig) {
     let state_clone = state.clone();
     tokio::spawn(async move {
         if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
+            let mut is_first = true;
             loop {
-                sync_with_upstream(state_clone.clone(), &upstream_config).await;
+                if (is_first && upstream_config.sync_at_startup) || !is_first {
+                    sync_with_upstream(state_clone.clone(), &upstream_config).await;
+                }
 
                 let current = Local::now();
                 if let Ok(next) = upstream_config.sync_interval.find_next_occurrence(&current, false) {
                     tokio::time::sleep((next - current).to_std().unwrap()).await;
                 }
+
+                is_first = false;
             }
         }
     });

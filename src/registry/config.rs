@@ -35,8 +35,14 @@ pub struct RegistryUpstreamConfig {
     pub address: SocketAddr,
     pub username: String,
     pub password: String,
+    #[serde(default="default_sync_at_startup")]
+    pub sync_at_startup: bool,
     #[serde(default="default_sync_interval")]
     pub sync_interval: Cron
+}
+
+fn default_sync_at_startup() -> bool {
+    true
 }
 
 fn default_sync_interval() -> Cron {
