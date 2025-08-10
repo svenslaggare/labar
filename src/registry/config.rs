@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-
+use std::str::FromStr;
+use croner::Cron;
 use serde::{Deserialize, Serialize};
 use toml_edit::DocumentMut;
 
@@ -35,11 +36,11 @@ pub struct RegistryUpstreamConfig {
     pub username: String,
     pub password: String,
     #[serde(default="default_sync_interval")]
-    pub sync_interval: f64
+    pub sync_interval: Cron
 }
 
-fn default_sync_interval() -> f64 {
-    60.0
+fn default_sync_interval() -> Cron {
+    Cron::from_str("* * * * *").unwrap()
 }
 
 impl RegistryConfig {

@@ -48,3 +48,5 @@ structopt = "0.3"
 
 sysinfo = "0.35"
 tempfile = "3"
+
+croner = { version = "3", features = ["serde"] }

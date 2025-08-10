@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 use chrono::Local;
 use log::{error, info};
@@ -88,10 +88,13 @@ pub async fn run(config: RegistryConfig) {
     let state_clone = state.clone();
     tokio::spawn(async move {
         if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
-            let mut interval = tokio::time::interval(Duration::from_secs_f64(upstream_config.sync_interval));
             loop {
-                interval.tick().await;
                 sync_with_upstream(state_clone.clone(), &upstream_config).await;
+
+                let current = Local::now();
+                if let Ok(next) = upstream_config.sync_interval.find_next_occurrence(&current, false) {
+                    tokio::time::sleep((next - current).to_std().unwrap()).await;
+                }
             }
         }
     });
