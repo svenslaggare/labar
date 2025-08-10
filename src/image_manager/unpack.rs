@@ -60,19 +60,28 @@ impl UnpackManager {
                   session: &StateSession,
                   layer_manager: &LayerManager,
                   request: UnpackRequest) -> ImageManagerResult<()> {
-        self.unpack_with(
-            session,
-            &StandardUnpacker,
-            layer_manager,
-            request
-        )
+        if !request.dry_run {
+            self.unpack_with(
+                &session,
+                &StandardUnpacker,
+                layer_manager,
+                request
+            )
+        } else {
+            self.unpack_with(
+                &session,
+                &DryRunUnpacker::new(self.printer.clone()),
+                layer_manager,
+                request
+            )
+        }
     }
 
-    pub fn unpack_with(&mut self,
-                       session: &StateSession,
-                       unpacker: &impl Unpacker,
-                       layer_manager: &LayerManager,
-                       request: UnpackRequest) -> ImageManagerResult<()> {
+    fn unpack_with(&mut self,
+                   session: &StateSession,
+                   unpacker: &impl Unpacker,
+                   layer_manager: &LayerManager,
+                   request: UnpackRequest) -> ImageManagerResult<()> {
         if request.replace && request.unpack_folder.exists() {
             if let Err(err) = self.remove_unpacking(&session, layer_manager, &request.unpack_folder, true) {
                 self.printer.println(&format!("Failed removing packing due to: {}", err));
@@ -206,7 +215,8 @@ impl UnpackManager {
 
     pub fn remove_unpacking(&mut self,
                             session: &StateSession,
-                            layer_manager: &LayerManager, unpack_folder: &Path, force: bool) -> ImageManagerResult<()> {
+                            layer_manager: &LayerManager,
+                            unpack_folder: &Path, force: bool) -> ImageManagerResult<()> {
         let unpack_folder_str = unpack_folder.canonicalize()?.to_str().unwrap().to_owned();
 
         let unpacking = session.get_unpacking(&unpack_folder_str)?
@@ -231,7 +241,8 @@ impl UnpackManager {
 
     fn remove_unpacked_layer(&self,
                              session: &StateSession,
-                             layer_manager: &LayerManager, unpack_folder: &Path, layer: &Layer) -> ImageManagerResult<()> {
+                             layer_manager: &LayerManager,
+                             unpack_folder: &Path, layer: &Layer) -> ImageManagerResult<()> {
         for operation in layer.operations.iter().rev() {
             match operation {
                 LayerOperation::Image { hash } => {
@@ -267,7 +278,8 @@ impl UnpackManager {
 
     pub fn extract(&self,
                    session: &StateSession,
-                   layer_manager: &LayerManager, reference: &Reference, archive_path: &Path) -> ImageManagerResult<()> {
+                   layer_manager: &LayerManager,
+                   reference: &Reference, archive_path: &Path) -> ImageManagerResult<()> {
         let file = File::create(archive_path)?;
         let mut writer = ZipWriter::new(file);
 

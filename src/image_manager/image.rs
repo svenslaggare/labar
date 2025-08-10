@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::layer::{LayerManager};
-use crate::image_manager::unpack::{DryRunUnpacker, UnpackManager, UnpackRequest, Unpacking};
+use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
@@ -68,22 +68,7 @@ impl ImageManager {
 
     pub fn unpack(&mut self, request: UnpackRequest) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
-
-        if !request.dry_run {
-            self.unpack_manager.unpack(
-                &session,
-                &mut self.layer_manager,
-                request
-            )?;
-        } else {
-            self.unpack_manager.unpack_with(
-                &session,
-                &DryRunUnpacker::new(self.printer.clone()),
-                &mut self.layer_manager,
-                request
-            )?;
-        }
-
+        self.unpack_manager.unpack(&session, &mut self.layer_manager, request)?;
         Ok(())
     }
 
