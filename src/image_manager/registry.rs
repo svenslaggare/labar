@@ -142,7 +142,7 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    pub async fn upload_layer(&self, registry: &RegistrySession, layer: &Layer) -> RegistryResult<()> {
+    pub async fn upload_layer(&self, registry: &RegistrySession, layer: &Layer) -> RegistryResult<bool> {
         let client = RegistryClient::new(&self.config, registry)?;
 
         // Begin upload
@@ -161,7 +161,7 @@ impl RegistryManager {
             }
             _ => {
                 self.printer.println("\t\t* Layer already exist.");
-                return Ok(());
+                return Ok(false);
             }
         }
 
@@ -197,7 +197,7 @@ impl RegistryManager {
             return Err(RegistryError::FailedToUpload);
         }
 
-        Ok(())
+        Ok(true)
     }
 
     pub async fn upload_image(&self, registry: &RegistrySession, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {

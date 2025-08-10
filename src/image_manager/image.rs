@@ -303,7 +303,7 @@ impl ImageManager {
         ).await
     }
 
-    pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<()> {
+    pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
         let session = self.state_manager.pooled_session()?;
 
         let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
@@ -338,18 +338,21 @@ impl ImageManager {
             }
         };
 
+        let mut layers_uploaded = 0;
         while let Some(current) = stack.pop() {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
             let layer = self.get_layer(&current)?;
             visit_layer(&mut stack, &layer);
-            self.registry_manager.upload_layer(&registry_session, &layer).await?;
+            if self.registry_manager.upload_layer(&registry_session, &layer).await? {
+                layers_uploaded += 1;
+            }
         }
 
         self.registry_manager.upload_image(&registry_session, &top_layer.hash, &tag).await?;
 
         self.printer.println("");
 
-        Ok(())
+        Ok(layers_uploaded)
     }
 
     pub async fn sync(&mut self, registry: &str, local_registry: Option<&str>) -> ImageManagerResult<DownloadResult> {
@@ -717,6 +720,8 @@ async fn test_push_pull() {
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
         assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+        let push_result = push_result.unwrap();
+        assert_eq!(1, push_result);
 
         // List remote
         let remote_images = image_manager.list_images_registry(&address.to_string()).await;
@@ -798,6 +803,8 @@ async fn test_push_pull_with_ref() {
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
         assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+        let push_result = push_result.unwrap();
+        assert_eq!(3, push_result);
 
         // List remote
         let remote_images = image_manager.list_images_registry(&address.to_string()).await;
