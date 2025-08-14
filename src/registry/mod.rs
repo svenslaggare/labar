@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant};
 
 use chrono::Local;
@@ -114,7 +115,8 @@ pub async fn run(config: RegistryConfig) {
 pub struct AppState {
     config: RegistryConfig,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
-    pending_uploads: Mutex<PendingUploads>
+    pending_uploads: Mutex<PendingUploads>,
+    upload_allowed: AtomicBool
 }
 
 impl AppState {
@@ -125,7 +127,8 @@ impl AppState {
             AppState {
                 config,
                 access_provider,
-                pending_uploads: Mutex::new(HashMap::new())
+                pending_uploads: Mutex::new(HashMap::new()),
+                upload_allowed: AtomicBool::new(true)
             }
         )
     }
@@ -245,6 +248,17 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
 
     let layer: Layer = decode_json(request).await?;
+
+    if !state.upload_allowed.load(Ordering::SeqCst) {
+        return Ok(
+            Json(json!(
+                UploadLayerResponse {
+                    status: UploadStatus::UploadNotAllowed,
+                    upload_id: None
+                }
+            ))
+        );
+    }
 
     let mut pending_uploads = state.pending_uploads.lock().await;
 
@@ -410,9 +424,6 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 }
 
 async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpstreamConfig) {
-    let upstream_address = upstream_config.address.to_string();
-    info!("Syncing with upstream {}...", upstream_address);
-
     async fn internal(state: Arc<AppState>,
                       upstream_config: &RegistryUpstreamConfig,
                       upstream_address: &str) -> Result<(), AppError> {
@@ -430,9 +441,21 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         Ok(())
     }
 
+    if !state.pending_uploads.lock().await.is_empty() {
+        info!("Uploads currently being done, skipping sync.");
+        return;
+    }
+
+    state.upload_allowed.store(false, Ordering::SeqCst);
+
+    let upstream_address = upstream_config.address.to_string();
+    info!("Syncing with upstream {}...", upstream_address);
+
     if let Err(err) = internal(state.clone(), &upstream_config, &upstream_address).await {
         error!("Syncing with upstream failed due to: {:?}.", err);
     }
+
+    state.upload_allowed.store(true, Ordering::SeqCst);
 }
 
 fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {
