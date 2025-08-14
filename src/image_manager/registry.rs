@@ -1,7 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use futures::{future, StreamExt};
 use reqwest::{Body, Client, Request, Response, StatusCode};
@@ -11,7 +10,7 @@ use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::{StateSession};
-use crate::reference::{ImageId, ImageTag, Reference};
+use crate::reference::{ImageId, ImageTag};
 use crate::registry::model::{AppErrorResponse, ImageSpec, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
@@ -60,11 +59,14 @@ impl RegistryManager {
         Ok(image)
     }
 
-    pub async fn download_layer(&self, registry: &RegistrySession, reference: &Reference) -> RegistryResult<Layer> {
-        let client = Arc::new(RegistryClient::new(&self.config, registry)?);
+    pub async fn download_layer(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
+        let client = RegistryClient::new(&self.config, registry)?;
 
-        let response = client.get_registry_text_response(&registry.registry, &format!("layers/{}/manifest", reference)).await?;
+        let response = client.get_registry_text_response(&registry.registry, &format!("layers/{}/manifest", hash)).await?;
         let mut layer: Layer = serde_json::from_str(&response)?;
+        if &layer.hash != hash {
+            return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: layer.hash.clone() })
+        }
 
         let layer_folder = self.config.get_layer_folder(&layer.hash);
 
@@ -72,7 +74,7 @@ impl RegistryManager {
 
         async fn download_file(client: &RegistryClient,
                                registry: &str,
-                               reference: &Reference,
+                               hash: &ImageId,
                                local_source_path: PathBuf,
                                file_index: usize,
                                content_hash: &str) -> RegistryResult<()> {
@@ -80,7 +82,7 @@ impl RegistryManager {
 
             let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
 
-            let response = client.get_registry_response(&registry, &format!("layers/{}/download/{}", reference, file_index)).await?;
+            let response = client.get_registry_response(&registry, &format!("layers/{}/download/{}", hash, file_index)).await?;
             let mut byte_stream = response.bytes_stream();
 
             let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
@@ -124,7 +126,7 @@ impl RegistryManager {
                     download_operations.push(download_file(
                         &client,
                         &registry.registry,
-                        reference,
+                        hash,
                         local_source_path,
                         *file_index,
                         content_hash
@@ -169,7 +171,10 @@ impl RegistryManager {
         let mut file_index = 0;
         for operation in &layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
-                let mut request = client.build_post_request(&registry.registry, &format!("layers/{}/upload/{}", layer.hash, file_index))
+                let mut request = client.build_post_request(
+                    &registry.registry,
+                    &format!("layers/{}/upload/{}", layer.hash, file_index)
+                )
                     .header("UPLOAD_ID", upload_id.clone())
                     .build()?;
 
@@ -303,6 +308,7 @@ pub enum RegistryError {
     FailedToUpload,
     InvalidLayer,
     InvalidContentHash,
+    IncorrectLayer { expected: ImageId, actual: ImageId },
     Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
     Deserialize(serde_json::Error),
@@ -339,6 +345,7 @@ impl Display for RegistryError {
             RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
+            RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),

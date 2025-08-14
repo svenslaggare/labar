@@ -374,17 +374,17 @@ impl ImageManager {
                            hash: &ImageId, tag: &ImageTag,
                            download_result: &mut DownloadResult) -> ImageManagerResult<Image> {
         let mut stack = Vec::new();
-        stack.push(hash.clone().to_ref());
+        stack.push(hash.clone());
 
-        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
+        let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone().to_ref());
+                stack.push(parent_hash.clone());
             }
 
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
-                        stack.push(hash.clone().to_ref());
+                        stack.push(hash.clone());
                     },
                     _ => {}
                 }
@@ -393,7 +393,7 @@ impl ImageManager {
 
         let mut top_level_hash = None;
         while let Some(current) = stack.pop() {
-            if let Ok(layer) = self.get_layer(&current) {
+            if let Ok(layer) = self.get_layer(&current.clone().to_ref()) {
                 self.printer.println(&format!("\t* Layer already exist: {}", current));
                 if top_level_hash.is_none() {
                     top_level_hash = Some(layer.hash.clone());
