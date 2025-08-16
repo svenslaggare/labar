@@ -9,6 +9,9 @@ mod registry;
 mod state;
 mod image;
 
+#[cfg(test)]
+mod registry_tests;
+
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
