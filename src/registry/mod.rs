@@ -1,10 +1,8 @@
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Instant};
 
-use chrono::Local;
+use chrono::{Local};
 use log::{error, info};
 
 use serde_json::json;
@@ -13,7 +11,6 @@ use serde::de::DeserializeOwned;
 use futures::StreamExt;
 use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
 
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -32,7 +29,7 @@ pub use crate::registry::config::RegistryConfig;
 
 use crate::content::ContentHash;
 use crate::image::{Layer, LayerOperation};
-use crate::image_manager::{ImageManager, EmptyPrinter};
+use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerError, StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider};
 use crate::registry::config::RegistryUpstreamConfig;
@@ -114,9 +111,7 @@ pub async fn run(config: RegistryConfig) {
 
 pub struct AppState {
     config: RegistryConfig,
-    access_provider: Box<dyn AuthProvider + Send + Sync>,
-    pending_uploads: Mutex<PendingUploads>,
-    upload_allowed: AtomicBool
+    access_provider: Box<dyn AuthProvider + Send + Sync>
 }
 
 impl AppState {
@@ -126,20 +121,10 @@ impl AppState {
         Arc::new(
             AppState {
                 config,
-                access_provider,
-                pending_uploads: Mutex::new(HashMap::new()),
-                upload_allowed: AtomicBool::new(true)
+                access_provider
             }
         )
     }
-}
-
-type PendingUploads = HashMap<ImageId, PendingUpload>;
-
-struct PendingUpload {
-    upload_id: String,
-    layer: Layer,
-    started: Instant
 }
 
 async fn verify_login(State(state): State<Arc<AppState>>,
@@ -249,19 +234,6 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
 
     let layer: Layer = decode_json(request).await?;
 
-    if !state.upload_allowed.load(Ordering::SeqCst) {
-        return Ok(
-            Json(json!(
-                UploadLayerResponse {
-                    status: UploadStatus::UploadNotAllowed,
-                    upload_id: None
-                }
-            ))
-        );
-    }
-
-    let mut pending_uploads = state.pending_uploads.lock().await;
-
     let image_manager = create_image_manager(&state, &token);
     if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
         return Ok(
@@ -272,19 +244,6 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
                 }
             ))
         );
-    }
-
-    if let Some(existing) = pending_uploads.get(&layer.hash) {
-        if existing.started.elapsed().as_secs_f64() < state.config.pending_upload_expiration {
-            return Ok(
-                Json(json!(
-                    UploadLayerResponse {
-                        status: UploadStatus::UploadingPending,
-                        upload_id: None
-                    }
-                ))
-            );
-        }
     }
 
     if !layer.verify_valid_paths(image_manager.config().base_folder()) {
@@ -300,14 +259,25 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
 
     let upload_id = uuid::Uuid::new_v4().to_string();
     let hash = layer.hash.clone();
-    pending_uploads.insert(
-        layer.hash.clone(),
-        PendingUpload {
-            upload_id: upload_id.clone(),
-            layer,
-            started: Instant::now()
-        }
-    );
+
+    let mut state_session = image_manager.pooled_state_session()?;
+    let upload_result = state_session.registry_try_start_layer_upload(
+        Local::now(),
+        &layer,
+        &upload_id,
+        state.config.pending_upload_expiration
+    ).map_err(|err| ImageManagerError::Sql(err))?;
+
+    if !upload_result {
+        return Ok(
+            Json(json!(
+                UploadLayerResponse {
+                    status: UploadStatus::UploadingPending,
+                    upload_id: None
+                }
+            ))
+        );
+    }
 
     info!("Beginning upload of layer {} (id: {})", hash, upload_id);
 
@@ -328,13 +298,14 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
     let upload_id = get_upload_id(&request, &token)?;
 
-    let mut pending_uploads = state.pending_uploads.lock().await;
-    let pending_upload = remove_pending_upload_by_id(&mut pending_uploads, &upload_id)?;
+    let image_manager = create_image_manager(&state, &token);
+    let mut state_session = image_manager.pooled_state_session()?;
 
-    let mut image_manager = create_image_manager(&state, &token);
+    let pending_upload_layer = get_pending_upload_layer_by_id(&state_session, &upload_id)?;
+    let pending_upload_layer_hash = pending_upload_layer.hash.clone();
 
-    if !pending_upload.layer.verify_path_exists(image_manager.config().base_folder()) {
-        info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload.layer.hash, upload_id);
+    if !pending_upload_layer.verify_path_exists(image_manager.config().base_folder()) {
+        info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload_layer_hash, upload_id);
 
         return Ok(
             Json(json!(
@@ -346,9 +317,11 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         );
     }
 
-    image_manager.insert_layer(pending_upload.layer.clone())?;
+    state_session.registry_end_layer_upload(
+        pending_upload_layer
+    ).map_err(|err| ImageManagerError::Sql(err))?;
 
-    info!("Finished upload of layer {} (id: {})", pending_upload.layer.hash, upload_id);
+    info!("Finished upload of layer {} (id: {})", pending_upload_layer_hash, upload_id);
 
     Ok(
         Json(
@@ -369,17 +342,17 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let upload_id = get_upload_id(&request, &token)?;
 
     let (layer, base_folder) = {
-        let pending_uploads = state.pending_uploads.lock().await;
-        let pending_upload = get_pending_upload_by_id(&pending_uploads, &upload_id)?;
+        let image_manager = create_image_manager(&state, &token);
+        let state_session = image_manager.pooled_state_session()?;
 
-        if layer_hash != pending_upload.layer.hash {
+        let pending_upload_layer = get_pending_upload_layer_by_id(&state_session, &upload_id)?;
+        if layer_hash != pending_upload_layer.hash {
             return Err(AppError::LayerFileNotFound);
         }
 
-        let layer = pending_upload.layer.clone();
         let base_folder = state.config.image_manager_config().base_folder().to_path_buf();
 
-        (layer, base_folder)
+        (pending_upload_layer, base_folder)
     };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
@@ -430,7 +403,23 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         let t0 = Instant::now();
         let mut image_manager = create_image_manager(&state, &AuthToken);
         image_manager.login(&upstream_address, &upstream_config.username, &upstream_config.password).await?;
-        let result = image_manager.sync(&upstream_address, Some(&state.config.address.to_string())).await?;
+
+        let result = image_manager.sync(
+            &upstream_address,
+            Some(&state.config.address.to_string()),
+            |state_session, layer| {
+                state_session.registry_try_start_layer_upload(
+                    Local::now(),
+                    layer,
+                    "undefined",
+                    state.config.pending_upload_expiration
+                ).unwrap_or(false)
+            },
+            |state_session, layer| {
+                state_session.registry_end_layer_upload(layer).unwrap_or(false)
+            }
+        ).await?;
+
         info!(
             "Downloaded {} images, {} layers from upstream in {:.1} seconds.",
             result.downloaded_images,
@@ -441,21 +430,12 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         Ok(())
     }
 
-    if !state.pending_uploads.lock().await.is_empty() {
-        info!("Uploads currently being done, skipping sync.");
-        return;
-    }
-
-    state.upload_allowed.store(false, Ordering::SeqCst);
-
     let upstream_address = upstream_config.address.to_string();
     info!("Syncing with upstream {}...", upstream_address);
 
     if let Err(err) = internal(state.clone(), &upstream_config, &upstream_address).await {
         error!("Syncing with upstream failed due to: {:?}.", err);
     }
-
-    state.upload_allowed.store(true, Ordering::SeqCst);
 }
 
 fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {
@@ -465,25 +445,11 @@ fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {
         .ok_or_else(|| AppError::UploadIdNotSpecified)
 }
 
-fn get_pending_upload_by_id<'a>(pending_uploads: &'a PendingUploads, upload_id: &str) -> AppResult<&'a PendingUpload> {
-    for pending_upload in pending_uploads.values() {
-        if pending_upload.upload_id == upload_id {
-            return Ok(pending_upload);
-        }
-    }
-
-    Err(AppError::InvalidUploadId)
-}
-
-fn remove_pending_upload_by_id(pending_uploads: &mut PendingUploads, upload_id: &str) -> AppResult<PendingUpload> {
-    for pending_upload in pending_uploads.values() {
-        if pending_upload.upload_id == upload_id {
-            let hash = pending_upload.layer.hash.clone();
-            return pending_uploads.remove(&hash).ok_or_else(|| AppError::InvalidUploadId);
-        }
-    }
-
-    Err(AppError::InvalidUploadId)
+fn get_pending_upload_layer_by_id(state_session: &StateSession, upload_id: &str) -> AppResult<Layer> {
+    let pending_upload_layer = state_session.registry_get_layer_upload_by_id(
+        upload_id
+    ).map_err(|err| ImageManagerError::Sql(err))?;
+    pending_upload_layer.ok_or_else(|| AppError::InvalidUploadId)
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {

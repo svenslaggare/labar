@@ -59,15 +59,16 @@ impl RegistryManager {
         Ok(image)
     }
 
+    pub async fn get_layer_definition(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
+        let client = RegistryClient::new(&self.config, registry)?;
+        let layer = Self::get_layer_definition_internal(&client, &registry.registry, &hash).await?;
+        Ok(layer)
+    }
+
     pub async fn download_layer(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let response = client.get_registry_text_response(&registry.registry, &format!("layers/{}/manifest", hash)).await?;
-        let mut layer: Layer = serde_json::from_str(&response)?;
-        if &layer.hash != hash {
-            return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: layer.hash.clone() })
-        }
-
+        let mut layer = Self::get_layer_definition_internal(&client, &registry.registry, &hash).await?;
         let layer_folder = self.config.get_layer_folder(&layer.hash);
 
         tokio::fs::create_dir_all(&layer_folder).await?;
@@ -139,6 +140,17 @@ impl RegistryManager {
             for result in future::join_all(download_operations).await {
                 result?;
             }
+        }
+
+        Ok(layer)
+    }
+
+    async fn get_layer_definition_internal(client: &RegistryClient, registry: &str, hash: &ImageId) -> Result<Layer, RegistryError> {
+        let response = client.get_registry_text_response(registry, &format!("layers/{}/manifest", hash)).await?;
+        let layer: Layer = serde_json::from_str(&response)?;
+
+        if &layer.hash != hash {
+            return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: layer.hash.clone() })
         }
 
         Ok(layer)

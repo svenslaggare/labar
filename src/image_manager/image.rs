@@ -10,7 +10,7 @@ use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::BoxPrinter;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
-use crate::image_manager::state::{StateManager, StateSession};
+use crate::image_manager::state::{PooledStateSession, StateManager, StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct ImageManager {
@@ -48,6 +48,10 @@ impl ImageManager {
 
     pub fn config(&self) -> &ImageManagerConfig {
         &self.config
+    }
+
+    pub fn pooled_state_session(&self) -> ImageManagerResult<PooledStateSession> {
+        Ok(self.state_manager.pooled_session()?)
     }
 
     pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<Image> {
@@ -349,21 +353,46 @@ impl ImageManager {
         Ok(layers_uploaded)
     }
 
-    pub async fn sync(&mut self, registry: &str, local_registry: Option<&str>) -> ImageManagerResult<DownloadResult> {
-        let session = self.state_manager.pooled_session()?;
+    pub async fn sync<BeforeLayerPull: Fn(&mut StateSession, &Layer) -> bool, CommitLayer: Fn(&mut StateSession, Layer) -> bool>(&mut self,
+                                                                                                                                 registry: &str,
+                                                                                                                                 local_registry: Option<&str>,
+                                                                                                                                 before_layer_pull: BeforeLayerPull,
+                                                                                                                                 commit_layer: CommitLayer) -> ImageManagerResult<DownloadResult> {
+        let mut session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
         let mut download_result = DownloadResult::new();
 
         let images = self.registry_manager.list_images(&registry_session).await?;
+        'next_image:
         for image in images {
-            let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
-            self.pull_internal(
-                &registry_session,
-                &image.image.hash,
-                &new_tag,
-                &mut download_result
-            ).await?;
+            let mut any_download = false;
+            for layer_to_download in self.get_non_downloaded_layers(&registry_session, &image.image.hash).await? {
+                if !before_layer_pull(&mut session, &layer_to_download) {
+                    // Somebody else is pulling this layer
+                    continue;
+                }
+
+                let layer = self.registry_manager.download_layer(&registry_session, &layer_to_download.hash).await?;
+                let layer_hash = layer.hash.clone();
+                if !commit_layer(&mut session, layer) {
+                    // We failed to commit, skip this image
+                    continue 'next_image;
+                }
+
+                download_result.downloaded_layers += 1;
+                if &layer_hash == &image.image.hash {
+                    download_result.downloaded_images += 1;
+                }
+
+                any_download = true;
+            }
+
+            if any_download {
+                let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
+                let image = Image::new(image.image.hash, new_tag);
+                self.insert_or_replace_image(image.clone())?;
+            }
         }
 
         Ok(download_result)
@@ -419,6 +448,41 @@ impl ImageManager {
         self.insert_or_replace_image(image.clone())?;
 
         Ok(image)
+    }
+
+    async fn get_non_downloaded_layers(&mut self,
+                                       registry: &RegistrySession,
+                                       hash: &ImageId) -> ImageManagerResult<Vec<Layer>> {
+        let mut stack = Vec::new();
+        stack.push(hash.clone());
+
+        let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.clone());
+            }
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.clone());
+                    },
+                    _ => {}
+                }
+            }
+        };
+
+        let mut layers = Vec::new();
+        while let Some(current) = stack.pop() {
+            if let Ok(layer) = self.get_layer(&current.clone().to_ref()) {
+                visit_layer(&mut stack, &layer);
+            } else {
+                let layer = self.registry_manager.get_layer_definition(&registry, &current).await?;
+                layers.push(layer.clone());
+                visit_layer(&mut stack, &layer);
+            }
+        }
+
+        Ok(layers)
     }
 
     pub fn get_layer(&self, reference: &Reference) -> ImageManagerResult<Layer> {

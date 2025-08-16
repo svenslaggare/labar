@@ -2,6 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Local};
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::image::{Image, Layer};
@@ -75,6 +76,26 @@ impl StateManager {
                 hash TEXT,
                 PRIMARY KEY (file, modified)
             );
+            "#,
+            ()
+        )?;
+
+        connection.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS registry_pending_layer_uploads(
+                hash TEXT PRIMARY KEY,
+                layer_metadata JSONB,
+                last_updated TIMESTAMPTZ,
+                upload_id TEXT,
+                state TEXT
+            );
+            "#,
+            ()
+        )?;
+
+        connection.execute(
+            r#"
+            CREATE INDEX IF NOT EXISTS index_registry_pending_layer_uploads_upload_id ON registry_pending_layer_uploads(upload_id);
             "#,
             ()
         )?;
@@ -159,7 +180,11 @@ impl StateSession {
     }
 
     pub fn insert_layer(&self, layer: Layer) -> SqlResult<()> {
-        self.connection.execute(
+        StateSession::insert_layer_internal(&self.connection, layer)
+    }
+
+    fn insert_layer_internal(connection: &Connection, layer: Layer) -> SqlResult<()> {
+        connection.execute(
             "INSERT INTO layers (hash, metadata) VALUES (?1, ?2)",
             (&layer.hash, &serde_json::to_value(&layer).unwrap())
         )?;
@@ -293,6 +318,56 @@ impl StateSession {
     pub fn add_content_hash(&self, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
         self.connection.execute("INSERT INTO content_hash_cache (file, modified, hash) VALUES (?1, ?2, ?3)", (file, modified, hash))?;
         Ok(())
+    }
+
+    pub fn registry_try_start_layer_upload(&mut self,
+                                           current_time: DateTime<Local>,
+                                           layer: &Layer,
+                                           upload_id: &str,
+                                           pending_upload_expiration: f64) -> SqlResult<bool> {
+        let transaction = self.connection.transaction()?;
+
+        let current_pending_upload_last_update: Option<DateTime<Local>> = transaction.query_row(
+            "SELECT last_updated FROM registry_pending_layer_uploads WHERE hash=?1",
+            [layer.hash.to_string()],
+            |row| row.get(0)
+        ).optional()?;
+
+        if let Some(current_pending_upload_last_update) = current_pending_upload_last_update {
+            if (current_time - current_pending_upload_last_update).to_std().unwrap().as_secs_f64() < pending_upload_expiration {
+                return Ok(false);
+            }
+        }
+
+        transaction.execute(
+            "INSERT INTO registry_pending_layer_uploads (hash, layer_metadata, last_updated, upload_id, state) VALUES (?1, ?2, ?3, ?4, ?5)",
+            (&layer.hash, &serde_json::to_value(&layer).unwrap(), current_time, upload_id, "uploading")
+        )?;
+
+        transaction.commit()?;
+        Ok(true)
+    }
+
+    pub fn registry_get_layer_upload_by_id(&self, upload_id: &str) -> SqlResult<Option<Layer>> {
+        self.connection.query_row(
+            "SELECT layer_metadata FROM registry_pending_layer_uploads WHERE upload_id=?1",
+            [upload_id],
+            |row| row.get(0)
+        ).optional()
+    }
+
+    pub fn registry_end_layer_upload(&mut self, layer: Layer) -> SqlResult<bool> {
+        let transaction = self.connection.transaction()?;
+
+        let count = transaction.execute("DELETE FROM registry_pending_layer_uploads WHERE hash=?1", (&layer.hash, ))?;
+        if count != 1 {
+            return Ok(false);
+        }
+
+        StateSession::insert_layer_internal(&transaction, layer)?;
+
+        transaction.commit()?;
+        Ok(true)
     }
 }
 
