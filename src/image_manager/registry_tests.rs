@@ -316,12 +316,8 @@ async fn test_sync() {
 
         // Wait until image exists
         let t0 = std::time::Instant::now();
-        loop {
+        while t0.elapsed().as_secs_f64() < 2.0 {
             if !image_manager.list_images_in_registry(&secondary_address.to_string()).await.unwrap().is_empty() {
-                break;
-            }
-
-            if t0.elapsed().as_secs_f64() > 2.0 {
                 break;
             }
 
