@@ -429,7 +429,6 @@ impl ImageManager {
         let images = self.registry_manager.list_images(&registry_session).await?;
         'next_image:
         for image in images {
-            let mut any_download = false;
             for layer_to_download in self.get_non_downloaded_layers(&registry_session, &image.image.hash).await? {
                 if !before_layer_pull(&mut session, &layer_to_download) {
                     // Somebody else is pulling this layer
@@ -447,11 +446,9 @@ impl ImageManager {
                 if &layer_hash == &image.image.hash {
                     download_result.downloaded_images += 1;
                 }
-
-                any_download = true;
             }
 
-            if any_download {
+            if self.layer_manager.layer_exist(&session, &image.image.hash)? {
                 let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
                 let image = Image::new(image.image.hash, new_tag);
                 self.insert_or_replace_image(image.clone())?;
@@ -470,7 +467,7 @@ impl ImageManager {
             Err(RegistryError::ReferenceNotFound) => {
                 Err(ImageManagerError::ReferenceNotFound { reference: tag.clone().to_ref() })
             }
-            Err(err) => { Err(err.into()) }
+            Err(err) => Err(err.into())
         }
     }
 
