@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use futures::{future, StreamExt};
+
 use reqwest::{Body, Client, Request, Response, StatusCode};
 use reqwest::header::{HeaderMap, HeaderValue};
 
@@ -30,10 +31,19 @@ impl RegistryManager {
         }
     }
 
+    pub async fn is_reachable(&self, registry: &str) -> RegistryResult<bool> {
+        let http_client = create_http_client(&self.config)?;
+
+        let full_url = format!("https://{}/", registry);
+
+        match http_client.execute(http_client.get(full_url).build()?).await {
+            Ok(response) => Ok(response.status().is_success()),
+            _ => Ok(false)
+        }
+    }
+
     pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
-        let http_client = Client::builder()
-            .danger_accept_invalid_certs(self.config.accept_self_signed)
-            .build()?;
+        let http_client = create_http_client(&self.config)?;
 
         let full_url = format!("https://{}/verify_login", registry);
         let response = http_client.execute(
@@ -324,9 +334,7 @@ impl RegistryClient {
     pub fn new(config: &ImageManagerConfig, registry: &RegistrySession) -> RegistryResult<RegistryClient> {
         Ok(
             RegistryClient {
-                http_client: Client::builder()
-                    .danger_accept_invalid_certs(config.accept_self_signed)
-                    .build()?,
+                http_client: create_http_client(config)?,
                 username: registry.username.clone(),
                 password: registry.password.clone()
             }
@@ -445,4 +453,10 @@ impl From<std::io::Error> for RegistryError {
     fn from(value: std::io::Error) -> Self {
         RegistryError::IO(value)
     }
+}
+
+fn create_http_client(config: &ImageManagerConfig) -> reqwest::Result<Client> {
+    Client::builder()
+        .danger_accept_invalid_certs(config.accept_self_signed)
+        .build()
 }

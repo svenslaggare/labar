@@ -3,9 +3,12 @@ use std::str::FromStr;
 
 use croner::Cron;
 
+use tokio::time::Instant;
+
 use crate::helpers::DataSize;
 use crate::image::Image;
-use crate::image_manager::{BuildRequest, ImageManager, ImageManagerConfig, Reference};
+use crate::image_manager::{BuildRequest, EmptyPrinter, ImageManager, ImageManagerConfig, Reference};
+use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::config::RegistryUpstreamConfig;
 
@@ -41,7 +44,9 @@ async fn test_pull() {
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
@@ -91,7 +96,9 @@ async fn test_push_pull() {
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
@@ -168,7 +175,9 @@ async fn test_push_pull_with_ref() {
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
@@ -269,7 +278,9 @@ async fn test_sync() {
     tokio::spawn(crate::registry::run(create_registry_config(primary_address, &tmp_primary_registry_folder)));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if !registry_is_reachable(&primary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     let mut secondary_registry_config = create_registry_config(secondary_address, &tmp_secondary_registry_folder);
     secondary_registry_config.upstream = Some(
@@ -288,7 +299,9 @@ async fn test_sync() {
     tokio::spawn(crate::registry::run(secondary_registry_config));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if !registry_is_reachable(&secondary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     let image_tag = ImageTag::with_registry(&secondary_address.to_string(), "test", "latest");
     image.tag = image.tag.set_registry(&secondary_address.to_string());
@@ -374,7 +387,9 @@ async fn test_pull_through() {
     tokio::spawn(crate::registry::run(create_registry_config(primary_address, &tmp_primary_registry_folder)));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if !registry_is_reachable(&primary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     let mut secondary_registry_config = create_registry_config(secondary_address, &tmp_secondary_registry_folder);
     secondary_registry_config.upstream = Some(
@@ -393,7 +408,9 @@ async fn test_pull_through() {
     tokio::spawn(crate::registry::run(secondary_registry_config));
 
     // Wait until registry starts
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    if !registry_is_reachable(&secondary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
 
     let image_tag = ImageTag::with_registry(&secondary_address.to_string(), "test", "latest");
     image.tag = image.tag.set_registry(&secondary_address.to_string());
@@ -434,7 +451,6 @@ async fn test_pull_through() {
     }
 }
 
-#[cfg(test)]
 fn build_test_image(image_manager: &mut ImageManager,
                     path: &Path, image_tag: ImageTag) -> Result<Image, String> {
     use crate::image_definition::ImageDefinition;
@@ -451,7 +467,6 @@ fn build_test_image(image_manager: &mut ImageManager,
     }).map_err(|err| err.to_string())
 }
 
-#[cfg(test)]
 fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
     use crate::registry::RegistryConfig;
     use crate::registry::auth::AccessRight;
@@ -471,4 +486,19 @@ fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &P
             )
         ]
     }
+}
+
+async fn registry_is_reachable(registry: &str, max_wait_time: f64) -> bool {
+    let registry_manager = RegistryManager::new(ImageManagerConfig::new(), EmptyPrinter::new());
+
+    let t0 = Instant::now();
+    while t0.elapsed().as_secs_f64() < max_wait_time {
+        if registry_manager.is_reachable(registry).await.unwrap() {
+            return true;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    false
 }

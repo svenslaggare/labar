@@ -74,6 +74,7 @@ pub async fn run(config: RegistryConfig) {
     let state = AppState::new(config);
 
     let app = Router::new()
+        .route("/", get(index))
         .route("/verify_login", get(verify_login))
         .route("/images", get(list_images))
         .route("/images", post(set_image))
@@ -140,6 +141,10 @@ impl AppState {
             }
         )
     }
+}
+
+async fn index() -> AppResult<impl IntoResponse> {
+    Ok("Labar registry")
 }
 
 async fn verify_login(State(state): State<Arc<AppState>>,
