@@ -274,14 +274,14 @@ impl ImageManager {
         Ok(())
     }
 
-    pub async fn list_images_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {
+    pub async fn list_images_in_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {
         let session = self.state_manager.pooled_session()?;
 
         let images = self.registry_manager.list_images(&RegistrySession::new(&session, registry)?).await?;
         Ok(images)
     }
 
-    pub async fn resolve_image_registry(&self, registry: &str, tag: &ImageTag) -> ImageManagerResult<ImageMetadata> {
+    pub async fn resolve_image_in_registry(&self, registry: &str, tag: &ImageTag) -> ImageManagerResult<ImageMetadata> {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
@@ -289,7 +289,7 @@ impl ImageManager {
         Ok(image_metadata)
     }
 
-    pub async fn get_layer_registry(&self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
+    pub async fn get_layer_from_registry(&self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
@@ -358,14 +358,6 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub async fn pull_layer(&mut self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
-        let session = self.state_manager.pooled_session()?;
-        let registry_session = RegistrySession::new(&session, registry)?;
-
-        let layer = self.registry_manager.download_layer(&registry_session, &hash).await?;
-        Ok(layer)
-    }
-
     pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
         let session = self.state_manager.pooled_session()?;
 
@@ -414,6 +406,14 @@ impl ImageManager {
         self.printer.println("");
 
         Ok(layers_uploaded)
+    }
+
+    pub async fn pull_layer(&mut self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        let layer = self.registry_manager.download_layer(&registry_session, &hash).await?;
+        Ok(layer)
     }
 
     pub async fn sync<BeforeLayerPull: Fn(&mut StateSession, &Layer) -> bool, CommitLayer: Fn(&mut StateSession, Layer) -> bool>(&mut self,

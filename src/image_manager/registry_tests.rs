@@ -118,7 +118,7 @@ async fn test_push_pull() {
         assert_eq!(1, push_result);
 
         // List remote
-        let remote_images = image_manager.list_images_registry(&address.to_string()).await;
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
         assert!(remote_images.is_ok());
         let remote_images = remote_images.unwrap();
         assert_eq!(1, remote_images.len());
@@ -201,7 +201,7 @@ async fn test_push_pull_with_ref() {
         assert_eq!(3, push_result);
 
         // List remote
-        let remote_images = image_manager.list_images_registry(&address.to_string()).await;
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
         assert!(remote_images.is_ok());
         let remote_images = remote_images.unwrap();
         assert_eq!(1, remote_images.len());
@@ -304,7 +304,7 @@ async fn test_sync() {
         // Wait until image exists
         let t0 = std::time::Instant::now();
         loop {
-            if !image_manager.list_images_registry(&secondary_address.to_string()).await.unwrap().is_empty() {
+            if !image_manager.list_images_in_registry(&secondary_address.to_string()).await.unwrap().is_empty() {
                 break;
             }
 

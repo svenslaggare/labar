@@ -381,7 +381,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::ListImagesRegistry { registry } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let images = transform_registry_result(image_manager.list_images_registry(&registry).await)?;
+            let images = transform_registry_result(image_manager.list_images_in_registry(&registry).await)?;
             print_images(&images);
         }
         CommandLineInput::Registry { command } => {

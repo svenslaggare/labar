@@ -191,7 +191,7 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
 
             info!("Pulling image {} from upstream.", &tag);
             let upstream_tag = tag.clone().set_registry(&upstream_config.hostname);
-            let image = image_manager.resolve_image_registry(&upstream_config.hostname, &upstream_tag).await?;
+            let image = image_manager.resolve_image_in_registry(&upstream_config.hostname, &upstream_tag).await?;
 
             // Delay image insert until layer has been pulled
             state.delayed_image_inserts.lock().await.entry(image.image.hash.clone())
@@ -257,7 +257,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
         Ok(layer) => Ok(Json(json!(layer)).into_response()),
         Err(ImageManagerError::ReferenceNotFound { .. }) if query.can_pull_through && state.config.can_pull_through_upstream() => {
             let upstream_config = state.config.upstream.as_ref().unwrap();
-            let layer = image_manager.get_layer_registry(&upstream_config.hostname, &hash).await?;
+            let layer = image_manager.get_layer_from_registry(&upstream_config.hostname, &hash).await?;
 
             // Download from upstream in the background
             tokio::spawn(pull_from_upstream(state.clone(), layer.clone()));
