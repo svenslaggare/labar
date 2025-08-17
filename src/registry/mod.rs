@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Instant};
@@ -15,11 +16,14 @@ use tokio::io::AsyncWriteExt;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
-use axum::extract::{Path, State, Request, FromRequest};
+use axum::extract::{Path, State, Request, FromRequest, Query};
+use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
 
 use rcgen::CertifiedKey;
+use serde::Deserialize;
+use tokio::sync::Mutex;
 
 pub mod model;
 pub mod auth;
@@ -28,12 +32,12 @@ pub mod config;
 pub use crate::registry::config::RegistryConfig;
 
 use crate::content::ContentHash;
-use crate::image::{Layer, LayerOperation};
+use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManager, EmptyPrinter, ImageManagerError, StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider};
 use crate::registry::config::RegistryUpstreamConfig;
-use crate::registry::model::{AppError, AppResult, ImageSpec, UploadLayerResponse, UploadStatus};
+use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) {
     if let Err(err) = setup_logging() {
@@ -75,6 +79,7 @@ pub async fn run(config: RegistryConfig) {
         .route("/images", post(set_image))
         .route("/images/{*tag}", get(resolve_image))
         .route("/images/{*tag}", delete(remove_image))
+        .route("/layers/{layer}/exists", get(get_layer_exists))
         .route("/layers/{layer}/manifest", get(get_layer_manifest))
         .route("/layers/{layer}/download/{index}", get(download_layer))
         .route("/layers/begin-upload", post(begin_layer_upload))
@@ -84,20 +89,28 @@ pub async fn run(config: RegistryConfig) {
     ;
 
     let state_clone = state.clone();
+
+    if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
+        let mut image_manager = create_image_manager(&state, &AuthToken);
+        image_manager.login(&upstream_config.hostname, &upstream_config.username, &upstream_config.password).await.unwrap();
+    }
+
     tokio::spawn(async move {
         if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
-            let mut is_first = true;
-            loop {
-                if (is_first && upstream_config.sync_at_startup) || !is_first {
-                    sync_with_upstream(state_clone.clone(), &upstream_config).await;
-                }
+            if upstream_config.sync {
+                let mut is_first = true;
+                loop {
+                    if (is_first && upstream_config.sync_at_startup) || !is_first {
+                        sync_with_upstream(state_clone.clone(), &upstream_config).await;
+                    }
 
-                let current = Local::now();
-                if let Ok(next) = upstream_config.sync_interval.find_next_occurrence(&current, false) {
-                    tokio::time::sleep((next - current).to_std().unwrap()).await;
-                }
+                    let current = Local::now();
+                    if let Ok(next) = upstream_config.sync_interval.find_next_occurrence(&current, false) {
+                        tokio::time::sleep((next - current).to_std().unwrap()).await;
+                    }
 
-                is_first = false;
+                    is_first = false;
+                }
             }
         }
     });
@@ -111,7 +124,8 @@ pub async fn run(config: RegistryConfig) {
 
 pub struct AppState {
     config: RegistryConfig,
-    access_provider: Box<dyn AuthProvider + Send + Sync>
+    access_provider: Box<dyn AuthProvider + Send + Sync>,
+    delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>
 }
 
 impl AppState {
@@ -121,7 +135,8 @@ impl AppState {
         Arc::new(
             AppState {
                 config,
-                access_provider
+                access_provider,
+                delayed_image_inserts: Mutex::new(HashMap::new())
             }
         )
     }
@@ -156,13 +171,39 @@ async fn set_image(State(state): State<Arc<AppState>>,
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct ResolveImageQuery {
+    #[serde(default)]
+    can_pull_through: bool
+}
+
 async fn resolve_image(State(state): State<Arc<AppState>>,
                        Path(tag): Path<ImageTag>,
+                       Query(query): Query<ResolveImageQuery>,
                        request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
 
     let image_manager = create_image_manager(&state, &token);
-    let image = image_manager.resolve_image(&tag)?;
+    let image = match image_manager.resolve_image(&tag) {
+        Ok(image) => image,
+        Err(ImageManagerError::ReferenceNotFound { .. }) if state.config.can_pull_through_upstream() && query.can_pull_through => {
+            let upstream_config = state.config.upstream.as_ref().unwrap();
+
+            info!("Pulling image {} from upstream.", &tag);
+            let upstream_tag = tag.clone().set_registry(&upstream_config.hostname);
+            let image = image_manager.resolve_image_registry(&upstream_config.hostname, &upstream_tag).await?;
+
+            // Delay image insert until layer has been pulled
+            state.delayed_image_inserts.lock().await.entry(image.image.hash.clone())
+                .or_insert_with(|| Vec::new())
+                .push(image.image.clone().replace_tag(tag));
+
+            image
+        }
+        err => {
+            err?
+        }
+    };
 
     Ok(Json(json!(image)))
 }
@@ -180,16 +221,53 @@ async fn remove_image(State(state): State<Arc<AppState>>,
     Ok(Json(json!({ "status": "success" })))
 }
 
-async fn get_layer_manifest(State(state): State<Arc<AppState>>,
-                            Path(hash): Path<ImageId>,
-                            request: Request) -> AppResult<impl IntoResponse> {
+async fn get_layer_exists(State(state): State<Arc<AppState>>,
+                          Path(hash): Path<ImageId>,
+                          request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
     let image_manager = create_image_manager(&state, &token);
 
-    let layer_reference = hash.to_ref();
-    let layer = image_manager.get_layer(&layer_reference)?;
-    Ok(Json(json!(layer)))
+    let layer_reference = hash.clone().to_ref();
+    let exists = match image_manager.get_layer(&layer_reference) {
+        Ok(_) => true,
+        Err(ImageManagerError::ReferenceNotFound { .. }) => false,
+        Err(err) => { return Err(err.into()); }
+    };
+
+    Ok(Json(json!(LayerExists { exists })))
+}
+
+#[derive(Deserialize)]
+struct LayerManifestQuery {
+    #[serde(default)]
+    can_pull_through: bool
+}
+
+async fn get_layer_manifest(State(state): State<Arc<AppState>>,
+                            Path(hash): Path<ImageId>,
+                            Query(query): Query<LayerManifestQuery>,
+                            request: Request) -> AppResult<Response> {
+    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+
+    let image_manager = create_image_manager(&state, &token);
+
+    let layer_reference = hash.clone().to_ref();
+    match image_manager.get_layer(&layer_reference) {
+        Ok(layer) => Ok(Json(json!(layer)).into_response()),
+        Err(ImageManagerError::ReferenceNotFound { .. }) if query.can_pull_through && state.config.can_pull_through_upstream() => {
+            let upstream_config = state.config.upstream.as_ref().unwrap();
+            let layer = image_manager.get_layer_registry(&upstream_config.hostname, &hash).await?;
+
+            // Download from upstream in the background
+            tokio::spawn(pull_from_upstream(state.clone(), layer.clone()));
+
+            let mut response = Json(json!(layer)).into_response();
+            response.headers_mut().insert("PULL-THROUGH", HeaderValue::from_static("true"));
+            Ok(response)
+        },
+        Err(err) => Err(err.into())
+    }
 }
 
 async fn download_layer(State(state): State<Arc<AppState>>,
@@ -397,21 +475,18 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 }
 
 async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpstreamConfig) {
-    async fn internal(state: Arc<AppState>,
-                      upstream_config: &RegistryUpstreamConfig,
-                      upstream_address: &str) -> Result<(), AppError> {
+    async fn internal(state: Arc<AppState>, upstream_config: &RegistryUpstreamConfig) -> Result<(), AppError> {
         let t0 = Instant::now();
         let mut image_manager = create_image_manager(&state, &AuthToken);
-        image_manager.login(&upstream_address, &upstream_config.username, &upstream_config.password).await?;
 
         let result = image_manager.sync(
-            &upstream_address,
+            &upstream_config.hostname,
             Some(&state.config.address.to_string()),
             |state_session, layer| {
                 state_session.registry_try_start_layer_upload(
                     Local::now(),
                     layer,
-                    "undefined",
+                    &uuid::Uuid::new_v4().to_string(),
                     state.config.pending_upload_expiration
                 ).unwrap_or(false)
             },
@@ -430,11 +505,52 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         Ok(())
     }
 
-    let upstream_address = upstream_config.address.to_string();
-    info!("Syncing with upstream {}...", upstream_address);
+    info!("Syncing with upstream {}...", &upstream_config.hostname);
 
-    if let Err(err) = internal(state.clone(), &upstream_config, &upstream_address).await {
+    if let Err(err) = internal(state.clone(), &upstream_config).await {
         error!("Syncing with upstream failed due to: {:?}.", err);
+    }
+}
+
+async fn pull_from_upstream(state: Arc<AppState>, layer: Layer) {
+    async fn internal(state: Arc<AppState>,
+                      upstream_config: &RegistryUpstreamConfig,
+                      layer: Layer) -> Result<(), AppError> {
+        let mut image_manager = create_image_manager(&state, &AuthToken);
+
+        let mut state_session = image_manager.pooled_state_session()?;
+        let started = state_session.registry_try_start_layer_upload(
+            Local::now(),
+            &layer,
+            &uuid::Uuid::new_v4().to_string(),
+            state.config.pending_upload_expiration
+        ).map_err(|err| ImageManagerError::Sql(err))?;
+
+        if !started {
+            info!("Layer {} already being pulled from upstream.", &layer.hash);
+        }
+
+        let layer = image_manager.pull_layer(&upstream_config.hostname, &layer.hash).await?;
+        let layer_hash = layer.hash.clone();
+        state_session.registry_end_layer_upload(layer).map_err(|err| ImageManagerError::Sql(err))?;
+
+        if let Some(images) = state.delayed_image_inserts.lock().await.remove(&layer_hash) {
+            for image in images {
+                if let Err(err) = image_manager.insert_or_replace_image(image) {
+                    error!("Failed to insert image after pulling from upstream due to: {}.", err);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    if let Some(upstream_config) = state.config.upstream.as_ref() {
+        info!("Pulling layer {} from upstream.", layer.hash);
+
+        if let Err(err) = internal(state.clone(), upstream_config, layer).await {
+            error!("Pulling from upstream failed due to: {:?}.", err);
+        }
     }
 }
 

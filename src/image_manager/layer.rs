@@ -24,12 +24,12 @@ impl LayerManager {
 
     pub fn get_layer(&self, session: &StateSession, reference: &Reference) -> ImageManagerResult<Layer> {
         self.get_layer_by_hash(session, &self.fully_qualify_reference(session, reference)?)
-            .map_err(|_| ImageManagerError::ImageNotFound { reference: reference.clone() })
+            .map_err(|_| ImageManagerError::ReferenceNotFound { reference: reference.clone() })
     }
 
     fn get_layer_by_hash(&self, session: &StateSession, hash: &ImageId) -> ImageManagerResult<Layer> {
         let layer = session.get_layer(hash)?;
-        layer.ok_or_else(|| ImageManagerError::LayerNotFound { image_id: hash.clone() })
+        layer.ok_or_else(|| ImageManagerError::ReferenceNotFound { reference: hash.clone().to_ref() })
     }
 
     pub fn layer_exist(&self, session: &StateSession, hash: &ImageId) -> ImageManagerResult<bool> {
@@ -44,7 +44,7 @@ impl LayerManager {
     pub fn remove_layer(&self, session: &StateSession, hash: &ImageId) -> ImageManagerResult<()> {
         let removed = session.remove_layer(hash)?;
         if !removed {
-            return Err(ImageManagerError::LayerNotFound { image_id: hash.clone() });
+            return Err(ImageManagerError::ReferenceNotFound { reference: hash.clone().to_ref() });
         }
 
         Ok(())
@@ -83,7 +83,7 @@ impl LayerManager {
                     return Ok(image_hash);
                 }
 
-                Err(ImageManagerError::ImageNotFound { reference: reference.clone() })
+                Err(ImageManagerError::ReferenceNotFound { reference: reference.clone() })
             }
             Reference::ImageId(id) => {
                 Ok(id.clone())
@@ -98,7 +98,7 @@ impl LayerManager {
     pub fn get_image(&self, session: &StateSession, tag: &ImageTag) -> ImageManagerResult<Image> {
         let image = session.get_image(tag)?;
         image
-            .ok_or_else(|| ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
+            .ok_or_else(|| ImageManagerError::ReferenceNotFound { reference: tag.clone().to_ref() })
     }
 
     pub fn get_image_hash(&self, session: &StateSession, tag: &ImageTag) -> ImageManagerResult<Option<ImageId>> {

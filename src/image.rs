@@ -147,6 +147,11 @@ impl Image {
     pub fn from_row(row: &Row) -> rusqlite::Result<Image> {
         Ok(Image::new(row.get(0)?, row.get(1)?))
     }
+
+    pub fn replace_tag(mut self, tag: ImageTag) -> Image {
+        self.tag = tag;
+        self
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

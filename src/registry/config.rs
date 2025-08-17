@@ -26,19 +26,38 @@ pub struct RegistryConfig {
     pub users: UsersSpec
 }
 
+impl RegistryConfig {
+    pub fn can_pull_through_upstream(&self) -> bool {
+        match self.upstream.as_ref() {
+            Some(upstream) => upstream.pull_through,
+            None => false,
+        }
+    }
+}
+
 fn default_pending_upload_expiration() -> f64 {
     30.0 * 60.0
 }
 
 #[derive(Debug, Serialize,  Deserialize)]
 pub struct RegistryUpstreamConfig {
-    pub address: SocketAddr,
+    pub hostname: String,
     pub username: String,
     pub password: String,
+
+    #[serde(default="default_sync")]
+    pub sync: bool,
     #[serde(default="default_sync_at_startup")]
     pub sync_at_startup: bool,
     #[serde(default="default_sync_interval")]
-    pub sync_interval: Cron
+    pub sync_interval: Cron,
+
+    #[serde(default)]
+    pub pull_through: bool
+}
+
+fn default_sync() -> bool {
+    true
 }
 
 fn default_sync_at_startup() -> bool {

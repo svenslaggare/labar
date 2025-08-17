@@ -15,8 +15,7 @@ mod registry_tests;
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
-    LayerNotFound { image_id: ImageId },
-    ImageNotFound { reference: Reference },
+    ReferenceNotFound { reference: Reference },
     FileIOError { message: String },
     FileNotInBuildContext { path: String },
     ZIPError(ZipError),
@@ -67,11 +66,8 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::ImageParser { error } => {
                 write!(f, "Image parser: {}", error)
             }
-            ImageManagerError::LayerNotFound { image_id } => {
-                write!(f, "Could not find the layer: {}.", image_id)
-            }
-            ImageManagerError::ImageNotFound { reference } => {
-                write!(f, "Could not find the image: {}.", reference)
+            ImageManagerError::ReferenceNotFound { reference } => {
+                write!(f, "Could not find the reference: {}.", reference)
             }
             ImageManagerError::FileIOError { message } => {
                 write!(f, "{}", message)
@@ -118,14 +114,18 @@ pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 #[derive(Clone)]
 pub struct ImageManagerConfig {
     base_folder: PathBuf,
-    pub accept_self_signed: bool
+    pub accept_self_signed: bool,
+    pub max_wait_for_upstream_pull: f64,
+    pub upstream_pull_check: f64
 }
 
 impl ImageManagerConfig {
     pub fn new() -> ImageManagerConfig {
         ImageManagerConfig {
             base_folder: dirs::home_dir().unwrap().join(".labar"),
-            accept_self_signed: true
+            accept_self_signed: true,
+            max_wait_for_upstream_pull: 5.0 * 60.0,
+            upstream_pull_check: 1.0
         }
     }
 

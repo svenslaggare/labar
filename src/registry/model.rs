@@ -35,10 +35,10 @@ impl IntoResponse for AppError {
         match self {
             AppError::ImagerManager(err) => {
                 match err {
-                    err @ ImageManagerError::ImageNotFound { .. } => {
+                    err @ ImageManagerError::ReferenceNotFound { .. } => {
                         (
                             StatusCode::NOT_FOUND,
-                            Json(json!(AppErrorResponse { error: format!("Image not found due to: {}", err) }))
+                            Json(json!(AppErrorResponse { error: format!("{}", err) }))
                         ).into_response()
                     }
                     err => {
@@ -114,6 +114,11 @@ impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
         AppError::IO(value)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct LayerExists {
+    pub exists: bool
 }
 
 #[derive(Serialize, Deserialize)]

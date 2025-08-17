@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::path::Path;
 
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest};
@@ -96,7 +96,7 @@ impl ImageManager {
             self.garbage_collect()?;
             Ok(())
         } else {
-            Err(ImageManagerError::ImageNotFound { reference: Reference::ImageTag(tag.clone()) })
+            Err(ImageManagerError::ReferenceNotFound { reference: Reference::ImageTag(tag.clone()) })
         }
     }
 
@@ -281,6 +281,22 @@ impl ImageManager {
         Ok(images)
     }
 
+    pub async fn resolve_image_registry(&self, registry: &str, tag: &ImageTag) -> ImageManagerResult<ImageMetadata> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        let image_metadata = self.resolve_image_registry_internal(&registry_session, &tag, false).await?;
+        Ok(image_metadata)
+    }
+
+    pub async fn get_layer_registry(&self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        let layer = self.registry_manager.get_layer_definition(&registry_session, hash).await?;
+        Ok(layer)
+    }
+
     pub async fn pull(&mut self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<Image> {
         let session = self.state_manager.pooled_session()?;
 
@@ -294,13 +310,60 @@ impl ImageManager {
 
         self.printer.println(&format!("Pulling image {}", tag));
 
-        let image_metadata = self.registry_manager.resolve_image(&registry_session, &tag).await?;
+        let image_metadata = self.resolve_image_registry_internal(&registry_session, &tag, true).await?;
 
-        self.pull_internal(
-            &registry_session,
-            &image_metadata.image.hash, &tag,
-            &mut DownloadResult::new()
-        ).await
+        let mut stack = Vec::new();
+        stack.push(image_metadata.image.hash.clone());
+
+        let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.clone());
+            }
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.clone());
+                    },
+                    _ => {}
+                }
+            }
+        };
+
+        let mut top_level_hash = None;
+        while let Some(current) = stack.pop() {
+            if let Ok(layer) = self.get_layer(&current.clone().to_ref()) {
+                self.printer.println(&format!("\t* Layer already exist: {}", current));
+                if top_level_hash.is_none() {
+                    top_level_hash = Some(layer.hash.clone());
+                }
+
+                visit_layer(&mut stack, &layer);
+            } else {
+                self.printer.println(&format!("\t* Downloading layer: {}", current));
+                let layer = self.registry_manager.download_layer(&registry_session, &current).await?;
+                self.insert_layer(layer.clone())?;
+
+                if top_level_hash.is_none() {
+                    top_level_hash = Some(layer.hash.clone());
+                }
+
+                visit_layer(&mut stack, &layer);
+            }
+        }
+
+        let image = Image::new(top_level_hash.unwrap(), tag.clone());
+        self.insert_or_replace_image(image.clone())?;
+
+        Ok(image)
+    }
+
+    pub async fn pull_layer(&mut self, registry: &str, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        let layer = self.registry_manager.download_layer(&registry_session, &hash).await?;
+        Ok(layer)
     }
 
     pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
@@ -398,56 +461,17 @@ impl ImageManager {
         Ok(download_result)
     }
 
-    async fn pull_internal(&mut self,
-                           registry: &RegistrySession,
-                           hash: &ImageId, tag: &ImageTag,
-                           download_result: &mut DownloadResult) -> ImageManagerResult<Image> {
-        let mut stack = Vec::new();
-        stack.push(hash.clone());
-
-        let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
+    async fn resolve_image_registry_internal(&self,
+                                             registry_session: &RegistrySession,
+                                             tag: &ImageTag,
+                                             can_pull_through: bool) -> ImageManagerResult<ImageMetadata> {
+        match self.registry_manager.resolve_image(&registry_session, &tag, can_pull_through).await {
+            Ok(image) => Ok(image),
+            Err(RegistryError::ReferenceNotFound) => {
+                Err(ImageManagerError::ReferenceNotFound { reference: tag.clone().to_ref() })
             }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone());
-                    },
-                    _ => {}
-                }
-            }
-        };
-
-        let mut top_level_hash = None;
-        while let Some(current) = stack.pop() {
-            if let Ok(layer) = self.get_layer(&current.clone().to_ref()) {
-                self.printer.println(&format!("\t* Layer already exist: {}", current));
-                if top_level_hash.is_none() {
-                    top_level_hash = Some(layer.hash.clone());
-                }
-
-                visit_layer(&mut stack, &layer);
-            } else {
-                self.printer.println(&format!("\t* Downloading layer: {}", current));
-                let layer = self.registry_manager.download_layer(&registry, &current).await?;
-                self.insert_layer(layer.clone())?;
-                download_result.downloaded_layers += 1;
-
-                if top_level_hash.is_none() {
-                    top_level_hash = Some(layer.hash.clone());
-                    download_result.downloaded_images += 1;
-                }
-
-                visit_layer(&mut stack, &layer);
-            }
+            Err(err) => { Err(err.into()) }
         }
-
-        let image = Image::new(top_level_hash.unwrap(), tag.clone());
-        self.insert_or_replace_image(image.clone())?;
-
-        Ok(image)
     }
 
     async fn get_non_downloaded_layers(&mut self,

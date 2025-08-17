@@ -34,7 +34,7 @@ impl BuildManager {
         if let Some(base_image_reference) = request.image_definition.base_image {
             let hash = layer_manager.fully_qualify_reference(session, &base_image_reference)?;
             if !layer_manager.layer_exist(session, &hash)? {
-                return Err(ImageManagerError::ImageNotFound { reference: base_image_reference.clone() });
+                return Err(ImageManagerError::ReferenceNotFound { reference: base_image_reference.clone() });
             }
 
             parent_hash = Some(hash);
@@ -137,7 +137,7 @@ impl BuildManager {
                 LayerOperationDefinition::Image { reference } => {
                     let hash = layer_manager.fully_qualify_reference(session, reference)?;
                     if !layer_manager.layer_exist(session, &hash)? {
-                        return Err(ImageManagerError::ImageNotFound { reference: reference.clone() });
+                        return Err(ImageManagerError::ReferenceNotFound { reference: reference.clone() });
                     }
 
                     hash_input += &hash.to_string();

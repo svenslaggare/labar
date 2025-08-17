@@ -1,9 +1,11 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use futures::{future, StreamExt};
 use reqwest::{Body, Client, Request, Response, StatusCode};
+use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
@@ -11,7 +13,7 @@ use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
-use crate::registry::model::{AppErrorResponse, ImageSpec, UploadLayerResponse, UploadStatus};
+use crate::registry::model::{AppErrorResponse, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
@@ -46,30 +48,40 @@ impl RegistryManager {
     pub async fn list_images(&self, registry: &RegistrySession) -> RegistryResult<Vec<ImageMetadata>> {
         let client = RegistryClient::new(&self.config, &registry)?;
 
-        let response = client.get_registry_text_response(&registry.registry, "images").await?;
+        let (response, _) = client.get_registry_text_response(&registry.registry, "images").await?;
         let images: Vec<ImageMetadata> = serde_json::from_str(&response)?;
         Ok(images)
     }
 
-    pub async fn resolve_image(&self, registry: &RegistrySession, tag: &ImageTag) -> RegistryResult<ImageMetadata> {
+    pub async fn resolve_image(&self, registry: &RegistrySession, tag: &ImageTag, can_pull_through: bool) -> RegistryResult<ImageMetadata> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let response = client.get_registry_text_response(&registry.registry, &format!("images/{}", tag)).await?;
+        let url = if can_pull_through {
+            format!("images/{}?can_pull_through=true", tag)
+        } else {
+            format!("images/{}", tag)
+        };
+
+        let (response, _) = client.get_registry_text_response(&registry.registry, &url).await?;
         let image: ImageMetadata = serde_json::from_str(&response)?;
         Ok(image)
     }
 
     pub async fn get_layer_definition(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
-        let layer = Self::get_layer_definition_internal(&client, &registry.registry, &hash).await?;
+        let (layer, _) = Self::get_layer_definition_internal(&client, &registry.registry, &hash, false).await?;
         Ok(layer)
     }
 
     pub async fn download_layer(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let mut layer = Self::get_layer_definition_internal(&client, &registry.registry, &hash).await?;
+        let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &registry.registry, &hash, true).await?;
         let layer_folder = self.config.get_layer_folder(&layer.hash);
+
+        if pull_through {
+            self.wait_for_pull_through(&client, registry, hash).await?;
+        }
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
@@ -145,15 +157,59 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    async fn get_layer_definition_internal(client: &RegistryClient, registry: &str, hash: &ImageId) -> Result<Layer, RegistryError> {
-        let response = client.get_registry_text_response(registry, &format!("layers/{}/manifest", hash)).await?;
+    async fn get_layer_definition_internal(client: &RegistryClient,
+                                           registry: &str,
+                                           hash: &ImageId,
+                                           can_pull_through: bool) -> Result<(Layer, bool), RegistryError> {
+        let url = if can_pull_through {
+            format!("layers/{}/manifest?can_pull_through=true", hash)
+        } else {
+            format!("layers/{}/manifest", hash)
+        };
+
+        let (response, headers) = client.get_registry_text_response(registry, &url).await?;
         let layer: Layer = serde_json::from_str(&response)?;
 
         if &layer.hash != hash {
             return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: layer.hash.clone() })
         }
 
-        Ok(layer)
+        let pull_through = headers.get("PULL-THROUGH") == Some(&HeaderValue::from_static("true"));
+
+        Ok((layer, pull_through))
+    }
+
+    async fn wait_for_pull_through(&self,
+                                   client: &RegistryClient,
+                                   registry: &RegistrySession,
+                                   hash: &ImageId) -> Result<(), RegistryError> {
+        self.printer.println("\t\t* Waiting for upstream to pull...");
+        let t0 = std::time::Instant::now();
+        while t0.elapsed().as_secs_f64() < self.config.max_wait_for_upstream_pull {
+            match Self::get_layer_exists(&client, &registry.registry, &hash).await {
+                Ok(exists) => {
+                    if exists {
+                        return Ok(());
+                    } else {
+                        tokio::time::sleep(Duration::from_secs_f64(self.config.upstream_pull_check)).await;
+                    }
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+
+        Err(RegistryError::FailToPullThrough)
+    }
+
+    async fn get_layer_exists(client: &RegistryClient,
+                              registry: &str,
+                              hash: &ImageId) -> Result<bool, RegistryError> {
+        let (response, _) = client.get_registry_text_response(registry, &format!("layers/{}/exists", hash)).await?;
+        let layer_exists: LayerExists = serde_json::from_str(&response)?;
+
+        Ok(layer_exists.exists)
     }
 
     pub async fn upload_layer(&self, registry: &RegistrySession, layer: &Layer) -> RegistryResult<bool> {
@@ -281,10 +337,11 @@ impl RegistryClient {
         self.http_client.execute(request)
     }
 
-    pub async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<String> {
+    pub async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<(String, HeaderMap)> {
         let response = self.get_registry_response(registry, url).await?;
+        let headers = response.headers().clone();
         let response = RegistryError::from_response(response, format!("url: /{}", url)).await?;
-        Ok(response)
+        Ok((response, headers))
     }
 
     pub fn json_post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
@@ -317,10 +374,12 @@ impl RegistryClient {
 pub enum RegistryError {
     FailedToContactRegistry(reqwest::Error),
     InvalidAuthentication,
+    ReferenceNotFound,
     FailedToUpload,
     InvalidLayer,
     InvalidContentHash,
     IncorrectLayer { expected: ImageId, actual: ImageId },
+    FailToPullThrough,
     Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
     Deserialize(serde_json::Error),
@@ -333,6 +392,8 @@ impl RegistryError {
             Ok(response.text().await?)
         } else if response.status() == StatusCode::UNAUTHORIZED {
             Err(RegistryError::InvalidAuthentication)
+        } else if response.status() == StatusCode::NOT_FOUND {
+            Err(RegistryError::ReferenceNotFound)
         } else {
             let status_code = response.status();
             let text = response.text().await?;
@@ -354,10 +415,12 @@ impl Display for RegistryError {
         match self {
             RegistryError::FailedToContactRegistry(err) => write!(f, "Failed to contact the registry due to: {}", err),
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
+            RegistryError::ReferenceNotFound => write!(f, "Could not find the reference"),
             RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
+            RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in time"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),

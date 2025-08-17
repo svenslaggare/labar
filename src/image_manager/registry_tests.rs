@@ -274,11 +274,15 @@ async fn test_sync() {
     let mut secondary_registry_config = create_registry_config(secondary_address, &tmp_secondary_registry_folder);
     secondary_registry_config.upstream = Some(
         RegistryUpstreamConfig {
-            address: primary_address,
+            hostname: primary_address.to_string(),
             username: "guest".to_string(),
             password: "guest".to_string(),
+
+            sync: true,
             sync_at_startup: true,
             sync_interval: Cron::from_str("* * * * *").unwrap(),
+
+            pull_through: false
         }
     );
     tokio::spawn(crate::registry::run(secondary_registry_config));
@@ -310,6 +314,98 @@ async fn test_sync() {
 
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
+
+        // Pull
+        let pull_result = image_manager.pull(&image_tag, None).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+
+        // List images
+        let images = image_manager.list_images();
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!(&image_tag, &images[0].image.tag);
+
+        // Check content
+        let reference = image_tag.clone().to_ref();
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference).unwrap();
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
+    }
+
+    #[allow(unused_must_use)] {
+        std::fs::remove_dir_all(&tmp_folder);
+        std::fs::remove_dir_all(&tmp_primary_registry_folder);
+        std::fs::remove_dir_all(&tmp_secondary_registry_folder);
+    }
+}
+
+#[tokio::test]
+async fn test_pull_through() {
+    use std::net::SocketAddr;
+
+    use crate::helpers;
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_folder = helpers::get_temp_folder();
+    let tmp_primary_registry_folder = helpers::get_temp_folder();
+    let tmp_secondary_registry_folder = helpers::get_temp_folder();
+
+    let primary_address: SocketAddr = "0.0.0.0:9565".parse().unwrap();
+    let secondary_address: SocketAddr = "0.0.0.0:9566".parse().unwrap();
+
+    // Build image inside primary registry
+    let mut image = {
+        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.clone());
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+
+        let image = build_test_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
+        ).unwrap();
+        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+
+        image
+    };
+
+    tokio::spawn(crate::registry::run(create_registry_config(primary_address, &tmp_primary_registry_folder)));
+
+    // Wait until registry starts
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let mut secondary_registry_config = create_registry_config(secondary_address, &tmp_secondary_registry_folder);
+    secondary_registry_config.upstream = Some(
+        RegistryUpstreamConfig {
+            hostname: primary_address.to_string(),
+            username: "guest".to_string(),
+            password: "guest".to_string(),
+
+            sync: false,
+            sync_at_startup: true,
+            sync_interval: Cron::from_str("* * * * *").unwrap(),
+
+            pull_through: true
+        }
+    );
+    tokio::spawn(crate::registry::run(secondary_registry_config));
+
+    // Wait until registry starts
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let image_tag = ImageTag::with_registry(&secondary_address.to_string(), "test", "latest");
+    image.tag = image.tag.set_registry(&secondary_address.to_string());
+
+    {
+        let mut config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        config.upstream_pull_check = 0.05;
+        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&secondary_address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
 
         // Pull
         let pull_result = image_manager.pull(&image_tag, None).await;
