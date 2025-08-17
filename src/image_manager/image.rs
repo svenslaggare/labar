@@ -285,7 +285,7 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        let image_metadata = self.resolve_image_registry_internal(&registry_session, &tag, false).await?;
+        let image_metadata = self.resolve_image_in_registry_internal(&registry_session, &tag, false).await?;
         Ok(image_metadata)
     }
 
@@ -310,7 +310,7 @@ impl ImageManager {
 
         self.printer.println(&format!("Pulling image {}", tag));
 
-        let image_metadata = self.resolve_image_registry_internal(&registry_session, &tag, true).await?;
+        let image_metadata = self.resolve_image_in_registry_internal(&registry_session, &tag, true).await?;
 
         let mut stack = Vec::new();
         stack.push(image_metadata.image.hash.clone());
@@ -458,10 +458,10 @@ impl ImageManager {
         Ok(download_result)
     }
 
-    async fn resolve_image_registry_internal(&self,
-                                             registry_session: &RegistrySession,
-                                             tag: &ImageTag,
-                                             can_pull_through: bool) -> ImageManagerResult<ImageMetadata> {
+    async fn resolve_image_in_registry_internal(&self,
+                                                registry_session: &RegistrySession,
+                                                tag: &ImageTag,
+                                                can_pull_through: bool) -> ImageManagerResult<ImageMetadata> {
         match self.registry_manager.resolve_image(&registry_session, &tag, can_pull_through).await {
             Ok(image) => Ok(image),
             Err(RegistryError::ReferenceNotFound) => {
