@@ -389,6 +389,9 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 
     if !pending_upload_layer.verify_path_exists(image_manager.config().base_folder()) {
         info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload_layer_hash, upload_id);
+        state_session.registry_remove_upload(
+            &upload_id
+        ).map_err(|err| ImageManagerError::Sql(err))?;
 
         return Ok(
             Json(json!(

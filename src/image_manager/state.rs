@@ -369,6 +369,11 @@ impl StateSession {
         transaction.commit()?;
         Ok(true)
     }
+
+    pub fn registry_remove_upload(&mut self, upload_id: &str) -> SqlResult<bool> {
+        let count = self.connection.execute("DELETE FROM registry_pending_layer_uploads WHERE upload_id=?1", (&upload_id, ))?;
+        Ok(count != 1)
+    }
 }
 
 pub struct PooledStateSession {
