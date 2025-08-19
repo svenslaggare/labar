@@ -148,3 +148,6 @@ pub struct ImageSpec {
     pub hash: ImageId,
     pub tag: ImageTag
 }
+
+pub const UPLOAD_ID_HEADER: &str = "UPLOAD-ID";
+pub const PULL_THROUGH_HEADER: &str = "PULL-THROUGH";

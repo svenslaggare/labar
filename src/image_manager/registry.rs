@@ -14,6 +14,7 @@ use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{BoxPrinter, ImageManagerConfig};
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
+use crate::registry::model;
 use crate::registry::model::{AppErrorResponse, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
@@ -31,6 +32,7 @@ impl RegistryManager {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn is_reachable(&self, registry: &str) -> RegistryResult<bool> {
         let http_client = create_http_client(&self.config)?;
 
@@ -184,7 +186,7 @@ impl RegistryManager {
             return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: layer.hash.clone() })
         }
 
-        let pull_through = headers.get("PULL-THROUGH") == Some(&HeaderValue::from_static("true"));
+        let pull_through = headers.get(model::PULL_THROUGH_HEADER) == Some(&HeaderValue::from_static("true"));
 
         Ok((layer, pull_through))
     }
@@ -253,7 +255,7 @@ impl RegistryManager {
                     &registry.registry,
                     &format!("layers/{}/upload/{}", layer.hash, file_index)
                 )
-                    .header("UPLOAD_ID", upload_id.clone())
+                    .header(model::UPLOAD_ID_HEADER, upload_id.clone())
                     .build()?;
 
                 let file = tokio::fs::File::open(self.config.base_folder.join(source_path)).await?;
@@ -269,7 +271,7 @@ impl RegistryManager {
 
         // Commit upload
         let request = client.json_post_registry_response(&registry.registry, "layers/end-upload")
-            .header("UPLOAD_ID", upload_id.clone())
+            .header(model::UPLOAD_ID_HEADER, upload_id.clone())
             .build()?;
         let response = client.execute(request).await?;
 

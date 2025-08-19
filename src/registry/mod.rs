@@ -89,13 +89,12 @@ pub async fn run(config: RegistryConfig) {
         .with_state(state.clone())
     ;
 
-    let state_clone = state.clone();
-
-    if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
+    if let Some(upstream_config) = state.config.upstream.as_ref() {
         let mut image_manager = create_image_manager(&state, &AuthToken);
         image_manager.login(&upstream_config.hostname, &upstream_config.username, &upstream_config.password).await.unwrap();
     }
 
+    let state_clone = state.clone();
     tokio::spawn(async move {
         if let Some(upstream_config) = state_clone.config.upstream.as_ref() {
             if upstream_config.sync {
@@ -268,7 +267,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
             tokio::spawn(pull_from_upstream(state.clone(), layer.clone()));
 
             let mut response = Json(json!(layer)).into_response();
-            response.headers_mut().insert("PULL-THROUGH", HeaderValue::from_static("true"));
+            response.headers_mut().insert(model::PULL_THROUGH_HEADER, HeaderValue::from_static("true"));
             Ok(response)
         },
         Err(err) => Err(err.into())
@@ -564,7 +563,7 @@ async fn pull_from_upstream(state: Arc<AppState>, layer: Layer) {
 
 fn get_upload_id(request: &Request, _token: &AuthToken) -> AppResult<String> {
     request.headers()
-        .get("UPLOAD_ID").map(|x| x.to_str().ok()).flatten()
+        .get(model::UPLOAD_ID_HEADER).map(|x| x.to_str().ok()).flatten()
         .map(|x| x.to_owned())
         .ok_or_else(|| AppError::UploadIdNotSpecified)
 }
