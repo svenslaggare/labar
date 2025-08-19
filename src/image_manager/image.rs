@@ -416,11 +416,16 @@ impl ImageManager {
         Ok(layer)
     }
 
-    pub async fn sync<BeforeLayerPull: Fn(&mut StateSession, &Layer) -> bool, CommitLayer: Fn(&mut StateSession, Layer) -> bool>(&mut self,
-                                                                                                                                 registry: &str,
-                                                                                                                                 local_registry: Option<&str>,
-                                                                                                                                 before_layer_pull: BeforeLayerPull,
-                                                                                                                                 commit_layer: CommitLayer) -> ImageManagerResult<DownloadResult> {
+    pub async fn sync<
+        BeforeLayerPull: Fn(&mut StateSession, &Layer) -> bool,
+        CommitLayer: Fn(&mut StateSession, Layer) -> bool
+    >(
+        &mut self,
+        registry: &str,
+        local_registry: Option<&str>,
+        before_layer_pull: BeforeLayerPull,
+        commit_layer: CommitLayer
+    ) -> ImageManagerResult<DownloadResult> {
         let mut session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
