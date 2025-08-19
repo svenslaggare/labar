@@ -239,7 +239,7 @@ impl RegistryManager {
         match upload_response.status {
             UploadStatus::Started => {}
             UploadStatus::InvalidPaths => {
-                return Err(RegistryError::FailedToUpload);
+                return Err(RegistryError::FailedToUpload { layer: layer.hash.clone() });
             }
             _ => {
                 self.printer.println("\t\t* Layer already exist.");
@@ -279,7 +279,7 @@ impl RegistryManager {
         let upload_response: UploadLayerResponse = serde_json::from_str(&upload_response)?;
 
         if UploadStatus::Finished != upload_response.status {
-            return Err(RegistryError::FailedToUpload);
+            return Err(RegistryError::FailedToUpload { layer: layer.hash.clone() });
         }
 
         Ok(true)
@@ -361,7 +361,7 @@ impl RegistryClient {
 
     pub async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<Response> {
         let request = self.build_get_request(registry, url);
-        let response = self.http_client.execute(request.build()?).await.map_err(|err| RegistryError::FailedToContactRegistry(err))?;
+        let response = self.http_client.execute(request.build()?).await.map_err(|err| RegistryError::Unavailable(err))?;
         Ok(response)
     }
 
@@ -382,10 +382,10 @@ impl RegistryClient {
 
 #[derive(Debug)]
 pub enum RegistryError {
-    FailedToContactRegistry(reqwest::Error),
+    Unavailable(reqwest::Error),
     InvalidAuthentication,
     ReferenceNotFound,
-    FailedToUpload,
+    FailedToUpload { layer: ImageId },
     InvalidLayer,
     InvalidContentHash,
     IncorrectLayer { expected: ImageId, actual: ImageId },
@@ -423,14 +423,14 @@ impl RegistryError {
 impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            RegistryError::FailedToContactRegistry(err) => write!(f, "Failed to contact the registry due to: {}", err),
+            RegistryError::Unavailable(err) => write!(f, "Registry unavailable due to: {}", err),
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::ReferenceNotFound => write!(f, "Could not find the reference"),
-            RegistryError::FailedToUpload => write!(f, "Failed to upload layer"),
+            RegistryError::FailedToUpload { layer } => write!(f, "Failed to upload layer {}", layer),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
-            RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in time"),
+            RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in enough time"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
             RegistryError::Http(err) => write!(f, "Http: {}", err),
             RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),
