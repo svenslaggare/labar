@@ -28,3 +28,15 @@ Merges the referred to image into the current image.
 **Examples**:
 
 * `IMAGE test:latest`
+
+## BEGIN LAYER
+Creates a new layer. All operations within the layer block will be considered to be one operation.
+
+**Examples**:
+
+```
+BEGIN LAYER
+    COPY data/test1.txt test1.txt
+    MKDIR test
+END
+```

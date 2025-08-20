@@ -76,6 +76,11 @@ pub enum ImageParseError {
     UndefinedCommand(String),
     FromOnlyOnFirst,
     ExpectedArguments { expected: usize, actual: usize },
+    ExpectedSubcomand,
+    NotWithinSubLayer,
+    AlreadyWithinSubLayer,
+    SubLayerNotEnded,
+    InvalidSubcommand(String),
     VariableNotFound(String),
     InvalidImageReference(String),
     IsAbsolutePath(String),
@@ -96,12 +101,223 @@ impl Display for ImageParseError {
             ImageParseError::UndefinedCommand(command) => write!(f, "'{}' is not a defined command", command),
             ImageParseError::FromOnlyOnFirst => write!(f, "FROM statement only allowed on the first line"),
             ImageParseError::ExpectedArguments { expected, actual } => write!(f, "Expected {} arguments but got {}", expected, actual),
+            ImageParseError::ExpectedSubcomand => write!(f, "Expected subcommand"),
+            ImageParseError::InvalidSubcommand(subcommand) => write!(f, "'{}' is not a valid subcommand", subcommand),
+            ImageParseError::NotWithinSubLayer => write!(f, "Not within a sublayer"),
+            ImageParseError::AlreadyWithinSubLayer => write!(f, "Already within a sublayer"),
+            ImageParseError::SubLayerNotEnded => write!(f, "Sublayer not terminated with END"),
             ImageParseError::VariableNotFound(name) => write!(f, "Variable '{}' not found", name),
             ImageParseError::InvalidImageReference(error) => write!(f, "Invalid image reference: {}", error),
             ImageParseError::IsAbsolutePath(path) => write!(f, "The path '{}' is absolute", path),
             ImageParseError::IO(error) => write!(f, "IO error: {}", error),
             ImageParseError::Other(error) => write!(f, "{}", error),
         }
+    }
+}
+
+impl ImageDefinition {
+    pub fn parse(content: &str, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
+        let mut image_definition = ImageDefinition::new(None, Vec::new());
+        let variable_regex = [
+            Regex::new("\\$([A-Za-z0-9_]+)").unwrap(),
+            Regex::new("\\$\\{([A-Za-z0-9_]+)}").unwrap()
+        ];
+
+        let mut is_first_line = true;
+
+        struct ActiveLayer {
+            layer: Option<LayerDefinition>,
+            within_layer: bool
+        }
+
+        impl ActiveLayer {
+            fn new_layer(&mut self, line: &str) -> ImageParseResult<()> {
+                if self.within_layer {
+                    return Err(ImageParseError::AlreadyWithinSubLayer);
+                }
+
+                self.layer = Some(LayerDefinition::new(line.to_owned(), Vec::new()));
+                self.within_layer = true;
+
+                Ok(())
+            }
+
+            fn end_layer(&mut self, image_definition: &mut ImageDefinition) -> ImageParseResult<()> {
+                if self.within_layer {
+                    if let Some(layer) = self.layer.take() {
+                        image_definition.layers.push(layer);
+                    }
+
+                    self.within_layer = false;
+                    Ok(())
+                } else {
+                    Err(ImageParseError::NotWithinSubLayer)
+                }
+            }
+
+            fn add_operation(&mut self,
+                             image_definition: &mut ImageDefinition,
+                             line: &str,
+                             operation: LayerOperationDefinition) {
+                if !self.within_layer {
+                    self.layer = Some(LayerDefinition::new(line.to_owned(), Vec::new()));
+                }
+
+                if let Some(layer) = self.layer.as_mut() {
+                    layer.operations.push(operation);
+                }
+
+                if !self.within_layer {
+                    if let Some(layer) = self.layer.take() {
+                        image_definition.layers.push(layer);
+                    }
+                }
+            }
+
+            fn finish(&self) -> ImageParseResult<()> {
+                if self.within_layer {
+                    Err(ImageParseError::SubLayerNotEnded)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+
+        let mut active_layer = ActiveLayer {
+            layer: None,
+            within_layer: false,
+        };
+
+        for line in content.lines() {
+            if line.trim_start().starts_with("#") {
+                continue;
+            }
+
+            let mut parts = line.split_whitespace().map(|x| x.to_owned()).collect::<Vec<_>>();
+            if parts.len() >= 1 {
+                for part in parts.iter_mut().skip(1) {
+                    for regex in &variable_regex {
+                        while let Some(regex_capture) = regex.captures(part) {
+                            let group = regex_capture.get(1).unwrap();
+                            let variable = group.as_str();
+                            let variable_value = context.get_variable(variable).ok_or_else(|| ImageParseError::VariableNotFound(variable.to_owned()))?;
+                            part.replace_range(regex_capture.get(0).unwrap().range(), variable_value);
+                        }
+                    }
+                }
+
+                let command = parts[0].as_str();
+                let num_arguments = parts.len() - 1;
+
+                match command {
+                    "FROM" => {
+                        if num_arguments != 1 {
+                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
+                        }
+
+                        if is_first_line {
+                            let base_image = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
+                            image_definition.base_image = Some(base_image);
+                        } else {
+                            return Err(ImageParseError::FromOnlyOnFirst);
+                        }
+                    },
+                    "COPY" => {
+                        if num_arguments < 2 {
+                            return Err(ImageParseError::ExpectedArguments { expected: 2, actual: num_arguments });
+                        }
+
+                        let arguments = extract_arguments(&mut parts);
+
+                        let source = parts[1].to_owned();
+                        let destination = parts[2].to_owned();
+                        let link_type = match arguments.get("link").map(|x| x.as_str()) {
+                            Some("soft") => LinkType::Soft,
+                            Some("hard") => LinkType::Hard,
+                            _ => LinkType::Hard
+                        };
+
+                        let writable = match arguments.get("writable").map(|x| x.as_str()) {
+                            Some("yes" | "true") => true,
+                            Some("no" | "false") => false,
+                            _ => false
+                        };
+
+                        active_layer.add_operation(
+                            &mut image_definition,
+                            line,
+                            LayerOperationDefinition::File {
+                                path: destination,
+                                source_path: source,
+                                link_type,
+                                writable
+                            }
+                        );
+                    },
+                    "MKDIR" => {
+                        if num_arguments != 1 {
+                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
+                        }
+
+                        let path = parts[1].to_owned();
+                        active_layer.add_operation(
+                            &mut image_definition,
+                            line,
+                            LayerOperationDefinition::Directory { path }
+                        );
+                    },
+                    "IMAGE" => {
+                        let reference = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
+
+                        if num_arguments != 1 {
+                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
+                        }
+
+                        active_layer.add_operation(
+                            &mut image_definition,
+                            line,
+                            LayerOperationDefinition::Image { reference }
+                        );
+                    }
+                    "BEGIN" => {
+                        if num_arguments != 1 {
+                            return Err(ImageParseError::ExpectedSubcomand)
+                        }
+
+                        let subcommand = &parts[1];
+                        match subcommand.as_ref() {
+                            "LAYER" => {
+                                active_layer.new_layer(line)?;
+                            }
+                            _ => {
+                                return Err(ImageParseError::InvalidSubcommand(subcommand.clone()));
+                            }
+                        }
+                    }
+                    "END" => {
+                        active_layer.end_layer(&mut image_definition)?;
+                    }
+                    _ => { return Err(ImageParseError::UndefinedCommand(command.to_owned())); }
+                }
+            } else if !line.trim().is_empty() {
+                return Err(ImageParseError::InvalidLine(line.to_owned()));
+            }
+
+            is_first_line = false;
+        }
+
+        active_layer.finish()?;
+
+        Ok(image_definition)
+    }
+
+    pub fn parse_without_context(content: &str) -> ImageParseResult<ImageDefinition> {
+        ImageDefinition::parse(content, &ImageDefinitionContext::new())
+    }
+
+    pub fn parse_file_without_context(path: &Path) -> ImageParseResult<ImageDefinition> {
+        let content = std::fs::read_to_string(path)?;
+        ImageDefinition::parse(&content, &ImageDefinitionContext::new())
     }
 }
 
@@ -212,127 +428,6 @@ fn recursive_copy_operations(source_path: &Path,
     results.sort();
 
     Ok(results)
-}
-
-impl ImageDefinition {
-    pub fn parse(content: &str, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
-        let mut image_definition = ImageDefinition::new(None, Vec::new());
-        let variable_regex = [
-            Regex::new("\\$([A-Za-z0-9_]+)").unwrap(),
-            Regex::new("\\$\\{([A-Za-z0-9_]+)\\}").unwrap()
-        ];
-
-        let mut is_first_line = true;
-        for line in content.lines() {
-            if line.trim_start().starts_with("#") {
-                continue;
-            }
-
-            let mut parts = line.split_whitespace().map(|x| x.to_owned()).collect::<Vec<_>>();
-            if parts.len() >= 1 {
-                for part in parts.iter_mut().skip(1) {
-                    for regex in &variable_regex {
-                        while let Some(regex_capture) = regex.captures(part) {
-                            let group = regex_capture.get(1).unwrap();
-                            let variable = group.as_str();
-                            let variable_value = context.get_variable(variable).ok_or_else(|| ImageParseError::VariableNotFound(variable.to_owned()))?;
-                            part.replace_range(regex_capture.get(0).unwrap().range(), variable_value);
-                        }
-                    }
-                }
-
-                let command = parts[0].as_str();
-                let num_arguments = parts.len() - 1;
-
-                match command {
-                    "FROM" => {
-                        if num_arguments != 1 {
-                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
-                        }
-
-                        if is_first_line {
-                            let base_image = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
-                            image_definition.base_image = Some(base_image);
-                        } else {
-                            return Err(ImageParseError::FromOnlyOnFirst);
-                        }
-                    },
-                    "COPY" => {
-                        if num_arguments < 2 {
-                            return Err(ImageParseError::ExpectedArguments { expected: 2, actual: num_arguments });
-                        }
-
-                        let arguments = extract_arguments(&mut parts);
-
-                        let source = parts[1].to_owned();
-                        let destination = parts[2].to_owned();
-                        let link_type = match arguments.get("link").map(|x| x.as_str()) {
-                            Some("soft") => LinkType::Soft,
-                            Some("hard") => LinkType::Hard,
-                            _ => LinkType::Hard
-                        };
-
-                        let writable = match arguments.get("writable").map(|x| x.as_str()) {
-                            Some("yes" | "true") => true,
-                            Some("no" | "false") => false,
-                            _ => false
-                        };
-
-                        image_definition.layers.push(LayerDefinition::new(
-                            line.to_owned(),
-                            vec![
-                                LayerOperationDefinition::File {
-                                    path: destination,
-                                    source_path: source,
-                                    link_type,
-                                    writable
-                                }
-                            ]
-                        ));
-                    },
-                    "MKDIR" => {
-                        if num_arguments != 1 {
-                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
-                        }
-
-                        let path = parts[1].to_owned();
-                        image_definition.layers.push(LayerDefinition::new(
-                            line.to_owned(),
-                            vec![LayerOperationDefinition::Directory { path }]
-                        ));
-                    },
-                    "IMAGE" => {
-                        let reference = Reference::from_str(&parts[1].to_owned()).map_err(|err| ImageParseError::InvalidImageReference(err))?;
-
-                        if num_arguments != 1 {
-                            return Err(ImageParseError::ExpectedArguments { expected: 1, actual: num_arguments });
-                        }
-
-                        image_definition.layers.push(LayerDefinition::new(
-                            line.to_owned(),
-                            vec![LayerOperationDefinition::Image { reference }]
-                        ));
-                    }
-                    _ => { return Err(ImageParseError::UndefinedCommand(command.to_owned())); }
-                }
-            } else {
-                return Err(ImageParseError::InvalidLine(line.to_owned()));
-            }
-
-            is_first_line = false;
-        }
-
-        Ok(image_definition)
-    }
-
-    pub fn parse_without_context(content: &str) -> ImageParseResult<ImageDefinition> {
-        ImageDefinition::parse(content, &ImageDefinitionContext::new())
-    }
-
-    pub fn parse_file_without_context(path: &Path) -> ImageParseResult<ImageDefinition> {
-        let content = std::fs::read_to_string(path)?;
-        ImageDefinition::parse(&content, &ImageDefinitionContext::new())
-    }
 }
 
 pub struct ImageDefinitionContext {
@@ -886,6 +981,59 @@ fn test_parse_image5() {
 }
 
 #[test]
+fn test_parse_sublayer1() {
+    let result = image_definition_from_file2("testdata/parsing/success/sublayer1.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(1, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            },
+            LayerOperationDefinition::File {
+                path: "file2.txt".to_owned(), source_path: "testdata/rawdata/file2.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
+    );
+}
+
+#[test]
+fn test_parse_sublayer2() {
+    let result = image_definition_from_file2("testdata/parsing/success/sublayer2.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(2, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            },
+            LayerOperationDefinition::File {
+                path: "file2.txt".to_owned(), source_path: "testdata/rawdata/file2.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
+    );
+
+    assert_eq!(
+        result.layers[1].operations,
+        vec![
+            LayerOperationDefinition::Directory {
+                path: "test".to_string()
+            }
+        ],
+    );
+}
+
+#[test]
 fn test_failed_parse_mkdir1() {
     let result = image_definition_from_file2("testdata/parsing/failed/mkdir1.labarfile");
     assert!(result.is_err());
@@ -900,5 +1048,17 @@ fn test_failed_parse_from1() {
 #[test]
 fn test_failed_parse_variables1() {
     let result = image_definition_from_file2("testdata/parsing/failed/variables1.labarfile");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_failed_parse_sublayer1() {
+    let result = image_definition_from_file2("testdata/parsing/failed/sublayer1.labarfile");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_failed_parse_sublayer2() {
+    let result = image_definition_from_file2("testdata/parsing/failed/sublayer2.labarfile");
     assert!(result.is_err());
 }
