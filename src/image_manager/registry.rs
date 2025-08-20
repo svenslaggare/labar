@@ -239,7 +239,12 @@ impl RegistryManager {
         match upload_response.status {
             UploadStatus::Started => {}
             UploadStatus::InvalidPaths => {
-                return Err(RegistryError::FailedToUpload { layer: layer.hash.clone() });
+                return Err(
+                    RegistryError::FailedToUpload {
+                        layer: layer.hash.clone(),
+                        reason: upload_response.status
+                    }
+                );
             }
             _ => {
                 self.printer.println("\t\t* Layer already exist.");
@@ -279,7 +284,12 @@ impl RegistryManager {
         let upload_response: UploadLayerResponse = serde_json::from_str(&upload_response)?;
 
         if UploadStatus::Finished != upload_response.status {
-            return Err(RegistryError::FailedToUpload { layer: layer.hash.clone() });
+            return Err(
+                RegistryError::FailedToUpload {
+                    layer: layer.hash.clone(),
+                    reason: upload_response.status
+                }
+            );
         }
 
         Ok(true)
@@ -385,7 +395,7 @@ pub enum RegistryError {
     Unavailable(reqwest::Error),
     InvalidAuthentication,
     ReferenceNotFound,
-    FailedToUpload { layer: ImageId },
+    FailedToUpload { layer: ImageId, reason: UploadStatus },
     InvalidLayer,
     InvalidContentHash,
     IncorrectLayer { expected: ImageId, actual: ImageId },
@@ -426,7 +436,7 @@ impl Display for RegistryError {
             RegistryError::Unavailable(err) => write!(f, "Registry unavailable due to: {}", err),
             RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
             RegistryError::ReferenceNotFound => write!(f, "Could not find the reference"),
-            RegistryError::FailedToUpload { layer } => write!(f, "Failed to upload layer {}", layer),
+            RegistryError::FailedToUpload { layer, reason } => write!(f, "Failed to upload layer {} due to: {}", layer, reason),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),

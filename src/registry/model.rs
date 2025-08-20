@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use axum::body::Body;
 use axum::http::StatusCode;
 use axum::Json;
@@ -127,7 +128,7 @@ pub struct UploadLayerResponse {
     pub upload_id: Option<String>
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum UploadStatus {
     #[serde(rename="already_exist")]
     AlreadyExist,
@@ -141,6 +142,19 @@ pub enum UploadStatus {
     Finished,
     #[serde(rename="incomplete_upload")]
     IncompleteUpload
+}
+
+impl Display for UploadStatus {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UploadStatus::AlreadyExist => write!(f, "Already exist"),
+            UploadStatus::UploadingPending => write!(f, "Uploading pending"),
+            UploadStatus::InvalidPaths => write!(f, "Invalid paths"),
+            UploadStatus::Started => write!(f, "Started"),
+            UploadStatus::Finished => write!(f, "Finished"),
+            UploadStatus::IncompleteUpload => write!(f, "Incomplete upload")
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
