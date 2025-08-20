@@ -276,8 +276,9 @@ impl ImageManager {
 
     pub async fn list_images_in_registry(&self, registry: &str) -> ImageManagerResult<Vec<ImageMetadata>> {
         let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
 
-        let images = self.registry_manager.list_images(&RegistrySession::new(&session, registry)?).await?;
+        let images = self.registry_manager.list_images(&registry_session).await?;
         Ok(images)
     }
 
@@ -316,18 +317,7 @@ impl ImageManager {
         stack.push(image_metadata.image.hash.clone());
 
         let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone());
-                    },
-                    _ => {}
-                }
-            }
+            layer.visit_image_ids(|image_id| stack.push(image_id.clone()));
         };
 
         let mut top_level_hash = None;
@@ -361,7 +351,7 @@ impl ImageManager {
     pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
         let session = self.state_manager.pooled_session()?;
 
-        let top_layer = self.get_layer(&Reference::ImageTag(tag.clone()))?;
+        let top_layer = self.get_layer(&tag.clone().to_ref())?;
 
         let mut tag = tag.clone();
         if tag.registry().is_none() {
@@ -374,27 +364,16 @@ impl ImageManager {
         self.printer.println(&format!("Pushing image {}", tag));
 
         let mut stack = Vec::new();
-        stack.push(top_layer.hash.clone().to_ref());
+        stack.push(top_layer.hash.clone());
 
-        let visit_layer = |stack: &mut Vec<Reference>, layer: &Layer| {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone().to_ref());
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone().to_ref());
-                    },
-                    _ => {}
-                }
-            }
+        let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
+            layer.visit_image_ids(|image_id| stack.push(image_id.clone()));
         };
 
         let mut layers_uploaded = 0;
         while let Some(current) = stack.pop() {
             self.printer.println(&format!("\t* Pushing layer: {}", current));
-            let layer = self.get_layer(&current)?;
+            let layer = self.get_layer(&current.clone().to_ref())?;
             visit_layer(&mut stack, &layer);
             if self.registry_manager.upload_layer(&registry_session, &layer).await? {
                 layers_uploaded += 1;
@@ -483,18 +462,7 @@ impl ImageManager {
         stack.push(hash.clone());
 
         let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone());
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone());
-                    },
-                    _ => {}
-                }
-            }
+            layer.visit_image_ids(|image_id| stack.push(image_id.clone()));
         };
 
         let mut layers = Vec::new();

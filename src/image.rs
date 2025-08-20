@@ -121,6 +121,21 @@ impl Layer {
 
         inner(base_folder, self).unwrap_or(false)
     }
+
+    pub fn visit_image_ids<F: FnMut(&ImageId)>(&self, mut f: F) {
+        if let Some(parent_hash) = self.parent_hash.as_ref() {
+            f(parent_hash);
+        }
+
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::Image { hash } => {
+                    f(hash);
+                },
+                _ => {}
+            }
+        }
+    }
 }
 
 impl FromSql for Layer {
