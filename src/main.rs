@@ -169,46 +169,6 @@ enum RegistryCommandLineInput {
     }
 }
 
-fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
-    let mut config = ImageManagerConfig::new();
-    config.accept_self_signed = file_config.accept_self_signed;
-    ImageManager::with_config(config, printer.clone()).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
-}
-
-fn create_write_lock(_file_config: &FileConfig) -> FileLock {
-    FileLock::new(ImageManagerConfig::new().base_folder().join("write_lock"))
-}
-
-fn create_unpack_lock(_file_config: &FileConfig) -> FileLock {
-    FileLock::new(ImageManagerConfig::new().base_folder().join("unpack_lock"))
-}
-
-fn print_images(images: &Vec<ImageMetadata>) {
-    let mut table_printer = TablePrinter::new(
-        vec![
-            "REPOSITORY".to_owned(),
-            "TAG".to_owned(),
-            "IMAGE ID".to_owned(),
-            "CREATED".to_owned(),
-            "SIZE".to_owned()
-        ]
-    );
-
-    for metadata in images {
-        let created: DateTime<Local> = metadata.created.into();
-
-        table_printer.add_row(vec![
-            metadata.image.tag.full_repository(),
-            metadata.image.tag.tag().to_owned(),
-            metadata.image.hash.to_string(),
-            created.format(DATE_FORMAT).to_string(),
-            metadata.size.to_string()
-        ]);
-    }
-
-    table_printer.print();
-}
-
 async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput) -> Result<(), String> {
     let printer = ConsolePrinter::new();
 
@@ -407,7 +367,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Config { edit } => {
             fn print_config(file_config: &FileConfig) {
                 println!("default_registry: {}", file_config.default_registry.as_ref().map(|x| x.as_str()).unwrap_or("N/A"));
-                println!("accept_self_signed: {}", file_config.accept_self_signed);
+                println!("accept_self_signed: {}", file_config.image_manager.accept_self_signed);
             }
 
             if let Some(edit) = edit {
@@ -419,7 +379,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                         new_file_config.default_registry = value.map(|x| x.to_owned());
                     }
                     "accept_self_signed" => {
-                        new_file_config.accept_self_signed = value_str == "yes" || value_str == "true";
+                        new_file_config.image_manager.accept_self_signed = value_str == "yes" || value_str == "true";
                     }
                     _ => {
                         return Err(format!("Invalid key '{}'", key));
@@ -457,16 +417,27 @@ async fn main() -> Result<(), String> {
     Ok(())
 }
 
+fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
+    ImageManager::with_config(
+        file_config.image_manager.clone(),
+        printer.clone()
+    ).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
+}
+
+fn create_write_lock(_file_config: &FileConfig) -> FileLock {
+    FileLock::new(ImageManagerConfig::new().base_folder().join("write_lock"))
+}
+
+fn create_unpack_lock(_file_config: &FileConfig) -> FileLock {
+    FileLock::new(ImageManagerConfig::new().base_folder().join("unpack_lock"))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileConfig {
     default_registry: Option<String>,
-    #[serde(default="default_accept_self_signed")]
-    accept_self_signed: bool
-}
-
-fn default_accept_self_signed() -> bool {
-    true
+    #[serde(default)]
+    image_manager: ImageManagerConfig
 }
 
 impl FileConfig {
@@ -492,7 +463,7 @@ impl Default for FileConfig {
     fn default() -> Self {
         FileConfig {
             default_registry: None,
-            accept_self_signed: true
+            image_manager: ImageManagerConfig::new()
         }
     }
 }
@@ -515,8 +486,6 @@ fn transform_registry_result<T>(result: ImageManagerResult<T>) -> Result<T, Stri
     }
 }
 
-const DATE_FORMAT: &str = "%Y-%m-%d %T";
-
 fn generate_completions() -> bool {
     if std::env::args().skip(1).next() == Some("generate-completions".to_owned()) {
         let output_dir = "completions";
@@ -526,4 +495,32 @@ fn generate_completions() -> bool {
     } else {
         false
     }
+}
+
+const DATE_FORMAT: &str = "%Y-%m-%d %T";
+
+fn print_images(images: &Vec<ImageMetadata>) {
+    let mut table_printer = TablePrinter::new(
+        vec![
+            "REPOSITORY".to_owned(),
+            "TAG".to_owned(),
+            "IMAGE ID".to_owned(),
+            "CREATED".to_owned(),
+            "SIZE".to_owned()
+        ]
+    );
+
+    for metadata in images {
+        let created: DateTime<Local> = metadata.created.into();
+
+        table_printer.add_row(vec![
+            metadata.image.tag.full_repository(),
+            metadata.image.tag.tag().to_owned(),
+            metadata.image.hash.to_string(),
+            created.format(DATE_FORMAT).to_string(),
+            metadata.size.to_string()
+        ]);
+    }
+
+    table_printer.print();
 }

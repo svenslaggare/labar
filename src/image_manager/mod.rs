@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
 use zip::result::ZipError;
 
 mod layer;
@@ -114,7 +115,7 @@ impl std::fmt::Display for ImageManagerError {
 
 pub type ImageManagerResult<T> = Result<T, ImageManagerError>;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageManagerConfig {
     base_folder: PathBuf,
     pub accept_self_signed: bool,
@@ -148,6 +149,12 @@ impl ImageManagerConfig {
 
     pub fn get_layer_folder(&self, hash: &ImageId) -> PathBuf {
         self.layers_base_folder().join(&Path::new(&hash.to_string()))
+    }
+}
+
+impl Default for ImageManagerConfig {
+    fn default() -> Self {
+        ImageManagerConfig::new()
     }
 }
 

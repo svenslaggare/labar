@@ -18,7 +18,7 @@ use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{BoxPrinter};
 use crate::image_manager::state::StateSession;
-use crate::reference::{ImageId, ImageTag, Reference};
+use crate::reference::{ImageId, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
@@ -450,6 +450,7 @@ impl Unpacker for DryRunUnpacker {
 fn test_unpack() {
     use std::str::FromStr;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
@@ -492,6 +493,7 @@ fn test_unpack() {
 fn test_unpack_exist() {
     use std::str::FromStr;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
@@ -545,6 +547,7 @@ fn test_unpack_exist() {
 fn test_remove_unpack() {
     use std::str::FromStr;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
@@ -595,6 +598,7 @@ fn test_remove_unpack() {
 fn test_unpack_replace1() {
     use std::str::FromStr;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
@@ -648,6 +652,7 @@ fn test_unpack_replace1() {
 fn test_unpack_replace2() {
     use std::str::FromStr;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
@@ -731,6 +736,7 @@ fn test_extract() {
     use std::str::FromStr;
     use zip::ZipArchive;
 
+    use crate::reference::ImageTag;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
