@@ -18,7 +18,7 @@ use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{BoxPrinter};
 use crate::image_manager::state::StateSession;
-use crate::reference::{ImageId, Reference};
+use crate::reference::{ImageId, ImageTag, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
@@ -450,14 +450,13 @@ impl Unpacker for DryRunUnpacker {
 fn test_unpack() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -466,11 +465,12 @@ fn test_unpack() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple1.labarfile")
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
@@ -478,32 +478,27 @@ fn test_unpack() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
     );
 
     assert!(unpack_result.is_ok());
-    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
+    assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
 }
 
 #[test]
 fn test_unpack_exist() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -512,11 +507,12 @@ fn test_unpack_exist() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple1.labarfile")
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
     unpack_manager.unpack(
@@ -524,7 +520,7 @@ fn test_unpack_exist() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
@@ -535,32 +531,27 @@ fn test_unpack_exist() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
     );
 
     assert!(unpack_result.is_err());
-    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
+    assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
 }
 
 #[test]
 fn test_remove_unpack() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -569,11 +560,12 @@ fn test_remove_unpack() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple1.labarfile")
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
     unpack_manager.unpack(
@@ -581,7 +573,7 @@ fn test_remove_unpack() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
@@ -591,30 +583,25 @@ fn test_remove_unpack() {
     let result = unpack_manager.remove_unpacking(
         &session,
         &layer_manager,
-        &tmp_dir.join("unpack"),
+        &tmp_folder.owned().join("unpack"),
         false
     );
 
     assert!(result.is_ok(), "{}", result.unwrap_err());
-    assert!(!tmp_dir.join("unpack").join("file1.txt").exists());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
+    assert!(!tmp_folder.owned().join("unpack").join("file1.txt").exists());
 }
 
 #[test]
 fn test_unpack_replace1() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -623,11 +610,12 @@ fn test_unpack_replace1() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple1.labarfile")
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
     unpack_manager.unpack(
@@ -635,7 +623,7 @@ fn test_unpack_replace1() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
@@ -646,32 +634,27 @@ fn test_unpack_replace1() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: true,
             dry_run: false,
         }
     );
 
     assert!(unpack_result.is_ok());
-    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
+    assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
 }
 
 #[test]
 fn test_unpack_replace2() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -680,11 +663,12 @@ fn test_unpack_replace2() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple1.labarfile")
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
@@ -692,31 +676,26 @@ fn test_unpack_replace2() {
         &layer_manager,
         UnpackRequest {
             reference: Reference::from_str("test").unwrap(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: true,
             dry_run: false,
         }
     );
 
     assert!(unpack_result.is_ok());
-    assert!(tmp_dir.join("unpack").join("file1.txt").exists());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
+    assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
 }
 
 #[test]
 fn test_unpack_self_reference() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -738,17 +717,13 @@ fn test_unpack_self_reference() {
         &layer_manager,
         UnpackRequest {
             reference: hash.clone().to_ref(),
-            unpack_folder: tmp_dir.join("unpack"),
+            unpack_folder: tmp_folder.owned().join("unpack"),
             replace: false,
             dry_run: false,
         }
     );
 
     assert!(unpack_result.is_err());
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
 }
 
 #[test]
@@ -756,14 +731,13 @@ fn test_extract() {
     use std::str::FromStr;
     use zip::ZipArchive;
 
-    use crate::helpers;
     use crate::image_manager::build::BuildManager;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -772,14 +746,15 @@ fn test_extract() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
-        Path::new("testdata/definitions/simple3.labarfile")
+        Path::new("testdata/definitions/simple3.labarfile"),
+        ImageTag::from_str("test").unwrap()
     ).unwrap();
 
-    let archive_file = tmp_dir.join("extract.zip");
+    let archive_file = tmp_folder.owned().join("extract.zip");
     let extract_result = unpack_manager.extract(
         &session,
         &layer_manager,
@@ -793,34 +768,4 @@ fn test_extract() {
     let zip_archive = ZipArchive::new(File::open(archive_file).unwrap()).unwrap();
     assert_eq!(vec!["test/file1.txt", "test2/"], zip_archive.file_names().collect::<Vec<_>>());
     assert_eq!(974, zip_archive.decompressed_size().unwrap() as u64);
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
-}
-
-#[cfg(test)]
-fn build_test_image(session: &mut StateSession,
-                    layer_manager: &LayerManager,
-                    build_manager: &crate::image_manager::build::BuildManager,
-                    path: &Path) -> Result<(), String> {
-    use std::str::FromStr;
-    use crate::image_definition::ImageDefinition;
-    use crate::image_manager::BuildRequest;
-    use crate::reference::ImageTag;
-
-    let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
-
-    build_manager.build_image(
-        session,
-        layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: ImageTag::from_str("test").unwrap(),
-            force: false,
-        }
-    ).map_err(|err| err.to_string())?;
-
-    Ok(())
 }

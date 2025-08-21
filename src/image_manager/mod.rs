@@ -10,6 +10,9 @@ mod state;
 mod image;
 
 #[cfg(test)]
+mod test_helpers;
+
+#[cfg(test)]
 mod registry_tests;
 
 #[derive(Debug)]

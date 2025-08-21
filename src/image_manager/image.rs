@@ -573,17 +573,16 @@ impl Deref for InspectLayerResult {
 fn test_build() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let result = build_test_image(
+        let result = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple1.labarfile"),
             ImageTag::from_str("test").unwrap()
@@ -605,23 +604,17 @@ fn test_build() {
 
         assert_eq!(Some(DataSize(974)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-    }
 }
 
 #[test]
 fn test_remove_image1() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = helpers::get_temp_folder();
-    std::fs::create_dir_all(&tmp_folder).unwrap();
+    let tmp_folder = super::test_helpers::TempFolder::new();
 
-    let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -629,7 +622,7 @@ fn test_remove_image1() {
         printer
     ).unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image(
         &mut image_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
         ImageTag::from_str("test").unwrap()
@@ -652,13 +645,11 @@ fn test_remove_image1() {
 fn test_remove_image2() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = helpers::get_temp_folder();
-    std::fs::create_dir_all(&tmp_folder).unwrap();
+    let tmp_folder = super::test_helpers::TempFolder::new();
 
-    let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
 
     let mut image_manager = ImageManager::with_config(
@@ -666,13 +657,13 @@ fn test_remove_image2() {
         printer
     ).unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image(
         &mut image_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
         ImageTag::from_str("test").unwrap()
     ).unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image(
         &mut image_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
         ImageTag::from_str("test2").unwrap()
@@ -693,23 +684,22 @@ fn test_remove_image2() {
 fn test_list_content() {
     use std::str::FromStr;
 
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        build_test_image(
+        super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple1.labarfile"),
             ImageTag::from_str("test").unwrap()
         ).unwrap();
 
-        build_test_image(
+        super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/with_image_ref.labarfile"),
             ImageTag::from_str("that").unwrap()
@@ -723,25 +713,4 @@ fn test_list_content() {
         assert_eq!("file1.txt", files[0]);
         assert_eq!("file2.txt", files[1]);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-    }
-}
-
-#[cfg(test)]
-fn build_test_image(image_manager: &mut ImageManager,
-                    path: &Path, image_tag: ImageTag) -> Result<Image, String> {
-    use crate::image_definition::ImageDefinition;
-
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new(path)
-    ).map_err(|err| err.to_string())?;
-
-    image_manager.build_image(BuildRequest {
-        build_context: Path::new("").to_path_buf(),
-        image_definition,
-        tag: image_tag,
-        force: false,
-    }).map_err(|err| err.to_string())
 }

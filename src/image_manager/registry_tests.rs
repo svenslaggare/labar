@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -6,21 +7,17 @@ use croner::Cron;
 use tokio::time::Instant;
 
 use crate::helpers::DataSize;
-use crate::image::Image;
-use crate::image_manager::{BuildRequest, EmptyPrinter, ImageManager, ImageManagerConfig, Reference};
+use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, Reference};
 use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
+use crate::registry::auth::AccessRight;
 use crate::registry::config::RegistryUpstreamConfig;
+use crate::registry::RegistryConfig;
 
 #[tokio::test]
 async fn test_pull() {
-    use std::net::SocketAddr;
-
-    use crate::helpers;
-    use crate::image_manager::ConsolePrinter;
-
-    let tmp_folder = helpers::get_temp_folder();
-    let tmp_registry_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_registry_folder = super::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9560".parse().unwrap();
 
@@ -28,10 +25,10 @@ async fn test_pull() {
 
     // Build image inside registry
     let image = {
-        let config = ImageManagerConfig::with_base_folder(tmp_registry_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_registry_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image = build_test_image(
+        let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             image_tag.clone()
@@ -49,7 +46,7 @@ async fn test_pull() {
     }
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         // Login
@@ -75,22 +72,12 @@ async fn test_pull() {
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-        std::fs::remove_dir_all(&tmp_registry_folder);
-    }
 }
 
 #[tokio::test]
 async fn test_push_pull() {
-    use std::net::SocketAddr;
-
-    use crate::helpers;
-    use crate::image_manager::ConsolePrinter;
-
-    let tmp_folder = helpers::get_temp_folder();
-    let tmp_registry_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_registry_folder = super::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9561".parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
@@ -101,7 +88,7 @@ async fn test_push_pull() {
     }
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         // Login
@@ -111,7 +98,7 @@ async fn test_push_pull() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
         // Build
-        let image = build_test_image(
+        let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             image_tag.clone()
@@ -153,23 +140,12 @@ async fn test_push_pull() {
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-        std::fs::remove_dir_all(&tmp_registry_folder);
-    }
 }
 
 #[tokio::test]
 async fn test_push_pull_with_ref() {
-    use std::str::FromStr;
-    use std::net::SocketAddr;
-
-    use crate::helpers;
-    use crate::image_manager::ConsolePrinter;
-
-    let tmp_folder = helpers::get_temp_folder();
-    let tmp_registry_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_registry_folder = super::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9562".parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
@@ -180,7 +156,7 @@ async fn test_push_pull_with_ref() {
     }
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         // Login
@@ -190,13 +166,13 @@ async fn test_push_pull_with_ref() {
         let image_tag = ImageTag::with_registry(&address.to_string(), "remote_image", "latest");
 
         // Build
-        let image_referred = build_test_image(
+        let image_referred = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple1.labarfile"),
             ImageTag::from_str("test").unwrap()
         ).unwrap();
 
-        let image = build_test_image(
+        let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/with_image_ref.labarfile"),
             image_tag.clone()
@@ -239,33 +215,23 @@ async fn test_push_pull_with_ref() {
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-        std::fs::remove_dir_all(&tmp_registry_folder);
-    }
 }
 
 #[tokio::test]
 async fn test_sync() {
-    use std::net::SocketAddr;
-
-    use crate::helpers;
-    use crate::image_manager::ConsolePrinter;
-
-    let tmp_folder = helpers::get_temp_folder();
-    let tmp_primary_registry_folder = helpers::get_temp_folder();
-    let tmp_secondary_registry_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_primary_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_secondary_registry_folder = super::test_helpers::TempFolder::new();
 
     let primary_address: SocketAddr = "0.0.0.0:9563".parse().unwrap();
     let secondary_address: SocketAddr = "0.0.0.0:9564".parse().unwrap();
 
     // Build image inside primary registry
     let mut image = {
-        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image = build_test_image(
+        let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
@@ -307,7 +273,7 @@ async fn test_sync() {
     image.tag = image.tag.set_registry(&secondary_address.to_string());
 
     {
-        let config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
         // Login
@@ -343,34 +309,23 @@ async fn test_sync() {
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-        std::fs::remove_dir_all(&tmp_primary_registry_folder);
-        std::fs::remove_dir_all(&tmp_secondary_registry_folder);
-    }
 }
 
 #[tokio::test]
 async fn test_pull_through() {
-    use std::net::SocketAddr;
-
-    use crate::helpers;
-    use crate::image_manager::ConsolePrinter;
-
-    let tmp_folder = helpers::get_temp_folder();
-    let tmp_primary_registry_folder = helpers::get_temp_folder();
-    let tmp_secondary_registry_folder = helpers::get_temp_folder();
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_primary_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_secondary_registry_folder = super::test_helpers::TempFolder::new();
 
     let primary_address: SocketAddr = "0.0.0.0:9565".parse().unwrap();
     let secondary_address: SocketAddr = "0.0.0.0:9566".parse().unwrap();
 
     // Build image inside primary registry
     let mut image = {
-        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.clone());
+        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.owned());
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
-        let image = build_test_image(
+        let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
@@ -412,7 +367,7 @@ async fn test_pull_through() {
     image.tag = image.tag.set_registry(&secondary_address.to_string());
 
     {
-        let mut config = ImageManagerConfig::with_base_folder(tmp_folder.clone());
+        let mut config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         config.upstream_pull_check = 0.05;
         let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
 
@@ -439,34 +394,9 @@ async fn test_pull_through() {
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_folder);
-        std::fs::remove_dir_all(&tmp_primary_registry_folder);
-        std::fs::remove_dir_all(&tmp_secondary_registry_folder);
-    }
 }
 
-fn build_test_image(image_manager: &mut ImageManager,
-                    path: &Path, image_tag: ImageTag) -> Result<Image, String> {
-    use crate::image_definition::ImageDefinition;
-
-    let image_definition = ImageDefinition::parse_file_without_context(
-        Path::new(path)
-    ).map_err(|err| err.to_string())?;
-
-    image_manager.build_image(BuildRequest {
-        build_context: Path::new("").to_path_buf(),
-        image_definition,
-        tag: image_tag,
-        force: false,
-    }).map_err(|err| err.to_string())
-}
-
-fn create_registry_config(address: std::net::SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
-    use crate::registry::RegistryConfig;
-    use crate::registry::auth::AccessRight;
-
+fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
     RegistryConfig {
         data_path: tmp_registry_folder.to_path_buf(),
         address,

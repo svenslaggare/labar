@@ -67,17 +67,7 @@ impl AddAssign for DataSize {
     }
 }
 
-#[allow(dead_code)]
-pub fn get_temp_folder() -> PathBuf {
-    let named_temp_folder = tempfile::Builder::new()
-        .suffix(".labar")
-        .tempfile().unwrap();
-
-    named_temp_folder.path().to_owned()
-}
-
-pub fn clean_path<P>(path: P) -> PathBuf where P: AsRef<Path>,
-{
+pub fn clean_path<P>(path: P) -> PathBuf where P: AsRef<Path> {
     // From: https://github.com/danreeves/path-clean/
     let mut out = Vec::new();
 

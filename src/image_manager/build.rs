@@ -226,13 +226,12 @@ fn create_hash(input: &str) -> String {
 
 #[test]
 fn test_build() {
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -240,7 +239,7 @@ fn test_build() {
     let build_manager = BuildManager::new(config, printer);
     let mut session = state_manager.session().unwrap();
 
-    let result = build_test_image(
+    let result = super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -259,21 +258,16 @@ fn test_build() {
     assert_eq!(image.hash, result.hash);
 
     assert_eq!(layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(), Some(result.hash));
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
 }
 
 #[test]
 fn test_build_with_cache1() {
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -282,7 +276,7 @@ fn test_build_with_cache1() {
     let mut session = state_manager.session().unwrap();
 
     // Build first time
-    let first_result = build_test_image(
+    let first_result = super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -293,7 +287,7 @@ fn test_build_with_cache1() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let second_result = build_test_image(
+    let second_result = super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -317,22 +311,17 @@ fn test_build_with_cache1() {
         layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(),
         Some(second_result.image.hash)
     );
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
 }
 
 #[test]
 fn test_build_with_cache2() {
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
     use crate::image::{LinkType};
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -340,7 +329,7 @@ fn test_build_with_cache2() {
     let build_manager = BuildManager::new(config, printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    let tmp_content_file = tmp_dir.join("test.txt");
+    let tmp_content_file = tmp_folder.owned().join("test.txt");
     std::fs::write(&tmp_content_file, "Hello, World!").unwrap();
 
     // Build first time
@@ -365,7 +354,7 @@ fn test_build_with_cache2() {
         &mut session,
         &mut layer_manager,
         BuildRequest {
-            build_context: tmp_dir.clone(),
+            build_context: tmp_folder.owned(),
             image_definition: image_definition.clone(),
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
@@ -380,7 +369,7 @@ fn test_build_with_cache2() {
         &mut session,
         &mut layer_manager,
         BuildRequest {
-            build_context: tmp_dir.clone(),
+            build_context: tmp_folder.owned(),
             image_definition: image_definition.clone(),
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
@@ -410,7 +399,7 @@ fn test_build_with_cache2() {
         &mut session,
         &mut layer_manager,
         BuildRequest {
-            build_context: tmp_dir.clone(),
+            build_context: tmp_folder.owned(),
             image_definition,
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
@@ -422,21 +411,16 @@ fn test_build_with_cache2() {
     assert_eq!(ImageTag::from_str("test").unwrap(), third_result.image.tag);
     assert_ne!(first_result.image.hash, third_result.image.hash);
     assert_eq!(1, third_result.built_layers);
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
 }
 
 #[test]
 fn test_build_with_image_ref() {
-    use crate::helpers;
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_dir = helpers::get_temp_folder();
-    let config = ImageManagerConfig::with_base_folder(tmp_dir.clone());
+    let tmp_folder = super::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
     let state_manager = StateManager::new(&config.base_folder()).unwrap();
@@ -444,7 +428,7 @@ fn test_build_with_image_ref() {
     let build_manager = BuildManager::new(config, printer);
     let mut session = state_manager.session().unwrap();
 
-    build_test_image(
+    super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -452,7 +436,7 @@ fn test_build_with_image_ref() {
         ImageTag::from_str("test").unwrap()
     ).unwrap();
 
-    let result = build_test_image(
+    let result = super::test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -471,31 +455,4 @@ fn test_build_with_image_ref() {
     assert_eq!(image.hash, result.hash);
 
     assert_eq!(layer_manager.get_image_hash(&session, &ImageTag::from_str("that").unwrap()).unwrap(), Some(result.hash));
-
-    #[allow(unused_must_use)] {
-        std::fs::remove_dir_all(&tmp_dir);
-    }
-}
-
-#[cfg(test)]
-fn build_test_image(session: &mut StateSession,
-                    layer_manager: &mut LayerManager,
-                    build_manager: &BuildManager,
-                    path: &Path,
-                    image_tag: ImageTag) -> Result<BuildResult, String> {
-    use crate::image_definition::ImageDefinition;
-    use crate::image_manager::BuildRequest;
-
-    let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
-
-    build_manager.build_image(
-        session,
-        layer_manager,
-        BuildRequest {
-            build_context: Path::new("").to_path_buf(),
-            image_definition,
-            tag: image_tag,
-            force: false,
-        }
-    ).map_err(|err| err.to_string())
 }
