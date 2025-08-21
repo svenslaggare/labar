@@ -8,17 +8,17 @@ use crate::image_manager::layer::{LayerManager};
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
 use crate::image::{Image, Layer, LayerOperation};
-use crate::image_manager::printing::BoxPrinter;
+use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 
 pub struct BuildManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter
+    printer: PrinterRef
 }
 
 impl BuildManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> BuildManager {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> BuildManager {
         BuildManager {
             config,
             printer

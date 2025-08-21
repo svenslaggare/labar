@@ -8,14 +8,14 @@ use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest};
 use crate::helpers::DataSize;
-use crate::image_manager::printing::BoxPrinter;
+use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct ImageManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter,
+    printer: PrinterRef,
 
     state_manager: StateManager,
     layer_manager: LayerManager,
@@ -25,11 +25,11 @@ pub struct ImageManager {
 }
 
 impl ImageManager {
-    pub fn new(printer: BoxPrinter) -> ImageManagerResult<ImageManager> {
+    pub fn new(printer: PrinterRef) -> ImageManagerResult<ImageManager> {
         ImageManager::with_config(ImageManagerConfig::new(), printer)
     }
 
-    pub fn with_config(config: ImageManagerConfig, printer: BoxPrinter) -> ImageManagerResult<ImageManager> {
+    pub fn with_config(config: ImageManagerConfig, printer: PrinterRef) -> ImageManagerResult<ImageManager> {
         let state_manager = StateManager::new(&config.base_folder)?;
 
         Ok(

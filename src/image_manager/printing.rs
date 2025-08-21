@@ -4,7 +4,7 @@ pub trait Printer {
     fn println(&self, line: &str);
 }
 
-pub type BoxPrinter = Arc<dyn Printer + Send + Sync>;
+pub type PrinterRef = Arc<dyn Printer + Send + Sync>;
 
 pub struct ConsolePrinter {
 

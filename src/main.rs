@@ -18,7 +18,7 @@ use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{BoxPrinter, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest};
+use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password};
 use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
@@ -417,7 +417,7 @@ async fn main() -> Result<(), String> {
     Ok(())
 }
 
-fn create_image_manager(file_config: &FileConfig, printer: BoxPrinter) -> ImageManager {
+fn create_image_manager(file_config: &FileConfig, printer: PrinterRef) -> ImageManager {
     ImageManager::with_config(
         file_config.image_manager.clone(),
         printer.clone()

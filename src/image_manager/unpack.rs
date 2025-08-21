@@ -16,7 +16,7 @@ use crate::helpers::clean_path;
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
-use crate::image_manager::printing::{BoxPrinter};
+use crate::image_manager::printing::{PrinterRef};
 use crate::image_manager::state::StateSession;
 use crate::reference::{ImageId, Reference};
 
@@ -41,11 +41,11 @@ impl Unpacking {
 
 pub struct UnpackManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter
+    printer: PrinterRef
 }
 
 impl UnpackManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> UnpackManager {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> UnpackManager {
         UnpackManager {
             config,
             printer
@@ -400,11 +400,11 @@ impl Unpacker for StandardUnpacker {
 }
 
 pub struct DryRunUnpacker {
-    printer: BoxPrinter
+    printer: PrinterRef
 }
 
 impl DryRunUnpacker {
-    pub fn new(printer: BoxPrinter) -> DryRunUnpacker {
+    pub fn new(printer: PrinterRef) -> DryRunUnpacker {
         DryRunUnpacker {
             printer
         }

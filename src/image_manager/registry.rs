@@ -11,7 +11,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{BoxPrinter, ImageManagerConfig};
+use crate::image_manager::{PrinterRef, ImageManagerConfig};
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 use crate::registry::model;
@@ -21,11 +21,11 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 
 pub struct RegistryManager {
     config: ImageManagerConfig,
-    printer: BoxPrinter
+    printer: PrinterRef
 }
 
 impl RegistryManager {
-    pub fn new(config: ImageManagerConfig, printer: BoxPrinter) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> RegistryManager {
         RegistryManager {
             config: config.clone(),
             printer
