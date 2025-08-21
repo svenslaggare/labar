@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Instant};
 
@@ -44,31 +45,7 @@ pub async fn run(config: RegistryConfig) {
         println!("Failed to setting up logging: {}", err);
     }
 
-    let (cert_path, key_path) = match (config.ssl_cert_path.as_ref(), config.ssl_key_path.as_ref()) {
-        (Some(cert_path), Some(key_path)) => {
-            info!("Using specified SSL certificate.");
-            (cert_path.clone(), key_path.clone())
-        }
-        _ => {
-            let cert_path = config.data_path.join("cert.pem");
-            let key_path = config.data_path.join("key.pem");
-
-            if !cert_path.exists() || !key_path.exists() {
-                info!("Generating SSL certificate...");
-                let subject_alt_names = vec!["localhost".to_string()];
-                let CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(subject_alt_names).unwrap();
-
-                std::fs::create_dir_all(&config.data_path).unwrap();
-                std::fs::write(&cert_path, cert.pem()).unwrap();
-                std::fs::write(&key_path, signing_key.serialize_pem()).unwrap();
-            }
-
-            info!("Using auto-generated SSL certificate.");
-
-            (cert_path, key_path)
-        }
-    };
-
+    let (cert_path, key_path) = get_certificate(&config);
     let tls_config = RustlsConfig::from_pem_chain_file(cert_path, key_path).await.unwrap();
 
     let state = AppState::new(config);
@@ -91,7 +68,11 @@ pub async fn run(config: RegistryConfig) {
 
     if let Some(upstream_config) = state.config.upstream.as_ref() {
         let mut image_manager = create_image_manager(&state, &AuthToken);
-        image_manager.login(&upstream_config.hostname, &upstream_config.username, &upstream_config.password).await.unwrap();
+        image_manager.login(
+            &upstream_config.hostname,
+            &upstream_config.username,
+            &upstream_config.password
+        ).await.unwrap();
     }
 
     let state_clone = state.clone();
@@ -120,6 +101,33 @@ pub async fn run(config: RegistryConfig) {
         .serve(app.into_make_service())
         .await
         .unwrap();
+}
+
+fn get_certificate(config: &RegistryConfig) -> (PathBuf, PathBuf) {
+    match (config.ssl_cert_path.as_ref(), config.ssl_key_path.as_ref()) {
+        (Some(cert_path), Some(key_path)) => {
+            info!("Using specified SSL certificate.");
+            (cert_path.clone(), key_path.clone())
+        }
+        _ => {
+            let cert_path = config.data_path.join("cert.pem");
+            let key_path = config.data_path.join("key.pem");
+
+            if !cert_path.exists() || !key_path.exists() {
+                info!("Generating SSL certificate...");
+                let subject_alt_names = vec!["localhost".to_string()];
+                let CertifiedKey { cert, signing_key } = rcgen::generate_simple_self_signed(subject_alt_names).unwrap();
+
+                std::fs::create_dir_all(&config.data_path).unwrap();
+                std::fs::write(&cert_path, cert.pem()).unwrap();
+                std::fs::write(&key_path, signing_key.serialize_pem()).unwrap();
+            }
+
+            info!("Using auto-generated SSL certificate.");
+
+            (cert_path, key_path)
+        }
+    }
 }
 
 pub struct AppState {
