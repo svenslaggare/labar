@@ -84,13 +84,13 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
+    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<usize> {
         let mut session = self.state_manager.pooled_session()?;
 
         if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
-            self.garbage_collect()?;
-            Ok(())
+            let removed_layers = self.garbage_collect()?;
+            Ok(removed_layers)
         } else {
             Err(ImageManagerError::ReferenceNotFound { reference: Reference::ImageTag(tag.clone()) })
         }
@@ -430,8 +430,7 @@ impl ImageManager {
 
             if self.layer_manager.layer_exist(&session, &image.image.hash)? {
                 let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
-                let image = Image::new(image.image.hash, new_tag);
-                self.insert_or_replace_image(image.clone())?;
+                self.insert_or_replace_image(Image::new(image.image.hash, new_tag))?;
             }
         }
 

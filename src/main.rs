@@ -348,7 +348,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             match command {
                 RegistryCommandLineInput::Run { config_file } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
-                    registry::run(registry_config).await;
+                    registry::run(registry_config).await.map_err(|err| format!("{}", err))?;
                 }
                 RegistryCommandLineInput::RemoveImage { config_file, tag } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
