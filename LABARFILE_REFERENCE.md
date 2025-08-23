@@ -30,7 +30,7 @@ Merges the referred to image into the current image.
 * `IMAGE test:latest`
 
 ## BEGIN LAYER
-Creates a new layer. All operations within the layer block will be considered to be one operation.
+Creates a new layer. All operations within the layer block will be part of the same layer.
 
 **Examples**:
 
