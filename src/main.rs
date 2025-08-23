@@ -386,12 +386,12 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     }
                 }
 
-                new_file_config.save_to_file(&get_config_file())?;
+                new_file_config.save_to_file(&FileConfig::default_path())?;
 
                 println!("New config:");
                 print_config(&new_file_config);
             } else {
-                println!("Config file: {}", get_config_file().display());
+                println!("Config file: {}", FileConfig::default_path().display());
                 print_config(&file_config);
             }
         }
@@ -406,7 +406,7 @@ async fn main() -> Result<(), String> {
         return Ok(());
     }
 
-    let file_config = FileConfig::from_file(&get_config_file()).unwrap_or(FileConfig::default());
+    let file_config = FileConfig::from_default().unwrap_or(FileConfig::default());
     let command_line_input = CommandLineInput::from_args();
 
     if let Err(err) = main_run(file_config, command_line_input).await {
@@ -449,6 +449,14 @@ impl FileConfig {
 }
 
 impl FileConfig {
+    pub fn from_default() -> Result<FileConfig, String> {
+        FileConfig::from_file(&FileConfig::default_path())
+    }
+
+    pub fn default_path() -> PathBuf {
+        dirs::home_dir().unwrap().join(".labar").join("config.toml")
+    }
+
     pub fn from_file(path: &Path) -> Result<FileConfig, String> {
         let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
         toml::from_str(&content).map_err(|err| format!("{}", err))
@@ -468,10 +476,6 @@ impl Default for FileConfig {
             image_manager: ImageManagerConfig::new()
         }
     }
-}
-
-fn get_config_file() -> PathBuf {
-    dirs::home_dir().unwrap().join(".labar").join("config.toml")
 }
 
 fn transform_registry_result<T>(result: ImageManagerResult<T>) -> Result<T, String> {
