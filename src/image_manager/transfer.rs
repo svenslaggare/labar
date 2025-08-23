@@ -74,11 +74,15 @@ impl TransferManager {
     pub fn import_image(&self,
                         session: &mut StateSession,
                         layer_manager: &LayerManager,
-                        path: &Path) -> ImageManagerResult<()> {
+                        path: &Path) -> ImageManagerResult<ImportResult> {
         let file = File::open(path)
             .map_err(|err| ImageManagerError::FileIOError { message: format!("Failed to open archive file due to: {}", err) })?;
-
         let mut archive = ZipArchive::new(BufReader::new(file))?;
+
+        let mut import_result = ImportResult {
+            layers: Vec::new(),
+            images: Vec::new()
+        };
 
         for file_name in archive.file_names().map(|x| x.to_owned()).collect::<Vec<String>>() {
             let parts = file_name.split("/").collect::<Vec<_>>();
@@ -118,6 +122,7 @@ impl TransferManager {
                 }
 
                 layer_manager.insert_layer(session, layer)?;
+                import_result.layers.push(hash.clone());
             }
         }
 
@@ -127,10 +132,17 @@ impl TransferManager {
         for image in images {
             layer_manager.insert_or_replace_image(session, image.clone())?;
             self.printer.println(&format!("Imported image {} ({}).", image.tag, image.hash));
+            import_result.images.push(image);
         }
 
-        Ok(())
+        Ok(import_result)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportResult {
+    pub layers: Vec<ImageId>,
+    pub images: Vec<Image>
 }
 
 #[test]
@@ -200,6 +212,10 @@ fn test_export_import() {
         );
 
         assert!(import_result.is_ok(), "{}", import_result.unwrap_err());
+        let import_result = import_result.unwrap();
+        assert_eq!(1, import_result.images.len());
+        assert_eq!(3, import_result.layers.len());
+
         for layer in expected_layers {
             assert!(layer_manager.layer_exist(&session, &layer).unwrap(), "Layer {} does not exist", layer);
         }
