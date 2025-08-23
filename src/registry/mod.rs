@@ -584,7 +584,7 @@ fn get_pending_upload_layer_by_id(state_session: &StateSession, upload_id: &str)
 }
 
 fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
-    ImageManager::with_config(
+    ImageManager::new(
         state.config.image_manager_config(),
         EmptyPrinter::new()
     ).unwrap()

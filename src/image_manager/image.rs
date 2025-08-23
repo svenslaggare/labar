@@ -25,11 +25,7 @@ pub struct ImageManager {
 }
 
 impl ImageManager {
-    pub fn new(printer: PrinterRef) -> ImageManagerResult<ImageManager> {
-        ImageManager::with_config(ImageManagerConfig::new(), printer)
-    }
-
-    pub fn with_config(config: ImageManagerConfig, printer: PrinterRef) -> ImageManagerResult<ImageManager> {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> ImageManagerResult<ImageManager> {
         let state_manager = StateManager::new(&config.base_folder)?;
 
         Ok(
@@ -580,7 +576,7 @@ fn test_build() {
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         let result = super::test_helpers::build_image(
             &mut image_manager,
@@ -617,7 +613,7 @@ fn test_remove_image1() {
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
 
-    let mut image_manager = ImageManager::with_config(
+    let mut image_manager = ImageManager::new(
         config,
         printer
     ).unwrap();
@@ -652,7 +648,7 @@ fn test_remove_image2() {
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
 
-    let mut image_manager = ImageManager::with_config(
+    let mut image_manager = ImageManager::new(
         config,
         printer
     ).unwrap();
@@ -691,7 +687,7 @@ fn test_list_content() {
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         super::test_helpers::build_image(
             &mut image_manager,

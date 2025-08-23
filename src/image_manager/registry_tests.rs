@@ -26,7 +26,7 @@ async fn test_pull() {
     // Build image inside registry
     let image = {
         let config = ImageManagerConfig::with_base_folder(tmp_registry_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         let image = super::test_helpers::build_image(
             &mut image_manager,
@@ -47,7 +47,7 @@ async fn test_pull() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         // Login
         let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
@@ -89,7 +89,7 @@ async fn test_push_pull() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         // Login
         let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
@@ -157,7 +157,7 @@ async fn test_push_pull_with_ref() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         // Login
         let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
@@ -229,7 +229,7 @@ async fn test_sync() {
     // Build image inside primary registry
     let mut image = {
         let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         let image = super::test_helpers::build_image(
             &mut image_manager,
@@ -274,7 +274,7 @@ async fn test_sync() {
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         // Login
         let login_result = image_manager.login(&secondary_address.to_string(), "guest", "guest").await;
@@ -323,7 +323,7 @@ async fn test_pull_through() {
     // Build image inside primary registry
     let mut image = {
         let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.owned());
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         let image = super::test_helpers::build_image(
             &mut image_manager,
@@ -369,7 +369,7 @@ async fn test_pull_through() {
     {
         let mut config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
         config.upstream_pull_check = 0.05;
-        let mut image_manager = ImageManager::with_config(config, ConsolePrinter::new()).unwrap();
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
 
         // Login
         let login_result = image_manager.login(&secondary_address.to_string(), "guest", "guest").await;

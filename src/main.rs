@@ -353,7 +353,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 RegistryCommandLineInput::RemoveImage { config_file, tag } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
 
-                    let mut image_manager = ImageManager::with_config(registry_config.image_manager_config(), printer.clone()).unwrap();
+                    let mut image_manager = ImageManager::new(registry_config.image_manager_config(), printer.clone()).unwrap();
                     image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
                 }
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights } => {
@@ -418,10 +418,12 @@ async fn main() -> Result<(), String> {
 }
 
 fn create_image_manager(file_config: &FileConfig, printer: PrinterRef) -> ImageManager {
-    ImageManager::with_config(
+    ImageManager::new(
         file_config.image_manager.clone(),
         printer.clone()
-    ).unwrap_or_else(|_| ImageManager::new(printer.clone()).unwrap())
+    ).unwrap_or_else(|_|
+        ImageManager::new(ImageManagerConfig::new(), printer.clone()).unwrap()
+    )
 }
 
 fn create_write_lock(_file_config: &FileConfig) -> FileLock {
