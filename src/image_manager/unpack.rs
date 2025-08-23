@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::fs::{File};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local};
@@ -304,16 +304,7 @@ impl UnpackManager {
                         let mut reader = BufReader::new(File::open(&abs_source_path)?);
 
                         writer.start_file_from_path(path, SimpleFileOptions::default())?;
-
-                        let mut buffer = vec![0; 4096];
-                        loop {
-                            let count = reader.read(&mut buffer)?;
-                            if count == 0 {
-                                break;
-                            }
-
-                            writer.write_all(&buffer[..count])?;
-                        }
+                        std::io::copy(&mut reader, writer)?;
                     }
                     LayerOperation::Directory { path } => {
                         writer.add_directory_from_path(path, SimpleFileOptions::default())?

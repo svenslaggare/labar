@@ -9,6 +9,7 @@ mod printing;
 mod registry;
 mod state;
 mod image;
+mod transfer;
 
 #[cfg(test)]
 mod test_helpers;
@@ -19,10 +20,10 @@ mod registry_tests;
 #[derive(Debug)]
 pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
+    InvalidImageId { error: String },
     ReferenceNotFound { reference: Reference },
     FileIOError { message: String },
     FileNotInBuildContext { path: String },
-    ZIPError(ZipError),
     UnpackingExist { path: String },
     UnpackingNotFound { path: String },
     FolderNotEmpty { path: String },
@@ -30,7 +31,10 @@ pub enum ImageManagerError {
     NoRegistryDefined,
     SelfReferential,
     InvalidUnpack,
+    InvalidImageImport,
+    ZIPError(ZipError),
     Sql(rusqlite::Error),
+    Serialization(serde_json::Error),
     OtherError { message: String }
 }
 
@@ -64,11 +68,20 @@ impl From<rusqlite::Error> for ImageManagerError {
     }
 }
 
+impl From<serde_json::Error> for ImageManagerError {
+    fn from(value: serde_json::Error) -> Self {
+        ImageManagerError::Serialization(value)
+    }
+}
+
 impl std::fmt::Display for ImageManagerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ImageManagerError::ImageParser { error } => {
                 write!(f, "Image parser: {}", error)
+            }
+            ImageManagerError::InvalidImageId { error } => {
+                write!(f, "Invalid image id: {}", error)
             }
             ImageManagerError::ReferenceNotFound { reference } => {
                 write!(f, "Could not find the reference: {}.", reference)
@@ -103,8 +116,14 @@ impl std::fmt::Display for ImageManagerError {
             ImageManagerError::InvalidUnpack => {
                 write!(f, "Invalid unpack")
             }
+            ImageManagerError::InvalidImageImport => {
+                write!(f, "Invalid image to import")
+            }
             ImageManagerError::Sql(err) => {
                 write!(f, "SQL: {}", err)
+            }
+            ImageManagerError::Serialization(err) => {
+                write!(f, "Serialization: {}", err)
             }
             ImageManagerError::OtherError { message } => {
                 write!(f, "{}", message)

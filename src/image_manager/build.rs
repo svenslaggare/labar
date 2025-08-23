@@ -42,6 +42,7 @@ impl BuildManager {
 
         let num_layers = request.image_definition.layers.len();
         let mut built_layers = 0;
+        let mut image_layers = Vec::new();
 
         for (layer_index, layer_definition) in request.image_definition.layers.into_iter().enumerate() {
             self.printer.println(&format!("Step {}/{} : {}", layer_index + 1, num_layers, layer_definition.input_line));
@@ -50,6 +51,7 @@ impl BuildManager {
             let layer = self.create_layer(session, layer_manager, &request.build_context, layer_definition, &parent_hash)?;
             let hash = layer.hash.clone();
 
+            image_layers.push(layer.hash.clone());
             if self.build_layer(session, layer_manager, &request.build_context, layer, request.force)? {
                 built_layers += 1;
             }
@@ -70,6 +72,7 @@ impl BuildManager {
             BuildResult {
                 image,
                 built_layers,
+                layers: image_layers
             }
         )
     }
@@ -217,7 +220,9 @@ pub struct BuildRequest {
 pub struct BuildResult {
     pub image: Image,
     #[allow(dead_code)]
-    pub built_layers: usize
+    pub built_layers: usize,
+    #[allow(dead_code)]
+    pub layers: Vec<ImageId>
 }
 
 fn create_hash(input: &str) -> String {

@@ -11,6 +11,7 @@ use crate::helpers::DataSize;
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession};
+use crate::image_manager::transfer::TransferManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct ImageManager {
@@ -21,6 +22,7 @@ pub struct ImageManager {
     layer_manager: LayerManager,
     build_manager: BuildManager,
     unpack_manager: UnpackManager,
+    transfer_manager: TransferManager,
     registry_manager: RegistryManager
 }
 
@@ -37,6 +39,7 @@ impl ImageManager {
                 layer_manager: LayerManager::new(config.clone()),
                 build_manager: BuildManager::new(config.clone(), printer.clone()),
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
+                transfer_manager: TransferManager::new(config.clone(), printer.clone()),
                 registry_manager: RegistryManager::new(config.clone(), printer.clone()),
             }
         )
@@ -81,6 +84,18 @@ impl ImageManager {
     pub fn extract(&self, reference: &Reference, archive_path: &Path) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
         self.unpack_manager.extract(&session, &self.layer_manager, reference, archive_path)?;
+        Ok(())
+    }
+
+    pub fn export_image(&self, tag: &ImageTag, path: &Path) -> ImageManagerResult<()> {
+        let session = self.state_manager.pooled_session()?;
+        self.transfer_manager.export_image(&session, &self.layer_manager, tag, path)?;
+        Ok(())
+    }
+
+    pub fn import_image(&self, path: &Path) -> ImageManagerResult<()> {
+        let mut session = self.state_manager.pooled_session()?;
+        self.transfer_manager.import_image(&mut session, &self.layer_manager, path)?;
         Ok(())
     }
 

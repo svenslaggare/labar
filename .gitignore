@@ -7,3 +7,4 @@ registry*.toml
 scripts
 completions
 certificate
+*.zip

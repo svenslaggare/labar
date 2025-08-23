@@ -95,6 +95,18 @@ enum CommandLineInput {
         #[structopt(name="archive", help="The archive file to extract into")]
         archive: String,
     },
+    #[structopt(about="Exports an image to a file")]
+    ExportImage {
+        #[structopt(name="tag", help="The image to export")]
+        tag: ImageTag,
+        #[structopt(name="path", help="The archive file to export the image into")]
+        path: String
+    },
+    #[structopt(about="Imports an image from a file")]
+    ImportImage {
+        #[structopt(name="path", help="The image archive to import")]
+        path: String
+    },
     #[structopt(about="Removes layers not used")]
     Purge {
 
@@ -316,6 +328,16 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Extract { reference, archive } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.extract(&reference, Path::new(&archive)).map_err(|err| format!("{}", err))?;
+        }
+        CommandLineInput::ExportImage { tag, path } => {
+            let _write_lock = create_write_lock(&file_config);
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            image_manager.export_image(&tag, Path::new(&path)).map_err(|err| format!("{}", err))?;
+        }
+        CommandLineInput::ImportImage { path } => {
+            let _write_lock = create_write_lock(&file_config);
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            image_manager.import_image(Path::new(&path)).map_err(|err| format!("{}", err))?;
         }
         CommandLineInput::Purge {} => {
             let _write_lock = create_write_lock(&file_config);

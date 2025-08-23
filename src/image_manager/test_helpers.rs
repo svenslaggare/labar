@@ -63,6 +63,10 @@ impl TempFolder {
     pub fn owned(&self) -> PathBuf {
         self.path.clone()
     }
+
+    pub fn create(&self) -> std::io::Result<()> {
+        std::fs::create_dir_all(&self.path)
+    }
 }
 
 impl Deref for TempFolder {
