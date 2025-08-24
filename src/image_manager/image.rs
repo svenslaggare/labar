@@ -312,17 +312,17 @@ impl ImageManager {
     pub async fn pull(&mut self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<Image> {
         let session = self.state_manager.pooled_session()?;
 
-        let mut tag = tag.clone();
-        if tag.registry().is_none() {
-            tag = tag.set_registry_opt(default_registry);
+        let mut pull_tag = tag.clone();
+        if pull_tag.registry().is_none() {
+            pull_tag = pull_tag.set_registry_opt(default_registry);
         }
 
-        let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
+        let registry = pull_tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        self.printer.println(&format!("Pulling image {}", tag));
+        self.printer.println(&format!("Pulling image {}", pull_tag));
 
-        let image_metadata = self.resolve_image_in_registry_internal(&registry_session, &tag, true).await?;
+        let image_metadata = self.resolve_image_in_registry_internal(&registry_session, &pull_tag, true).await?;
 
         let mut stack = Vec::new();
         stack.push(image_metadata.image.hash.clone());
