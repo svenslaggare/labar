@@ -1,7 +1,6 @@
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use crate::image::Image;
 use crate::image_definition::ImageDefinition;
 use crate::image_manager::{BuildRequest, ImageManager, StateSession};
 use crate::image_manager::build::{BuildManager, BuildResult};
@@ -10,7 +9,7 @@ use crate::reference::ImageTag;
 
 pub fn build_image(image_manager: &mut ImageManager,
                    path: &Path,
-                   image_tag: ImageTag) -> Result<Image, String> {
+                   image_tag: ImageTag) -> Result<BuildResult, String> {
     use crate::image_definition::ImageDefinition;
 
     let image_definition = ImageDefinition::parse_file_without_context(

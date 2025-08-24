@@ -51,11 +51,14 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
 
     let app = Router::new()
         .route("/", get(index))
+
         .route("/verify_login", get(verify_login))
+
         .route("/images", get(list_images))
         .route("/images", post(set_image))
         .route("/images/{*tag}", get(resolve_image))
         .route("/images/{*tag}", delete(remove_image))
+
         .route("/layers/{layer}/exists", get(get_layer_exists))
         .route("/layers/{layer}/manifest", get(get_layer_manifest))
         .route("/layers/{layer}/download/{index}", get(download_layer))

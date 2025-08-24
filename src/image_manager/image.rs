@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet};
+use std::collections::{HashSet};
 use std::ops::Deref;
 use std::path::Path;
 
@@ -6,7 +6,7 @@ use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
-use crate::image_manager::build::{BuildManager, BuildRequest};
+use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
 use crate::helpers::DataSize;
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
@@ -53,10 +53,10 @@ impl ImageManager {
         Ok(self.state_manager.pooled_session()?)
     }
 
-    pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<Image> {
+    pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<BuildResult> {
         let mut session = self.state_manager.pooled_session()?;
 
-        let image = self.build_manager.build_image(&mut session, &mut self.layer_manager, request)?.image;
+        let image = self.build_manager.build_image(&mut session, &mut self.layer_manager, request)?;
         Ok(image)
     }
 
@@ -65,6 +65,7 @@ impl ImageManager {
 
         let layer = self.layer_manager.get_layer(&session, reference)?;
         let image = Image::new(layer.hash.clone(), tag.clone());
+
         self.layer_manager.insert_or_replace_image(&mut session, image.clone())?;
         Ok(image)
     }
@@ -116,7 +117,7 @@ impl ImageManager {
 
         let mut removed_layers = 0;
 
-        let mut used_layers = BTreeSet::new();
+        let mut used_layers = HashSet::new();
         for hash in self.get_hard_references(&session)? {
             self.layer_manager.find_used_layers(&session, &hash, &mut used_layers)?;
         }
@@ -310,12 +311,9 @@ impl ImageManager {
     }
 
     pub async fn pull(&mut self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<Image> {
-        let session = self.state_manager.pooled_session()?;
+        let pull_tag = tag.clone().set_registry_opt_if_empty(default_registry);
 
-        let mut pull_tag = tag.clone();
-        if pull_tag.registry().is_none() {
-            pull_tag = pull_tag.set_registry_opt(default_registry);
-        }
+        let session = self.state_manager.pooled_session()?;
 
         let registry = pull_tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
         let registry_session = RegistrySession::new(&session, registry)?;
@@ -360,14 +358,9 @@ impl ImageManager {
     }
 
     pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
+        let tag = tag.clone().set_registry_opt_if_empty(default_registry);
+
         let session = self.state_manager.pooled_session()?;
-
-        let top_layer = self.get_layer(&tag.clone().to_ref())?;
-
-        let mut tag = tag.clone();
-        if tag.registry().is_none() {
-            tag = tag.set_registry_opt(default_registry);
-        }
 
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
         let registry_session = RegistrySession::new(&session, registry)?;
@@ -375,6 +368,7 @@ impl ImageManager {
         self.printer.println(&format!("Pushing image {}", tag));
 
         let mut stack = Vec::new();
+        let top_layer = self.get_layer(&tag.clone().to_ref())?;
         stack.push(top_layer.hash.clone());
 
         let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
@@ -598,7 +592,7 @@ fn test_build() {
             ImageTag::from_str("test").unwrap()
         );
         assert!(result.is_ok());
-        let result = result.unwrap();
+        let result = result.unwrap().image;
 
         assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
 

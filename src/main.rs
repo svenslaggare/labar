@@ -32,7 +32,7 @@ enum CommandLineInput {
         file: String,
         #[structopt(name="tag", help="The tag of the image")]
         tag: ImageTag,
-        #[structopt(long, help="The build context")]
+        #[structopt(long, help="The build context. If not specified, defaults to current directory")]
         context: Option<PathBuf>,
         #[structopt(long, help="The build arguments on format key=value")]
         arguments: Vec<String>,
@@ -197,7 +197,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 }
             }
 
-            println!("Building image: {}", tag);
+            println!("Building image {}...", tag);
             let start_time = Instant::now();
             let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
             let image_definition = ImageDefinition::parse(
@@ -212,7 +212,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 force,
             };
 
-            let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?;
+            let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?.image;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }

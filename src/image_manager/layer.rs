@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet};
+use std::collections::{HashSet};
 
 use crate::helpers::DataSize;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
@@ -52,7 +52,8 @@ impl LayerManager {
 
     pub fn find_used_layers(&self,
                             session: &StateSession,
-                            hash: &ImageId, used_layers: &mut BTreeSet<ImageId>) -> ImageManagerResult<()> {
+                            hash: &ImageId,
+                            used_layers: &mut HashSet<ImageId>) -> ImageManagerResult<()> {
         used_layers.insert(hash.clone());
         let layer = self.get_layer_by_hash(session, hash)?;
 

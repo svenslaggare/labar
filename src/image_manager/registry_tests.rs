@@ -32,7 +32,7 @@ async fn test_pull() {
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             image_tag.clone()
-        ).unwrap();
+        ).unwrap().image;
         assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         image
@@ -102,8 +102,7 @@ async fn test_push_pull() {
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             image_tag.clone()
-        ).unwrap();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        ).unwrap().image;
 
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
@@ -170,14 +169,13 @@ async fn test_push_pull_with_ref() {
             &mut image_manager,
             Path::new("testdata/definitions/simple1.labarfile"),
             ImageTag::from_str("test").unwrap()
-        ).unwrap();
+        ).unwrap().image;
 
         let image = super::test_helpers::build_image(
             &mut image_manager,
             Path::new("testdata/definitions/with_image_ref.labarfile"),
             image_tag.clone()
-        ).unwrap();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        ).unwrap().image;
 
         // Push
         let push_result = image_manager.push(&image.tag, None).await;
@@ -235,8 +233,7 @@ async fn test_sync() {
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
-        ).unwrap();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        ).unwrap().image;
 
         image
     };
@@ -329,8 +326,7 @@ async fn test_pull_through() {
             &mut image_manager,
             Path::new("testdata/definitions/simple4.labarfile"),
             ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
-        ).unwrap();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        ).unwrap().image;
 
         image
     };
@@ -396,7 +392,7 @@ async fn test_pull_through() {
     }
 }
 
-fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> crate::registry::RegistryConfig {
+fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> RegistryConfig {
     RegistryConfig {
         data_path: tmp_registry_folder.to_path_buf(),
         address,

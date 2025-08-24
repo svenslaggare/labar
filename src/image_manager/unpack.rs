@@ -175,11 +175,11 @@ impl UnpackManager {
 
                     self.printer.println(&format!("\t* Unpacking file {} -> {}", path, destination_path.to_str().unwrap()));
 
-                    #[allow(unused_must_use)] {
-                        if let Some(parent_dir) = destination_path.parent() {
-                            unpacker.create_dir_all(parent_dir)?;
-                        }
+                    if let Some(parent_dir) = destination_path.parent() {
+                        unpacker.create_dir_all(parent_dir)?;
+                    }
 
+                    #[allow(unused_must_use)] {
                         unpacker.remove_file(&destination_path);
                     }
 
@@ -198,10 +198,7 @@ impl UnpackManager {
                 },
                 LayerOperation::Directory { path } => {
                     self.printer.println(&format!("\t* Creating directory {}", path));
-
-                    #[allow(unused_must_use)] {
-                        unpacker.create_dir_all(&unpack_folder.join(path))?;
-                    }
+                    unpacker.create_dir_all(&unpack_folder.join(path))?;
                 },
             }
         }

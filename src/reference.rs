@@ -152,6 +152,14 @@ impl ImageTag {
         }
     }
 
+    pub fn set_registry_opt_if_empty(self, registry: Option<&str>) -> Self {
+        if self.registry().is_none() {
+            self.set_registry_opt(registry)
+        } else {
+            self
+        }
+    }
+
     pub fn set_tag(mut self, tag: &str) -> Self {
         self.tag = tag.to_owned();
         self
