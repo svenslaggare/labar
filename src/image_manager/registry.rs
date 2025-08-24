@@ -45,22 +45,22 @@ impl RegistryManager {
     }
 
     pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
-        let http_client = create_http_client(&self.config)?;
+        let registry_session = RegistrySession {
+            registry: registry.to_owned(),
+            username: username.to_owned(),
+            password: password.to_owned()
+        };
+        let client = RegistryClient::new(&self.config, &registry_session)?;
 
-        let full_url = format!("https://{}/verify_login", registry);
-        let response = http_client.execute(
-            http_client
-                .get(full_url)
-                .basic_auth(&username, Some(&password)).build()?
-        ).await?;
-        RegistryError::from_response(response, "url: /verify_login".to_owned()).await?;
+        client.get_registry_text_response("verify_login").await?;
+
         Ok(())
     }
 
     pub async fn list_images(&self, registry: &RegistrySession) -> RegistryResult<Vec<ImageMetadata>> {
         let client = RegistryClient::new(&self.config, &registry)?;
 
-        let (response, _) = client.get_registry_text_response(&registry.registry, "images").await?;
+        let (response, _) = client.get_registry_text_response("images").await?;
         let images: Vec<ImageMetadata> = serde_json::from_str(&response)?;
         Ok(images)
     }
@@ -74,31 +74,30 @@ impl RegistryManager {
             format!("images/{}", tag)
         };
 
-        let (response, _) = client.get_registry_text_response(&registry.registry, &url).await?;
+        let (response, _) = client.get_registry_text_response(&url).await?;
         let image: ImageMetadata = serde_json::from_str(&response)?;
         Ok(image)
     }
 
     pub async fn get_layer_definition(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
-        let (layer, _) = Self::get_layer_definition_internal(&client, &registry.registry, &hash, false).await?;
+        let (layer, _) = Self::get_layer_definition_internal(&client, &hash, false).await?;
         Ok(layer)
     }
 
     pub async fn download_layer(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &registry.registry, &hash, true).await?;
+        let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &hash, true).await?;
         let layer_folder = self.config.get_layer_folder(&layer.hash);
 
         if pull_through {
-            self.wait_for_pull_through(&client, registry, hash).await?;
+            self.wait_for_pull_through(&client, hash).await?;
         }
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
-        async fn download_file(client: &RegistryClient,
-                               registry: &str,
+        async fn download_file(client: &RegistryClient<'_>,
                                hash: &ImageId,
                                local_source_path: PathBuf,
                                file_index: usize,
@@ -107,7 +106,7 @@ impl RegistryManager {
 
             let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
 
-            let response = client.get_registry_response(&registry, &format!("layers/{}/download/{}", hash, file_index)).await?;
+            let response = client.get_registry_response(&format!("layers/{}/download/{}", hash, file_index)).await?;
             let mut byte_stream = response.bytes_stream();
 
             let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
@@ -150,7 +149,6 @@ impl RegistryManager {
                     self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
                     download_operations.push(download_file(
                         &client,
-                        &registry.registry,
                         hash,
                         local_source_path,
                         *file_index,
@@ -169,8 +167,7 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    async fn get_layer_definition_internal(client: &RegistryClient,
-                                           registry: &str,
+    async fn get_layer_definition_internal(client: &RegistryClient<'_>,
                                            hash: &ImageId,
                                            can_pull_through: bool) -> Result<(Layer, bool), RegistryError> {
         let url = if can_pull_through {
@@ -179,7 +176,7 @@ impl RegistryManager {
             format!("layers/{}/manifest", hash)
         };
 
-        let (response, headers) = client.get_registry_text_response(registry, &url).await?;
+        let (response, headers) = client.get_registry_text_response(&url).await?;
         let layer: Layer = serde_json::from_str(&response)?;
 
         if &layer.hash != hash {
@@ -192,13 +189,12 @@ impl RegistryManager {
     }
 
     async fn wait_for_pull_through(&self,
-                                   client: &RegistryClient,
-                                   registry: &RegistrySession,
+                                   client: &RegistryClient<'_>,
                                    hash: &ImageId) -> Result<(), RegistryError> {
         self.printer.println("\t\t* Waiting for upstream to pull...");
         let t0 = std::time::Instant::now();
         while t0.elapsed().as_secs_f64() < self.config.max_wait_for_upstream_pull {
-            match Self::get_layer_exists(&client, &registry.registry, &hash).await {
+            match Self::get_layer_exists(&client, &hash).await {
                 Ok(exists) => {
                     if exists {
                         return Ok(());
@@ -215,10 +211,8 @@ impl RegistryManager {
         Err(RegistryError::FailToPullThrough)
     }
 
-    async fn get_layer_exists(client: &RegistryClient,
-                              registry: &str,
-                              hash: &ImageId) -> Result<bool, RegistryError> {
-        let (response, _) = client.get_registry_text_response(registry, &format!("layers/{}/exists", hash)).await?;
+    async fn get_layer_exists(client: &RegistryClient<'_>, hash: &ImageId) -> Result<bool, RegistryError> {
+        let (response, _) = client.get_registry_text_response(&format!("layers/{}/exists", hash)).await?;
         let layer_exists: LayerExists = serde_json::from_str(&response)?;
 
         Ok(layer_exists.exists)
@@ -228,7 +222,7 @@ impl RegistryManager {
         let client = RegistryClient::new(&self.config, registry)?;
 
         // Begin upload
-        let mut request = client.json_post_registry_response(&registry.registry, "layers/begin-upload").build()?;
+        let mut request = client.json_post_registry_response("layers/begin-upload").build()?;
         *request.body_mut() = Some(Body::from(serde_json::to_string(&layer)?));
         let response = client.execute(request).await?;
 
@@ -257,7 +251,6 @@ impl RegistryManager {
         for operation in &layer.operations {
             if let LayerOperation::File { source_path, .. } = operation {
                 let mut request = client.build_post_request(
-                    &registry.registry,
                     &format!("layers/{}/upload/{}", layer.hash, file_index)
                 )
                     .header(model::UPLOAD_ID_HEADER, upload_id.clone())
@@ -275,7 +268,7 @@ impl RegistryManager {
         }
 
         // Commit upload
-        let request = client.json_post_registry_response(&registry.registry, "layers/end-upload")
+        let request = client.json_post_registry_response("layers/end-upload")
             .header(model::UPLOAD_ID_HEADER, upload_id.clone())
             .build()?;
         let response = client.execute(request).await?;
@@ -298,7 +291,7 @@ impl RegistryManager {
     pub async fn upload_image(&self, registry: &RegistrySession, hash: &ImageId, tag: &ImageTag) -> RegistryResult<()> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let mut request = client.json_post_registry_response(&registry.registry, "images").build()?;
+        let mut request = client.json_post_registry_response("images").build()?;
 
         *request.body_mut() = Some(Body::from(serde_json::to_string(
             &ImageSpec {
@@ -336,19 +329,17 @@ impl RegistrySession {
     }
 }
 
-struct RegistryClient {
+struct RegistryClient<'a> {
     http_client: Client,
-    username: String,
-    password: String
+    session: &'a RegistrySession
 }
 
-impl RegistryClient {
-    pub fn new(config: &ImageManagerConfig, registry: &RegistrySession) -> RegistryResult<RegistryClient> {
+impl<'a> RegistryClient<'a> {
+    pub fn new(config: &ImageManagerConfig, registry: &'a RegistrySession) -> RegistryResult<RegistryClient<'a>> {
         Ok(
             RegistryClient {
                 http_client: create_http_client(config)?,
-                username: registry.username.clone(),
-                password: registry.password.clone()
+                session: registry
             }
         )
     }
@@ -357,36 +348,36 @@ impl RegistryClient {
         self.http_client.execute(request)
     }
 
-    pub async fn get_registry_text_response(&self, registry: &str, url: &str) -> RegistryResult<(String, HeaderMap)> {
-        let response = self.get_registry_response(registry, url).await?;
+    pub async fn get_registry_text_response(&self, url: &str) -> RegistryResult<(String, HeaderMap)> {
+        let response = self.get_registry_response(url).await?;
         let headers = response.headers().clone();
         let response = RegistryError::from_response(response, format!("url: /{}", url)).await?;
         Ok((response, headers))
     }
 
-    pub fn json_post_registry_response(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let request = self.build_post_request(registry, url);
+    pub fn json_post_registry_response(&self, url: &str) -> reqwest::RequestBuilder {
+        let request = self.build_post_request(url);
         request.header(reqwest::header::CONTENT_TYPE, "application/json")
     }
 
-    pub async fn get_registry_response(&self, registry: &str, url: &str) -> RegistryResult<Response> {
-        let request = self.build_get_request(registry, url);
+    pub async fn get_registry_response(&self, url: &str) -> RegistryResult<Response> {
+        let request = self.build_get_request(url);
         let response = self.http_client.execute(request.build()?).await.map_err(|err| RegistryError::Unavailable(err))?;
         Ok(response)
     }
 
-    pub fn build_get_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let full_url = format!("https://{}/{}", registry, url);
+    pub fn build_get_request(&self, url: &str) -> reqwest::RequestBuilder {
+        let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client.
             get(full_url)
-            .basic_auth(&self.username, Some(&self.password))
+            .basic_auth(&self.session.username, Some(&self.session.password))
     }
 
-    pub fn build_post_request(&self, registry: &str, url: &str) -> reqwest::RequestBuilder {
-        let full_url = format!("https://{}/{}", registry, url);
+    pub fn build_post_request(&self, url: &str) -> reqwest::RequestBuilder {
+        let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client
             .post(full_url)
-            .basic_auth(&self.username, Some(&self.password))
+            .basic_auth(&self.session.username, Some(&self.session.password))
     }
 }
 
