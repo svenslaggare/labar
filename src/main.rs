@@ -348,7 +348,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::Login { registry, username, password } => {
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.login(&registry, &username, &password).await.map_err(|err| format!("{}", err))?;
-            println!("Logged into registry {}.", registry);
+            println!("Logged into registry {} as {}.", registry, username);
         }
         CommandLineInput::Push { tag } => {
             let _write_lock = create_write_lock(&file_config);

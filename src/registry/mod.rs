@@ -571,7 +571,7 @@ fn setup_logging() -> Result<(), fern::InitError> {
         .format(|out, message, record| {
             out.finish(format_args!(
                 "[{} {} {}] {}",
-                 Local::now().format("%Y-%m-%d %T"),
+                Local::now().format("%Y-%m-%d %T"),
                 record.level(),
                 record.target(),
                 message
