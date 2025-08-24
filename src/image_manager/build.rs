@@ -130,10 +130,8 @@ impl BuildManager {
                     layer_definition: LayerDefinition,
                     parent_hash: &Option<ImageId>) -> ImageManagerResult<Layer> {
         let mut layer_operations = Vec::new();
-        let mut hash_input = String::new();
-        if let Some(parent_hash) = parent_hash.as_ref() {
-            hash_input += &parent_hash.to_string();
-        }
+        let mut layer_hash = LayerHash::new();
+        layer_hash.add_parent_hash(parent_hash.as_ref());
 
         for operation_definition in &layer_definition.operations {
             match operation_definition {
@@ -143,7 +141,7 @@ impl BuildManager {
                         return Err(ImageManagerError::ReferenceNotFound { reference: reference.clone() });
                     }
 
-                    hash_input += &hash.to_string();
+                    layer_hash.add_image_ref(&hash);
                     layer_operations.push(LayerOperation::Image { hash });
                 }
                 LayerOperationDefinition::File { path, source_path, link_type, writable } => {
@@ -180,31 +178,61 @@ impl BuildManager {
                         writable: *writable
                     });
 
-                    let file_hash = format!(
-                        "{}{}{}{}{}",
-                        path,
-                        relative_source_path,
-                        content_hash,
-                        link_type,
-                        writable
-                    );
-
-                    hash_input += &file_hash;
+                    if let Some(last) = layer_operations.last() {
+                        layer_hash.add_file(last);
+                    }
                 },
                 LayerOperationDefinition::Directory { path } => {
                     layer_operations.push(LayerOperation::Directory { path: path.clone() });
-                    hash_input += path;
+                    layer_hash.add_directory(path);
                 },
             }
         }
 
-        Ok(
-            Layer::new(
-                parent_hash.clone(),
-                ImageId::from_str(&create_hash(&hash_input)).unwrap(),
-                layer_operations
-            )
-        )
+        Ok(Layer::new(parent_hash.clone(), layer_hash.finalize(), layer_operations))
+    }
+}
+
+struct LayerHash {
+    hash_input: String
+}
+
+impl LayerHash {
+    pub fn new() -> LayerHash {
+        LayerHash {
+            hash_input: String::new()
+        }
+    }
+
+    pub fn add_parent_hash(&mut self, parent_hash: Option<&ImageId>) {
+        if let Some(parent_hash) = parent_hash.as_ref() {
+            self.add_image_ref(parent_hash);
+        }
+    }
+
+    pub fn add_image_ref(&mut self, hash: &ImageId) {
+        self.hash_input += &hash.to_string();
+    }
+
+    pub fn add_directory(&mut self, path: &str) {
+        self.hash_input += path;
+    }
+
+    pub fn add_file(&mut self, operation: &LayerOperation) {
+        if let LayerOperation::File { path, source_path, content_hash, link_type, writable } = operation {
+            self.hash_input += &format!(
+                "{}{}{}{}{}",
+                path,
+                source_path,
+                content_hash,
+                link_type,
+                writable
+            );
+        }
+    }
+
+    pub fn finalize(self) -> ImageId {
+        ImageId::from_str(&create_hash(&self.hash_input)).unwrap()
     }
 }
 
@@ -255,6 +283,7 @@ fn test_build() {
     let result = result.unwrap().image;
 
     assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
+    assert_eq!(ImageId::from_str("de9b8feb3088ddcf31706a868de9d059161a3069b52a902fe0fed34af30ac38b").unwrap(), result.hash);
 
     let session = state_manager.session().unwrap();
     let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
