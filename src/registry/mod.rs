@@ -472,6 +472,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             }
 
             if &content_hasher.finalize() != content_hash {
+                tokio::fs::remove_file(&temp_file_path).await?;
                 return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
             }
 
