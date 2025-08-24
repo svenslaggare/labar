@@ -170,17 +170,16 @@ impl BuildManager {
                         .map_err(|_| ImageManagerError::FileNotInBuildContext { path: source_path.clone() })?;
                     let relative_source_path = relative_source_path.to_str().unwrap();
 
-                    layer_operations.push(LayerOperation::File {
+                    let operation = LayerOperation::File {
                         path: path.clone(),
                         source_path: relative_source_path.to_owned(),
                         content_hash: content_hash.clone(),
                         link_type: *link_type,
                         writable: *writable
-                    });
+                    };
 
-                    if let Some(last) = layer_operations.last() {
-                        layer_hash.add_file(last);
-                    }
+                    layer_hash.add_file(&operation);
+                    layer_operations.push(operation);
                 },
                 LayerOperationDefinition::Directory { path } => {
                     layer_operations.push(LayerOperation::Directory { path: path.clone() });
