@@ -52,9 +52,7 @@ impl TransferManager {
                         writer.start_file_from_path(source_path, SimpleFileOptions::default())?;
                         std::io::copy(&mut reader, &mut writer)?;
                     }
-                    LayerOperation::Directory { .. } => {
-
-                    }
+                    LayerOperation::Directory { .. } => {}
                 }
             }
 
