@@ -174,7 +174,7 @@ impl AuthProvider for MemoryAuthProvider {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Password(String);
 
 impl Password {
@@ -183,15 +183,9 @@ impl Password {
     }
 }
 
-impl ToString for Password {
-    fn to_string(&self) -> String {
-        self.0.clone()
-    }
-}
-
-impl Debug for Password {
+impl Display for Password {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Password(*******)")
+        write!(f, "{}", self.0.clone())
     }
 }
 
@@ -199,12 +193,8 @@ impl FromStr for Password {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        Ok(Password(base16ct::lower::encode_string(&Sha256::digest(text.as_bytes()))))
+        Ok(Password::from_plain_text(text))
     }
-}
-
-pub fn create_password_hash(password: &str) -> String {
-    base16ct::lower::encode_string(&Sha256::digest(password.as_bytes()))
 }
 
 #[test]
