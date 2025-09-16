@@ -153,14 +153,14 @@ fn test_export_import() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     tmp_folder.create().unwrap();
     let archive_file = tmp_folder.owned().join("image.zip");
 
     // Export
     let expected_layers;
     {
-        let tmp_env_folder = super::test_helpers::TempFolder::new();
+        let tmp_env_folder = crate::test_helpers::TempFolder::new();
         let config = ImageManagerConfig::with_base_folder(tmp_env_folder.owned().clone());
 
         let printer = ConsolePrinter::new();
@@ -194,7 +194,7 @@ fn test_export_import() {
 
     // Import
     {
-        let tmp_env_folder = super::test_helpers::TempFolder::new();
+        let tmp_env_folder = crate::test_helpers::TempFolder::new();
         let config = ImageManagerConfig::with_base_folder(tmp_env_folder.owned().clone());
 
         let printer = ConsolePrinter::new();

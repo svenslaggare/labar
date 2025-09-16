@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
+use std::path::Path;
 use std::str::FromStr;
 
-use log::info;
+use log::{error, info};
 
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
@@ -11,7 +11,10 @@ use sha2::{Digest, Sha256};
 use serde::{Deserialize, Serialize};
 
 use axum::extract::Request;
+use rusqlite::OptionalExtension;
+use rusqlite::types::FromSqlError;
 
+use crate::image_manager::{SqlResult, StateManager, StateSession};
 use crate::registry::model::{AppError, AppResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -118,66 +121,152 @@ pub trait AuthProvider {
 
 pub type UsersSpec = Vec<(String, Password, Vec<AccessRight>)>;
 
-pub struct MemoryAuthProvider {
-    users: HashMap<String, MemoryAuthProviderEntry>
+pub struct SqliteAuthProvider {
+    state_manager: StateManager
 }
 
-impl MemoryAuthProvider {
-    pub fn new(users: UsersSpec) -> MemoryAuthProvider {
-        let mut users_map = HashMap::new();
-        for (username, password, access_rights) in users {
-            users_map.insert(
-                username,
-                MemoryAuthProviderEntry {
-                    password,
-                    access_rights: HashSet::from_iter(access_rights.into_iter())
-                }
-            );
-        }
-
-        MemoryAuthProvider {
-            users: users_map
-        }
-    }
-}
-
-struct MemoryAuthProviderEntry {
-    password: Password,
-    access_rights: HashSet<AccessRight>
-}
-
-impl AuthProvider for MemoryAuthProvider {
-    fn has_access(&self, username: &str, password: &Password, requested_access_right: AccessRight) -> AppResult<bool> {
-        let entry = match self.users.get(username) {
-            Some(user) => user,
-            None => {
-                info!("User '{}' does not exist.", username);
-                return Ok(false);
-            }
+impl SqliteAuthProvider {
+    pub fn new(base_folder: &Path, initial_users: UsersSpec) -> SqlResult<SqliteAuthProvider> {
+        let provider = SqliteAuthProvider {
+            state_manager: StateManager::new(base_folder)?
         };
 
-        if &entry.password != password {
-            info!("Invalid password for user: {}.", username);
-            return Ok(false);
+        let mut session = provider.state_manager.pooled_session()?;
+        if !provider.db_any_users(&mut session)? && !initial_users.is_empty() {
+            info!("Setting up initial users...");
+            for (username, password, access_rights) in initial_users {
+                provider.db_add_user(&mut session, &username, &password, &access_rights)?;
+            }
         }
 
-        if requested_access_right == AccessRight::Access {
-            return Ok(true);
-        }
-
-        if entry.access_rights.contains(&requested_access_right) {
-            Ok(true)
-        } else {
-            info!("User '{}' does not have {:?} access rights.", username, requested_access_right);
-            Ok(false)
-        }
+        Ok(provider)
     }
+
+    pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>) -> bool {
+        fn internal(provider: &SqliteAuthProvider,
+                    username: String, password: Password, access_rights: Vec<AccessRight>) -> SqlResult<bool> {
+            let mut session = provider.state_manager.pooled_session()?;
+            Ok(provider.db_add_user(&mut session, &username, &password, &access_rights).is_ok())
+        }
+
+        internal(self, username, password, access_rights).unwrap_or(false)
+    }
+
+    pub fn remove_user(&self, username: &str) -> bool {
+        fn internal(provider: &SqliteAuthProvider, username: &str) -> SqlResult<bool> {
+            let mut session = provider.state_manager.pooled_session()?;
+            Ok(provider.db_remove_user(&mut session, &username).is_ok())
+        }
+
+        internal(self, username).unwrap_or(false)
+    }
+
+    fn db_any_users(&self, session: &mut StateSession) -> SqlResult<bool> {
+        let count = session.connection.query_one(
+            "SELECT COUNT(*) FROM registry_users",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?;
+
+        Ok(count > 0)
+    }
+
+    fn db_add_user(&self,
+                   session: &mut StateSession,
+                   username: &str,
+                   password: &Password,
+                   access_rights: &Vec<AccessRight>) -> SqlResult<()> {
+        session.connection.execute(
+            "INSERT INTO registry_users (username, password, access_rights) VALUES (?1, ?2, ?3)",
+            (username, password.to_string(), &serde_json::to_value(access_rights).unwrap())
+        )?;
+        Ok(())
+    }
+
+    fn db_remove_user(&self,
+                      session: &mut StateSession,
+                      username: &str) -> SqlResult<()> {
+        session.connection.execute(
+            "DELETE FROM registry_users WHERE username=?1",
+            (username, )
+        )?;
+        Ok(())
+    }
+
+    fn db_get_user(&self, session: &mut StateSession, username: &str) -> SqlResult<Option<RegistryUser>> {
+        session.connection.query_row(
+            "SELECT username, password, access_rights FROM registry_users WHERE username=?1",
+            (username, ),
+            |row| {
+                let access_rights: serde_json::Value = row.get(2)?;
+                let access_rights: Vec<AccessRight> = serde_json::from_value(access_rights)
+                    .map_err(|_| FromSqlError::InvalidType)?;
+
+                Ok(
+                    RegistryUser {
+                        username: row.get(0)?,
+                        password: Password::from_hash(row.get(1)?),
+                        access_rights,
+                    }
+                )
+            }
+        ).optional()
+    }
+}
+
+impl AuthProvider for SqliteAuthProvider {
+    fn has_access(&self, username: &str, password: &Password, requested_access_right: AccessRight) -> AppResult<bool> {
+        fn internal(provider: &SqliteAuthProvider, username: &str, password: &Password, requested_access_right: AccessRight) -> SqlResult<AppResult<bool>> {
+            let mut session = provider.state_manager.pooled_session()?;
+
+            let entry = match provider.db_get_user(&mut session, username)? {
+                Some(user) => user,
+                None => {
+                    info!("User '{}' does not exist.", username);
+                    return Ok(Ok(false));
+                }
+            };
+
+            if &entry.password != password {
+                info!("Invalid password for user: {}.", username);
+                return Ok(Ok(false));
+            }
+
+            if requested_access_right == AccessRight::Access {
+                return Ok(Ok(true));
+            }
+
+            if entry.access_rights.contains(&requested_access_right) {
+                Ok(Ok(true))
+            } else {
+                info!("User '{}' does not have {:?} access rights.", username, requested_access_right);
+                Ok(Ok(false))
+            }
+        }
+
+        internal(&self, username, password, requested_access_right)
+            .unwrap_or_else(|err| {
+                error!("SQL failure: {}", err);
+                Ok(false)
+            })
+    }
+}
+
+struct RegistryUser {
+    #[allow(dead_code)]
+    username: String,
+    password: Password,
+    access_rights: Vec<AccessRight>
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Password(String);
 
 impl Password {
+    pub fn from_hash(hash: String) -> Password {
+        Password(hash)
+    }
+
     pub fn from_plain_text(password: &str) -> Password {
         Password(base16ct::lower::encode_string(&Sha256::digest(password.as_bytes())))
     }
@@ -199,13 +288,18 @@ impl FromStr for Password {
 
 #[test]
 fn test_access_rights1() {
-    let provider = MemoryAuthProvider::new(vec![
-        (
-            "guest".to_owned(),
-            Password::from_plain_text("guest"),
-            vec![AccessRight::List, AccessRight::Download]
-        )
-    ]);
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+
+    let provider = SqliteAuthProvider::new(
+        &tmp_folder,
+        vec![
+            (
+                "guest".to_owned(),
+                Password::from_plain_text("guest"),
+                vec![AccessRight::List, AccessRight::Download]
+            )
+        ]
+    ).unwrap();
 
     assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::Access).ok());
     assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::List).ok());
@@ -216,13 +310,18 @@ fn test_access_rights1() {
 
 #[test]
 fn test_access_rights2() {
-    let provider = MemoryAuthProvider::new(vec![
-        (
-            "guest".to_owned(),
-            Password::from_plain_text("guest"),
-            vec![]
-        )
-    ]);
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+
+    let provider = SqliteAuthProvider::new(
+        &tmp_folder,
+        vec![
+            (
+                "guest".to_owned(),
+                Password::from_plain_text("guest"),
+                vec![]
+            )
+        ]
+    ).unwrap();
 
     assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::Access).ok());
 }

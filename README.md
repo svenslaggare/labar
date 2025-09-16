@@ -33,9 +33,9 @@ To configure the registry, use the sample TOML configuration file below:
 ```toml
 data_path = "<HOME>/.labar-registry"
 address = "0.0.0.0:3000"
-users = [
+initial_users = [
     ["guest", "84983c60f7daadc1cb8698621f802c0d9f9a3c3c295c810748fb048115c186ec", ["List", "Download", "Upload", "Delete"]]
 ]
 ```
 
-The specified password is a SHA256 hash of the actual password.
+The specified password is a SHA256 hash of the actual password (`guest` in the example).

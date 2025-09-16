@@ -14,14 +14,17 @@ pub mod registry;
 pub mod reference;
 pub mod content;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
 use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest};
 use crate::reference::{ImageTag, Reference};
-use crate::registry::auth::{AccessRight, Password};
-use crate::registry::config::{config_file_add_user, config_file_remove_user, RegistryConfig};
+use crate::registry::auth::{AccessRight, Password, SqliteAuthProvider};
+use crate::registry::config::{RegistryConfig};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name="labar", about="Layer Based Archive")]
@@ -379,10 +382,20 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
                 }
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights } => {
-                    config_file_add_user(&config_file, username, password, access_rights)?;
+                    let registry_config = RegistryConfig::load_from_file(&config_file)?;
+                    let auth_provider = SqliteAuthProvider::new(&registry_config.data_path, Vec::new()).map_err(|_| "Failed to setup auth provider")?;
+
+                    if !auth_provider.add_user(username, password, access_rights) {
+                        return Err("User already exists".to_owned());
+                    }
                 }
                 RegistryCommandLineInput::RemoveUser { config_file, username } => {
-                    config_file_remove_user(&config_file, username)?;
+                    let registry_config = RegistryConfig::load_from_file(&config_file)?;
+                    let auth_provider = SqliteAuthProvider::new(&registry_config.data_path, Vec::new()).map_err(|_| "Failed to setup auth provider")?;
+
+                    if !auth_provider.remove_user(&username) {
+                        return Err("Failed to remove user".to_owned());
+                    }
                 }
             }
         }

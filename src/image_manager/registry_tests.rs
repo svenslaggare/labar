@@ -16,8 +16,8 @@ use crate::registry::RegistryConfig;
 
 #[tokio::test]
 async fn test_pull() {
-    let tmp_folder = super::test_helpers::TempFolder::new();
-    let tmp_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9560".parse().unwrap();
 
@@ -76,8 +76,8 @@ async fn test_pull() {
 
 #[tokio::test]
 async fn test_push_pull() {
-    let tmp_folder = super::test_helpers::TempFolder::new();
-    let tmp_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9561".parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
@@ -143,8 +143,8 @@ async fn test_push_pull() {
 
 #[tokio::test]
 async fn test_push_pull_with_ref() {
-    let tmp_folder = super::test_helpers::TempFolder::new();
-    let tmp_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
     let address: SocketAddr = "0.0.0.0:9562".parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
@@ -217,9 +217,9 @@ async fn test_push_pull_with_ref() {
 
 #[tokio::test]
 async fn test_sync() {
-    let tmp_folder = super::test_helpers::TempFolder::new();
-    let tmp_primary_registry_folder = super::test_helpers::TempFolder::new();
-    let tmp_secondary_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
+    let tmp_secondary_registry_folder = crate::test_helpers::TempFolder::new();
 
     let primary_address: SocketAddr = "0.0.0.0:9563".parse().unwrap();
     let secondary_address: SocketAddr = "0.0.0.0:9564".parse().unwrap();
@@ -310,9 +310,9 @@ async fn test_sync() {
 
 #[tokio::test]
 async fn test_pull_through() {
-    let tmp_folder = super::test_helpers::TempFolder::new();
-    let tmp_primary_registry_folder = super::test_helpers::TempFolder::new();
-    let tmp_secondary_registry_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
+    let tmp_secondary_registry_folder = crate::test_helpers::TempFolder::new();
 
     let primary_address: SocketAddr = "0.0.0.0:9565".parse().unwrap();
     let secondary_address: SocketAddr = "0.0.0.0:9566".parse().unwrap();
@@ -400,7 +400,7 @@ fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> Re
         ssl_cert_path: None,
         ssl_key_path: None,
         upstream: None,
-        users: vec![
+        initial_users: vec![
             (
                 "guest".to_owned(),
                 crate::registry::auth::Password::from_plain_text("guest"),

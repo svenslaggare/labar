@@ -262,7 +262,7 @@ fn test_build() {
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -299,7 +299,7 @@ fn test_build_with_cache1() {
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -353,7 +353,7 @@ fn test_build_with_cache2() {
     use crate::image_manager::state::StateManager;
     use crate::image::{LinkType};
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -452,7 +452,7 @@ fn test_build_with_image_ref() {
     use crate::reference::Reference;
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();

@@ -100,6 +100,17 @@ impl StateManager {
             ()
         )?;
 
+        connection.execute(
+            r#"
+            CREATE TABLE IF NOT EXISTS registry_users(
+                username TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                access_rights JSONB NOT NULL
+            );
+            "#,
+            ()
+        )?;
+
         Ok(
             StateManager {
                 base_folder: base_folder.to_path_buf(),
@@ -130,7 +141,7 @@ impl StateManager {
 }
 
 pub struct StateSession {
-    connection: Connection
+    pub connection: Connection
 }
 
 impl StateSession {

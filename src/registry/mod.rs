@@ -34,7 +34,7 @@ use crate::content::ContentHash;
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerError};
 use crate::reference::{ImageId, ImageTag, Reference};
-use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, MemoryAuthProvider};
+use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::RegistryUpstreamConfig;
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
@@ -47,7 +47,7 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
     let tls_config = RustlsConfig::from_pem_chain_file(cert_path, key_path).await
         .map_err(|err| RunRegistryError::InvalidCertificate { reason: err.to_string() })?;
 
-    let state = AppState::new(config);
+    let state = AppState::new(config)?;
 
     let app = Router::new()
         .route("/", get(index))
@@ -111,6 +111,7 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
 pub enum RunRegistryError {
     FailedGenerateCertificate { reason: String },
     InvalidCertificate { reason: String },
+    AuthSetup { reason: String },
     LoginUpstream { reason: String },
     FailedRunServer { reason: String }
 }
@@ -120,6 +121,7 @@ impl Display for RunRegistryError {
         match self {
             RunRegistryError::FailedGenerateCertificate { reason } => write!(f, "Failed to generate certificate due to: {}", reason),
             RunRegistryError::InvalidCertificate { reason } => write!(f, "Invalid certificate specified: {}", reason),
+            RunRegistryError::AuthSetup { reason } => write!(f, "Failed to setup authentication due to: {}", reason),
             RunRegistryError::LoginUpstream { reason } => write!(f, "Failed to login upstream due to: {}", reason),
             RunRegistryError::FailedRunServer { reason } => write!(f, "Failed to run server due to: {}", reason)
         }
@@ -133,15 +135,20 @@ struct AppState {
 }
 
 impl AppState {
-    pub fn new(mut config: RegistryConfig) -> Arc<AppState> {
-        let access_provider = Box::new(MemoryAuthProvider::new(std::mem::take(&mut config.users)));
+    pub fn new(mut config: RegistryConfig) -> Result<Arc<AppState>, RunRegistryError> {
+        let access_provider = SqliteAuthProvider::new(
+            config.image_manager_config().base_folder(),
+            std::mem::take(&mut config.initial_users)
+        ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
 
-        Arc::new(
-            AppState {
-                config,
-                access_provider,
-                delayed_image_inserts: Mutex::new(HashMap::new())
-            }
+        Ok(
+            Arc::new(
+                AppState {
+                    config,
+                    access_provider: Box::new(access_provider),
+                    delayed_image_inserts: Mutex::new(HashMap::new())
+                }
+            )
         )
     }
 }

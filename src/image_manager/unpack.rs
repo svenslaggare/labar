@@ -444,7 +444,7 @@ fn test_unpack() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -487,7 +487,7 @@ fn test_unpack_exist() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -541,7 +541,7 @@ fn test_remove_unpack() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -592,7 +592,7 @@ fn test_unpack_replace1() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
 
     let printer = ConsolePrinter::new();
@@ -646,7 +646,7 @@ fn test_unpack_replace2() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();
@@ -687,7 +687,7 @@ fn test_unpack_self_reference() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();
@@ -730,7 +730,7 @@ fn test_extract() {
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
 
     let printer = ConsolePrinter::new();

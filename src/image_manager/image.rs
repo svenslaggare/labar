@@ -579,7 +579,7 @@ fn test_build() {
 
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -616,7 +616,7 @@ fn test_remove_image1() {
 
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
 
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
@@ -651,7 +651,7 @@ fn test_remove_image2() {
 
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
 
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
     let printer = ConsolePrinter::new();
@@ -690,7 +690,7 @@ fn test_list_content() {
 
     use crate::image_manager::ConsolePrinter;
 
-    let tmp_folder = super::test_helpers::TempFolder::new();
+    let tmp_folder = crate::test_helpers::TempFolder::new();
 
     {
         let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
