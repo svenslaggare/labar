@@ -7,7 +7,7 @@ use croner::Cron;
 use tokio::time::Instant;
 
 use crate::helpers::DataSize;
-use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, Reference};
+use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, PullRequest, Reference};
 use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::auth::AccessRight;
@@ -54,7 +54,11 @@ async fn test_pull() {
         assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
 
         // Pull
-        let pull_result = image_manager.pull(&image_tag, None).await;
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+        }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
@@ -121,7 +125,11 @@ async fn test_push_pull() {
         assert!(image_manager.remove_image(&image.tag).is_ok());
 
         // Pull
-        let pull_result = image_manager.pull(&image.tag, None).await;
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+        }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
@@ -195,7 +203,11 @@ async fn test_push_pull_with_ref() {
         assert!(image_manager.remove_image(&image_referred.tag).is_ok());
 
         // Pull
-        let pull_result = image_manager.pull(&image.tag, None).await;
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+        }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
@@ -288,7 +300,11 @@ async fn test_sync() {
         }
 
         // Pull
-        let pull_result = image_manager.pull(&image_tag, None).await;
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+        }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);
@@ -372,7 +388,11 @@ async fn test_pull_through() {
         assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
 
         // Pull
-        let pull_result = image_manager.pull(&image_tag, None).await;
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+        }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
         assert_eq!(image, pull_image);

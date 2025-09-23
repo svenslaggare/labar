@@ -182,6 +182,7 @@ pub use printing::{PrinterRef, ConsolePrinter, EmptyPrinter, Printer};
 pub use crate::image_definition::ImageParseError;
 pub use crate::image_manager::registry::RegistryError;
 pub use crate::reference::{ImageId, Reference};
+pub use crate::image_manager::image::PullRequest;
 pub use crate::image_manager::build::BuildRequest;
 pub use crate::image_manager::unpack::UnpackRequest;
 pub use crate::image_manager::state::{StateSession, StateManager, SqlResult};

@@ -322,8 +322,8 @@ impl ImageManager {
         Ok(layer)
     }
 
-    pub async fn pull(&mut self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<Image> {
-        let pull_tag = tag.clone().set_registry_opt_if_empty(default_registry);
+    pub async fn pull(&mut self, request: PullRequest<'_>) -> ImageManagerResult<Image> {
+        let pull_tag = request.tag.clone().set_registry_opt_if_empty(request.default_registry);
 
         let session = self.state_manager.pooled_session()?;
 
@@ -363,7 +363,7 @@ impl ImageManager {
             }
         }
 
-        let image = Image::new(top_level_hash.unwrap(), tag.clone());
+        let image = Image::new(top_level_hash.unwrap(), request.new_tag.unwrap_or_else(|| request.tag.clone()));
         self.insert_or_replace_image(image.clone())?;
 
         Ok(image)
@@ -549,6 +549,12 @@ impl ImageManager {
         self.layer_manager.insert_or_replace_image(&mut session, image)?;
         Ok(())
     }
+}
+
+pub struct PullRequest<'a> {
+    pub tag: ImageTag,
+    pub default_registry: Option<&'a str>,
+    pub new_tag: Option<ImageTag>
 }
 
 pub struct DownloadResult {

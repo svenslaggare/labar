@@ -21,7 +21,7 @@ use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest};
+use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password, SqliteAuthProvider};
 use crate::registry::config::{RegistryConfig};
@@ -135,7 +135,9 @@ enum CommandLineInput {
     #[structopt(about="Pulls an image from a remote registry")]
     Pull {
         #[structopt(name="tag", help="The image to pull")]
-        tag: ImageTag
+        tag: ImageTag,
+        #[structopt(name="new_tag", help="Use this as the tag of the image instead")]
+        new_tag: Option<ImageTag>
     },
     #[structopt(about="Pushes a local image to a remote registry")]
     Push {
@@ -378,10 +380,16 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config, printer.clone());
             transform_registry_result(image_manager.push(&tag, file_config.default_registry()).await)?;
         },
-        CommandLineInput::Pull { tag } => {
+        CommandLineInput::Pull { tag, new_tag } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
-            transform_registry_result(image_manager.pull(&tag, file_config.default_registry()).await)?;
+            transform_registry_result(image_manager.pull(
+                PullRequest {
+                    tag,
+                    default_registry: file_config.default_registry(),
+                    new_tag,
+                }
+            ).await)?;
         },
         CommandLineInput::ListImagesRegistry { registry } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
