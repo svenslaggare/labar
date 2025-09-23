@@ -42,6 +42,15 @@ enum CommandLineInput {
         #[structopt(long, help="Forces a build, ignoring previously cached layers")]
         force: bool,
     },
+    #[structopt(about="Builds an image from a directory, automatically creating the operations")]
+    BuildFromDirectory {
+        #[structopt(name="directory", help="The directory to build from")]
+        directory: PathBuf,
+        #[structopt(name="tag", help="The tag of the image")]
+        tag: ImageTag,
+        #[structopt(long, help="Forces a build, ignoring previously cached layers")]
+        force: bool,
+    },
     #[structopt(about="Removes an image")]
     RemoveImage {
         #[structopt(name="tag", help="The tag of the image to remove")]
@@ -216,6 +225,17 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             };
 
             let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?.image;
+            let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
+            println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
+        }
+        CommandLineInput::BuildFromDirectory { directory, tag, force } => {
+            let _write_lock = create_write_lock(&file_config);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
+
+            println!("Building image {}...", tag);
+            let start_time = Instant::now();
+
+            let image = image_manager.build_image_from_directory(&directory, tag, force).map_err(|err| format!("{}", err))?.image;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }

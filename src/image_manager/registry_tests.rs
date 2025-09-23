@@ -33,7 +33,7 @@ async fn test_pull() {
             Path::new("testdata/definitions/simple4.labarfile"),
             image_tag.clone()
         ).unwrap().image;
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&image.hash.clone().to_ref()).ok());
 
         image
     };
@@ -68,7 +68,7 @@ async fn test_pull() {
 
         // Check content
         let reference = image_tag.clone().to_ref();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
@@ -135,7 +135,7 @@ async fn test_push_pull() {
 
         // Check content
         let reference = Reference::ImageTag(image.tag.clone());
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
@@ -209,7 +209,7 @@ async fn test_push_pull_with_ref() {
 
         // Check content
         let reference = Reference::ImageTag(image.tag.clone());
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
@@ -302,7 +302,7 @@ async fn test_sync() {
 
         // Check content
         let reference = image_tag.clone().to_ref();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }
@@ -386,7 +386,7 @@ async fn test_pull_through() {
 
         // Check content
         let reference = image_tag.clone().to_ref();
-        assert_eq!(Some(DataSize(3003)), image_manager.image_size(&reference).ok());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
     }

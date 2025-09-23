@@ -8,6 +8,7 @@ use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
 use crate::helpers::DataSize;
+use crate::image_definition::{ImageDefinition};
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession};
@@ -58,6 +59,17 @@ impl ImageManager {
 
         let image = self.build_manager.build_image(&mut session, &mut self.layer_manager, request)?;
         Ok(image)
+    }
+
+    pub fn build_image_from_directory(&mut self, directory: &Path, tag: ImageTag, force: bool) -> ImageManagerResult<BuildResult> {
+        self.build_image(
+            BuildRequest {
+                build_context: Default::default(),
+                image_definition: ImageDefinition::create_from_directory(directory)?,
+                tag,
+                force
+            }
+        )
     }
 
     pub fn tag_image(&mut self, reference: &Reference, tag: &ImageTag) -> ImageManagerResult<Image> {
@@ -606,7 +618,44 @@ fn test_build() {
         let image = image.unwrap();
         assert_eq!(image.hash, top_layer.hash);
 
-        assert_eq!(Some(DataSize(974)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
+        assert_eq!(Some(DataSize(973)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
+    }
+}
+
+#[test]
+fn test_build_from_directory() {
+    use std::str::FromStr;
+
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        let result = image_manager.build_image_from_directory(
+            Path::new("testdata/rawdata2"),
+            ImageTag::from_str("test").unwrap(),
+            false
+        );
+        assert!(result.is_ok());
+        let result = result.unwrap().image;
+
+        assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
+
+        let top_layer = image_manager.get_layer(&Reference::from_str("test").unwrap());
+        assert!(top_layer.is_ok());
+        let top_layer = top_layer.unwrap();
+        assert_eq!(top_layer.hash, result.hash);
+
+        let image = image_manager.get_image(&ImageTag::from_str("test").unwrap());
+        assert!(image.is_ok());
+        let image = image.unwrap();
+        assert_eq!(image.hash, top_layer.hash);
+
+        assert_eq!(Some(DataSize(4257)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
     }
 }
 

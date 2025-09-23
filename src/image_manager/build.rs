@@ -119,7 +119,14 @@ impl BuildManager {
             }
         }
 
-        layer_manager.insert_layer(session, layer)?;
+        if force {
+            if !layer_manager.layer_exist(session, &layer.hash)? {
+                layer_manager.insert_layer(session, layer)?;
+            }
+        } else {
+            layer_manager.insert_layer(session, layer)?;
+        }
+
         Ok(true)
     }
 
@@ -282,7 +289,7 @@ fn test_build() {
     let result = result.unwrap().image;
 
     assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
-    assert_eq!(ImageId::from_str("de9b8feb3088ddcf31706a868de9d059161a3069b52a902fe0fed34af30ac38b").unwrap(), result.hash);
+    assert_eq!(ImageId::from_str("3880bfaad2a448eebe7a24fac6c0812fab3e613c881f2c622eb972dad2b53172").unwrap(), result.hash);
 
     let session = state_manager.session().unwrap();
     let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());

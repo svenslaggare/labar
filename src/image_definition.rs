@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, StripPrefixError};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
@@ -85,12 +85,19 @@ pub enum ImageParseError {
     InvalidImageReference(String),
     IsAbsolutePath(String),
     IO(std::io::Error),
+    StripPrefix(StripPrefixError),
     Other(String),
 }
 
 impl From<std::io::Error> for ImageParseError {
     fn from(error: std::io::Error) -> Self {
         ImageParseError::IO(error)
+    }
+}
+
+impl From<StripPrefixError> for ImageParseError {
+    fn from(error: StripPrefixError) -> Self {
+        ImageParseError::StripPrefix(error)
     }
 }
 
@@ -109,6 +116,7 @@ impl Display for ImageParseError {
             ImageParseError::VariableNotFound(name) => write!(f, "Variable '{}' not found", name),
             ImageParseError::InvalidImageReference(error) => write!(f, "Invalid image reference: {}", error),
             ImageParseError::IsAbsolutePath(path) => write!(f, "The path '{}' is absolute", path),
+            ImageParseError::StripPrefix(error) => write!(f, "Failed to strip prefix due to: {}", error),
             ImageParseError::IO(error) => write!(f, "IO error: {}", error),
             ImageParseError::Other(error) => write!(f, "{}", error),
         }
@@ -318,6 +326,68 @@ impl ImageDefinition {
     pub fn parse_file_without_context(path: &Path) -> ImageParseResult<ImageDefinition> {
         let content = std::fs::read_to_string(path)?;
         ImageDefinition::parse(&content, &ImageDefinitionContext::new())
+    }
+
+    pub fn create_from_directory(directory: &Path) -> ImageParseResult<ImageDefinition> {
+        let mut read_dir = std::fs::read_dir(directory)?;
+        let mut root_files = Vec::new();
+        let mut directories = Vec::new();
+        while let Some(entry) = read_dir.next() {
+            let entry = entry?;
+
+            if entry.path().is_file() {
+                root_files.push(entry.path());
+            } else {
+                directories.push(entry.path());
+            }
+        }
+
+        root_files.sort();
+        directories.sort();
+
+        let mut layers = Vec::new();
+        for current_directory in directories {
+            let current_directory_relative = current_directory.strip_prefix(&directory)?;
+
+            layers.push(
+                LayerDefinition {
+                    input_line: String::new(),
+                    operations: vec![
+                        LayerOperationDefinition::File {
+                            path: current_directory_relative.to_str().unwrap().to_owned(),
+                            source_path: current_directory.to_str().unwrap().to_owned(),
+                            link_type: LinkType::Hard,
+                            writable: false,
+                        }
+                    ]
+                }
+            );
+        }
+
+        for file in root_files {
+            let file_relative = file.strip_prefix(&directory)?;
+
+            layers.push(
+                LayerDefinition {
+                    input_line: String::new(),
+                    operations: vec![
+                        LayerOperationDefinition::File {
+                            path: file_relative.to_str().unwrap().to_owned(),
+                            source_path: file.to_str().unwrap().to_owned(),
+                            link_type: LinkType::Hard,
+                            writable: false
+                        }
+                    ]
+                }
+            );
+        }
+
+        Ok(
+            ImageDefinition {
+                base_image: None,
+                layers
+            }
+        )
     }
 }
 

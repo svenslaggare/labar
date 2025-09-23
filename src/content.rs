@@ -44,7 +44,7 @@ pub fn compute_content_hash(path: &Path) -> std::io::Result<String> {
 #[test]
 fn test_compute_file() {
     assert_eq!(
-        Some("a6d3bede153575dad6806556e10c79c48329201e9cb3ccee9d55ee5f1b1ed3e8".to_owned()),
+        Some("22fab83a2b47a54531588ea2b025e8c48f5e03b40df4283f0ec1c70b0faba38e".to_owned()),
         compute_content_hash(Path::new("testdata/rawdata/file1.txt")).ok()
     );
 }

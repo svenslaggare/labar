@@ -761,5 +761,5 @@ fn test_extract() {
 
     let zip_archive = ZipArchive::new(File::open(archive_file).unwrap()).unwrap();
     assert_eq!(vec!["test/file1.txt", "test2/"], zip_archive.file_names().collect::<Vec<_>>());
-    assert_eq!(974, zip_archive.decompressed_size().unwrap() as u64);
+    assert_eq!(973, zip_archive.decompressed_size().unwrap() as u64);
 }
