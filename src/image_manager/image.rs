@@ -1,7 +1,8 @@
 use std::collections::{HashSet};
 use std::ops::Deref;
 use std::path::Path;
-
+use std::time::Duration;
+use chrono::Local;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
 use crate::image_manager::layer::{LayerManager};
@@ -113,15 +114,38 @@ impl ImageManager {
     }
 
     pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<usize> {
+        self.remove_image_internal(tag, true)
+    }
+
+    fn remove_image_internal(&mut self, tag: &ImageTag, gc: bool) -> ImageManagerResult<usize> {
         let mut session = self.state_manager.pooled_session()?;
 
         if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
-            let removed_layers = self.garbage_collect()?;
-            Ok(removed_layers)
+
+            if gc {
+                let removed_layers = self.garbage_collect()?;
+                Ok(removed_layers)
+            } else {
+                Ok(0)
+            }
         } else {
             Err(ImageManagerError::ReferenceNotFound { reference: Reference::ImageTag(tag.clone()) })
         }
+    }
+
+    pub fn clean_old_images(&mut self, duration: Duration) -> ImageManagerResult<()> {
+        let session = self.state_manager.pooled_session()?;
+
+        let now = Local::now();
+        for image in self.layer_manager.images_iter(&session)? {
+            let layer = self.layer_manager.get_layer(&session, &image.hash.clone().to_ref())?;
+            if (now - layer.created).to_std().unwrap() > duration {
+                self.remove_image_internal(&image.tag, false)?;
+            }
+        }
+
+        Ok(())
     }
 
     pub fn garbage_collect(&mut self) -> ImageManagerResult<usize> {

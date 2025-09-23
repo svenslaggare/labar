@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use chrono::{DateTime, Local};
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
@@ -121,7 +121,8 @@ enum CommandLineInput {
     },
     #[structopt(about="Removes layers not used")]
     Purge {
-
+        #[structopt(long, name="clean_old_images", help="Removes unused images that are older than X number of days")]
+        clean_old_images: Option<u64>
     },
     #[structopt(about="Login into a remote registry")]
     Login {
@@ -364,9 +365,14 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config, printer.clone());
             image_manager.import_image(Path::new(&path)).map_err(|err| format!("{}", err))?;
         }
-        CommandLineInput::Purge {} => {
+        CommandLineInput::Purge { clean_old_images } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
+
+            if let Some(clean_old_images) = clean_old_images {
+                let duration = Duration::from_secs(clean_old_images * 24 * 60 * 60);
+                image_manager.clean_old_images(duration).map_err(|err| format!("{}", err))?;
+            }
 
             image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
