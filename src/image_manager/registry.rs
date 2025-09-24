@@ -12,6 +12,7 @@ use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{PrinterRef, ImageManagerConfig};
+use crate::image_manager::build::LayerHash;
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 use crate::registry::model;
@@ -90,6 +91,11 @@ impl RegistryManager {
 
         let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &hash, true).await?;
         let layer_folder = self.config.get_layer_folder(&layer.hash);
+
+        let computed_hash = LayerHash::from_layer(&layer);
+        if &computed_hash != hash {
+            return Err(RegistryError::IncorrectLayer { expected: hash.clone(), actual: computed_hash });
+        }
 
         if pull_through {
             self.wait_for_pull_through(&client, hash).await?;

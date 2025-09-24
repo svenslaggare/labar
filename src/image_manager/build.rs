@@ -97,16 +97,16 @@ impl BuildManager {
             self.printer.println(&format!("\t* {}", operation));
 
             match operation {
-                LayerOperation::File { path, source_path, .. } => {
+                LayerOperation::File { path, source_path, original_source_path, .. } => {
                     let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
                     let relative_destination_path = destination_path.strip_prefix(&self.config.base_folder).unwrap();
 
-                    std::fs::copy(&build_context.join(&source_path), &destination_path)
+                    std::fs::copy(&build_context.join(&original_source_path), &destination_path)
                         .map_err(|err|
                             ImageManagerError::FileIOError {
                                 message: format!(
                                     "Failed to copy file {} -> {} due to: {}",
-                                    source_path,
+                                    original_source_path,
                                     destination_path.to_str().unwrap(),
                                     err
                                 )
@@ -114,6 +114,7 @@ impl BuildManager {
                         )?;
 
                     *source_path = relative_destination_path.to_str().unwrap().to_owned();
+                    *original_source_path = create_hash(&original_source_path);
                 },
                 _ => {}
             }
@@ -179,13 +180,14 @@ impl BuildManager {
 
                     let operation = LayerOperation::File {
                         path: path.clone(),
-                        source_path: relative_source_path.to_owned(),
+                        source_path: String::new(),
+                        original_source_path: relative_source_path.to_owned(),
                         content_hash: content_hash.clone(),
                         link_type: *link_type,
                         writable: *writable
                     };
 
-                    layer_hash.add_file(&operation);
+                    layer_hash.add_file(&operation, false);
                     layer_operations.push(operation);
                 },
                 LayerOperationDefinition::Directory { path } => {
@@ -199,7 +201,7 @@ impl BuildManager {
     }
 }
 
-struct LayerHash {
+pub struct LayerHash {
     hash_input: String
 }
 
@@ -208,6 +210,27 @@ impl LayerHash {
         LayerHash {
             hash_input: String::new()
         }
+    }
+
+    pub fn from_layer(layer: &Layer) -> ImageId {
+        let mut layer_hash = LayerHash::new();
+        layer_hash.add_parent_hash(layer.parent_hash.as_ref());
+
+        for operation in &layer.operations {
+            match operation {
+                LayerOperation::Image { hash } => {
+                    layer_hash.add_image_ref(&hash);
+                }
+                LayerOperation::File { .. } => {
+                    layer_hash.add_file(&operation, true);
+                },
+                LayerOperation::Directory { path } => {
+                    layer_hash.add_directory(path);
+                },
+            }
+        }
+
+        layer_hash.finalize()
     }
 
     pub fn add_parent_hash(&mut self, parent_hash: Option<&ImageId>) {
@@ -224,12 +247,18 @@ impl LayerHash {
         self.hash_input += path;
     }
 
-    pub fn add_file(&mut self, operation: &LayerOperation) {
-        if let LayerOperation::File { path, source_path, content_hash, link_type, writable } = operation {
+    pub fn add_file(&mut self, operation: &LayerOperation, hashed: bool) {
+        if let LayerOperation::File { path, original_source_path, content_hash, link_type, writable, .. } = operation {
+            let original_source_path = if hashed {
+                original_source_path.clone()
+            } else {
+                create_hash(&original_source_path)
+            };
+
             self.hash_input += &format!(
                 "{}{}{}{}{}",
                 path,
-                source_path,
+                original_source_path,
                 content_hash,
                 link_type,
                 writable
@@ -289,7 +318,7 @@ fn test_build() {
     let result = result.unwrap().image;
 
     assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
-    assert_eq!(ImageId::from_str("3880bfaad2a448eebe7a24fac6c0812fab3e613c881f2c622eb972dad2b53172").unwrap(), result.hash);
+    assert_eq!(ImageId::from_str("670ca8ce5558c66c12a618f74bfed7e9006621d8c926dcd7ab7b10a428f0b5d1").unwrap(), result.hash);
 
     let session = state_manager.session().unwrap();
     let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
