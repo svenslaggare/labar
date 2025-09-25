@@ -180,8 +180,12 @@ impl StateSession {
         ).optional()
     }
 
-    pub fn layer_exists(&self,  hash: &ImageId) -> SqlResult<bool> {
-        let count = self.connection.query_one(
+    pub fn layer_exists(&self, hash: &ImageId) -> SqlResult<bool> {
+        StateSession::layer_exists_internal(&self.connection, hash)
+    }
+
+    fn layer_exists_internal(connection: &Connection, hash: &ImageId) -> SqlResult<bool> {
+        let count = connection.query_one(
             "SELECT COUNT(*) FROM layers WHERE hash=?1",
             [hash],
             |row| row.get::<_, i64>(0)
@@ -192,6 +196,22 @@ impl StateSession {
 
     pub fn insert_layer(&self, layer: Layer) -> SqlResult<()> {
         StateSession::insert_layer_internal(&self.connection, layer)
+    }
+
+    pub fn insert_or_replace_layer(&mut self, layer: Layer) -> SqlResult<()> {
+        let transaction = self.connection.transaction()?;
+
+        if StateSession::layer_exists_internal(&transaction, &layer.hash)? {
+            transaction.execute(
+                "UPDATE layers set metadata=?2 WHERE hash=?1",
+                (&layer.hash, &serde_json::to_value(&layer).unwrap())
+            )?;
+        } else {
+            StateSession::insert_layer_internal(&transaction, layer)?;
+        }
+
+        transaction.commit()?;
+        Ok(())
     }
 
     fn insert_layer_internal(connection: &Connection, layer: Layer) -> SqlResult<()> {

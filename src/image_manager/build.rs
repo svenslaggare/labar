@@ -78,7 +78,7 @@ impl BuildManager {
     }
 
     fn build_layer(&self,
-                   session: &StateSession,
+                   session: &mut StateSession,
                    layer_manager: &LayerManager,
                    build_context: &Path,
                    mut layer: Layer,
@@ -121,9 +121,7 @@ impl BuildManager {
         }
 
         if force {
-            if !layer_manager.layer_exist(session, &layer.hash)? {
-                layer_manager.insert_layer(session, layer)?;
-            }
+            layer_manager.insert_or_replace_layer(session, layer)?;
         } else {
             layer_manager.insert_layer(session, layer)?;
         }

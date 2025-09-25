@@ -41,6 +41,11 @@ impl LayerManager {
         Ok(())
     }
 
+    pub fn insert_or_replace_layer(&self, session: &mut StateSession, layer: Layer) -> ImageManagerResult<()> {
+        session.insert_or_replace_layer(layer)?;
+        Ok(())
+    }
+
     pub fn remove_layer(&self, session: &StateSession, hash: &ImageId) -> ImageManagerResult<()> {
         let removed = session.remove_layer(hash)?;
         if !removed {
