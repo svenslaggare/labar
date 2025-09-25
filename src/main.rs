@@ -185,7 +185,9 @@ enum RegistryCommandLineInput {
         #[structopt(help="The password")]
         password: Password,
         #[structopt(help="The list of access rights")]
-        access_rights: Vec<AccessRight>
+        access_rights: Vec<AccessRight>,
+        #[structopt(long, help="If this user, update instead")]
+        update: bool
     },
     #[structopt(about="Removes a new user to the registry")]
     RemoveUser {
@@ -415,11 +417,11 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     let mut image_manager = ImageManager::new(registry_config.image_manager_config(), printer.clone()).unwrap();
                     image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
                 }
-                RegistryCommandLineInput::AddUser { config_file, username, password, access_rights } => {
+                RegistryCommandLineInput::AddUser { config_file, username, password, access_rights, update } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
                     let auth_provider = SqliteAuthProvider::new(&registry_config.data_path, Vec::new()).map_err(|_| "Failed to setup auth provider")?;
 
-                    if !auth_provider.add_user(username, password, access_rights) {
+                    if !auth_provider.add_user(username, password, access_rights, update) {
                         return Err("User already exists".to_owned());
                     }
                 }

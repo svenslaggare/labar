@@ -142,14 +142,22 @@ impl SqliteAuthProvider {
         Ok(provider)
     }
 
-    pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>) -> bool {
+    pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>, update: bool) -> bool {
         fn internal(provider: &SqliteAuthProvider,
-                    username: String, password: Password, access_rights: Vec<AccessRight>) -> SqlResult<bool> {
+                    username: String, password: Password, access_rights: Vec<AccessRight>,
+                    update: bool) -> SqlResult<bool> {
             let mut session = provider.state_manager.pooled_session()?;
+
+            if update {
+                if provider.db_get_user(&mut session, &username)?.is_some() {
+                    return Ok(provider.db_update_user(&mut session, &username, &password, &access_rights).is_ok());
+                }
+            }
+
             Ok(provider.db_add_user(&mut session, &username, &password, &access_rights).is_ok())
         }
 
-        internal(self, username, password, access_rights).unwrap_or(false)
+        internal(self, username, password, access_rights, update).unwrap_or(false)
     }
 
     pub fn remove_user(&self, username: &str) -> bool {
@@ -178,6 +186,18 @@ impl SqliteAuthProvider {
                    access_rights: &Vec<AccessRight>) -> SqlResult<()> {
         session.connection.execute(
             "INSERT INTO registry_users (username, password, access_rights) VALUES (?1, ?2, ?3)",
+            (username, password.to_string(), &serde_json::to_value(access_rights).unwrap())
+        )?;
+        Ok(())
+    }
+
+    fn db_update_user(&self,
+                      session: &mut StateSession,
+                      username: &str,
+                      password: &Password,
+                      access_rights: &Vec<AccessRight>) -> SqlResult<()> {
+        session.connection.execute(
+            "UPDATE registry_users SET password=?2, access_rights=?3 WHERE username = ?1",
             (username, password.to_string(), &serde_json::to_value(access_rights).unwrap())
         )?;
         Ok(())
