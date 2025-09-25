@@ -16,6 +16,7 @@ use rusqlite::types::FromSqlError;
 
 use crate::image_manager::{SqlResult, StateManager, StateSession};
 use crate::registry::model::{AppError, AppResult};
+use crate::registry::RegistryConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AccessRight {
@@ -140,6 +141,10 @@ impl SqliteAuthProvider {
         }
 
         Ok(provider)
+    }
+
+    pub fn from_registry_config(registry_config: &RegistryConfig) -> SqlResult<SqliteAuthProvider> {
+        SqliteAuthProvider::new(&registry_config.data_path, registry_config.initial_users.clone())
     }
 
     pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>, update: bool) -> bool {

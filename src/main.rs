@@ -419,7 +419,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 }
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights, update } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
-                    let auth_provider = SqliteAuthProvider::new(&registry_config.data_path, Vec::new()).map_err(|_| "Failed to setup auth provider")?;
+                    let auth_provider = SqliteAuthProvider::from_registry_config(&registry_config).map_err(|_| "Failed to setup auth provider")?;
 
                     if !auth_provider.add_user(username, password, access_rights, update) {
                         return Err("User already exists".to_owned());
@@ -427,7 +427,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 }
                 RegistryCommandLineInput::RemoveUser { config_file, username } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
-                    let auth_provider = SqliteAuthProvider::new(&registry_config.data_path, Vec::new()).map_err(|_| "Failed to setup auth provider")?;
+                    let auth_provider = SqliteAuthProvider::from_registry_config(&registry_config).map_err(|_| "Failed to setup auth provider")?;
 
                     if !auth_provider.remove_user(&username) {
                         return Err("Failed to remove user".to_owned());
