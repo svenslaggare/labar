@@ -401,7 +401,7 @@ impl ImageManager {
                                 let retry_time = 2.0;
                                 tokio::time::sleep(Duration::from_secs_f64(retry_time)).await;
                                 self.printer.println(&format!(
-                                    "Failed to pull layer due to: {} - will retry in {} seconds...",
+                                    "{} - will retry in {} seconds...",
                                     err.to_string(),
                                     retry_time
                                 ));
