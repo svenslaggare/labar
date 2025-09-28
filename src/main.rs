@@ -145,7 +145,9 @@ enum CommandLineInput {
         #[structopt(name="tag", help="The image to pull")]
         tag: ImageTag,
         #[structopt(name="new_tag", help="Use this as the tag of the image instead")]
-        new_tag: Option<ImageTag>
+        new_tag: Option<ImageTag>,
+        #[structopt(long, name="retry", help="If failed to pull, do this number of retries")]
+        retry: Option<usize>
     },
     #[structopt(about="Pushes a local image to a remote registry")]
     Push {
@@ -404,7 +406,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config, printer.clone());
             transform_registry_result(image_manager.push(&tag, file_config.default_registry()).await)?;
         },
-        CommandLineInput::Pull { tag, new_tag } => {
+        CommandLineInput::Pull { tag, new_tag, retry } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             transform_registry_result(image_manager.pull(
@@ -412,6 +414,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     tag,
                     default_registry: file_config.default_registry(),
                     new_tag,
+                    retry
                 }
             ).await)?;
         },

@@ -28,6 +28,7 @@ pub enum ImageManagerError {
     UnpackingNotFound { path: String },
     FolderNotEmpty { path: String },
     RegistryError { error: RegistryError },
+    PullFailed { error: RegistryError },
     NoRegistryDefined,
     SelfReferential,
     InvalidUnpack,
@@ -106,6 +107,9 @@ impl std::fmt::Display for ImageManagerError {
             },
             ImageManagerError::RegistryError { error } => {
                 write!(f, "{}", error)
+            }
+            ImageManagerError::PullFailed { error } => {
+                write!(f, "Failed to pull layer due to: {}", error)
             }
             ImageManagerError::NoRegistryDefined => {
                 write!(f, "No registry defined")

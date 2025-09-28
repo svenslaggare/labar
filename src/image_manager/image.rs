@@ -382,7 +382,34 @@ impl ImageManager {
                 visit_layer(&mut stack, &layer);
             } else {
                 self.printer.println(&format!("\t* Downloading layer: {}", current));
-                let layer = self.registry_manager.download_layer(&registry_session, &current).await?;
+                let mut retries = request.retry.unwrap_or(0);
+                let layer = loop {
+                    let layer = self.registry_manager.download_layer(&registry_session, &current)
+                        .await
+                        .map_err(|error| ImageManagerError::PullFailed { error });
+
+                    match layer {
+                        Ok(layer) => {
+                            break layer;
+                        },
+                        Err(err) => {
+                            if retries == 0 {
+                                return Err(err);
+                            } else {
+                                retries -= 1;
+
+                                let retry_time = 2.0;
+                                tokio::time::sleep(Duration::from_secs_f64(retry_time)).await;
+                                self.printer.println(&format!(
+                                    "Failed to pull layer due to: {} - will retry in {} seconds...",
+                                    err.to_string(),
+                                    retry_time
+                                ));
+                            }
+                        }
+                    }
+                };
+
                 self.insert_layer(layer.clone())?;
 
                 if top_level_hash.is_none() {
@@ -585,7 +612,8 @@ impl ImageManager {
 pub struct PullRequest<'a> {
     pub tag: ImageTag,
     pub default_registry: Option<&'a str>,
-    pub new_tag: Option<ImageTag>
+    pub new_tag: Option<ImageTag>,
+    pub retry: Option<usize>
 }
 
 pub struct DownloadResult {

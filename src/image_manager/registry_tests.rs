@@ -58,6 +58,7 @@ async fn test_pull() {
             tag: image_tag.clone(),
             default_registry: None,
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
@@ -129,6 +130,7 @@ async fn test_push_pull() {
             tag: image_tag.clone(),
             default_registry: None,
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
@@ -202,6 +204,7 @@ async fn test_push_pull_default_registry() {
             tag: image_tag.clone(),
             default_registry: Some(&default_registry),
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
@@ -280,6 +283,7 @@ async fn test_push_pull_with_ref() {
             tag: image_tag.clone(),
             default_registry: None,
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
@@ -377,6 +381,7 @@ async fn test_sync() {
             tag: image_tag.clone(),
             default_registry: None,
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
@@ -465,6 +470,7 @@ async fn test_pull_through() {
             tag: image_tag.clone(),
             default_registry: None,
             new_tag: None,
+            retry: None,
         }).await;
         assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
         let pull_image = pull_result.unwrap();
