@@ -400,6 +400,8 @@ impl ImageManager {
     }
 
     pub async fn push(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<usize> {
+        let top_layer = self.get_layer(&tag.clone().to_ref())?;
+
         let tag = tag.clone().set_registry_opt_if_empty(default_registry);
 
         let session = self.state_manager.pooled_session()?;
@@ -410,7 +412,6 @@ impl ImageManager {
         self.printer.println(&format!("Pushing image {}", tag));
 
         let mut stack = Vec::new();
-        let top_layer = self.get_layer(&tag.clone().to_ref())?;
         stack.push(top_layer.hash.clone());
 
         let visit_layer = |stack: &mut Vec<ImageId>, layer: &Layer| {
