@@ -26,6 +26,11 @@ COPY testdata/rawdata/file1.txt file1.txt
 ## Unpacking images
 To unpack the image (to make the content available), use the `labar unpack` command. This will unpack the folder structure into a new folder, but the actual files are linked into new directory, leading to no extra space used.
 
+Multiple unpackings can be done at the same time using an unpack file (`labar unpack-file` command):
+```
+image:latest /home/labar/test
+```
+
 ## Registry
 To distribute images, Labar uses an HTTP based registry. This can be started using `labar registry run` command.
 

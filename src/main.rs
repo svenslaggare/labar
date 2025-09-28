@@ -21,7 +21,7 @@ use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest};
+use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest, UnpackFile};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, Password, SqliteAuthProvider};
 use crate::registry::config::{RegistryConfig};
@@ -90,6 +90,13 @@ enum CommandLineInput {
         destination: String,
         #[structopt(long, help="Replaces the existing unpacking")]
         replace: bool,
+        #[structopt(long, help="Simulates what an unpacking would do")]
+        dry_run: bool
+    },
+    #[structopt(about="Unpacks from a definition file")]
+    UnpackFile {
+        #[structopt(name="file", help="The file with the unpack definition")]
+        file: String,
         #[structopt(long, help="Simulates what an unpacking would do")]
         dry_run: bool
     },
@@ -346,6 +353,15 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             };
 
             image_manager.unpack(request).map_err(|err| format!("{}", err))?;
+        },
+        CommandLineInput::UnpackFile { file, dry_run } => {
+            let _unpack_lock = create_unpack_lock(&file_config);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
+
+            let unpack_content = std::fs::read_to_string(file).map_err(|err| format!("Unpack definition not found: {}", err))?;
+            let unpack_file = UnpackFile::parse(&unpack_content, dry_run).map_err(|err| format!("Failed parsing build definition: {}", err))?;
+
+            image_manager.unpack_file(unpack_file).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {
             let _unpack_lock = create_unpack_lock(&file_config);

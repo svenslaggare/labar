@@ -1,10 +1,11 @@
 use std::collections::HashSet;
+use std::fmt::{Display, Formatter};
 use std::fs::{File};
 use std::io::{BufReader};
 use std::path::{Path, PathBuf};
-
+use std::str::FromStr;
 use chrono::{DateTime, Local};
-
+use itertools::izip;
 use rusqlite::Row;
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +29,14 @@ pub struct Unpacking {
 }
 
 impl Unpacking {
+    pub fn new(layer: &Layer, destination: &str) -> Unpacking {
+        Unpacking {
+            hash: layer.hash.clone(),
+            destination: destination.to_owned(),
+            time: Local::now()
+        }
+    }
+
     pub fn from_row(row: &Row) -> rusqlite::Result<Unpacking> {
         Ok(
             Unpacking {
@@ -77,46 +86,103 @@ impl UnpackManager {
         }
     }
 
+    pub fn unpack_file(&self,
+                       session: &StateSession,
+                       layer_manager: &LayerManager,
+                       unpack_file: UnpackFile) -> ImageManagerResult<()> {
+        let dry_run = unpack_file.requests.get(0).map(|request| request.dry_run).unwrap_or(false);
+        if !dry_run {
+            self.unpack_requests_with(
+                &session,
+                &StandardUnpacker,
+                layer_manager,
+                &unpack_file.requests
+            )
+        } else {
+            self.unpack_requests_with(
+                &session,
+                &DryRunUnpacker::new(self.printer.clone()),
+                layer_manager,
+                &unpack_file.requests
+            )
+        }
+    }
+
     fn unpack_with(&self,
                    session: &StateSession,
                    unpacker: &impl Unpacker,
                    layer_manager: &LayerManager,
                    request: UnpackRequest) -> ImageManagerResult<()> {
-        if request.replace && request.unpack_folder.exists() {
-            if let Err(err) = self.remove_unpacking(&session, layer_manager, &request.unpack_folder, true) {
-                self.printer.println(&format!("Failed removing packing due to: {}", err));
+        self.unpack_requests_with(
+            session,
+            unpacker,
+            layer_manager,
+            &[request]
+        )
+    }
+
+    fn unpack_requests_with(&self,
+                            session: &StateSession,
+                            unpacker: &impl Unpacker,
+                            layer_manager: &LayerManager,
+                            requests: &[UnpackRequest]) -> ImageManagerResult<()> {
+        let mut top_layers = Vec::new();
+        for request in requests.iter() {
+            top_layers.push(layer_manager.get_layer(&session, &request.reference)?);
+        }
+
+        for request in requests.iter() {
+            if request.replace && request.unpack_folder.exists() {
+                if let Err(err) = self.remove_unpacking(&session, layer_manager, &request.unpack_folder, true) {
+                    self.printer.println(&format!("Failed removing packing due to: {}", err));
+                }
             }
         }
 
-        let top_layer = layer_manager.get_layer(&session, &request.reference)?;
-        if !request.unpack_folder.exists() {
-            unpacker.create_dir_all(&request.unpack_folder)?;
+        let mut unpack_folders = Vec::new();
+        for request in requests.iter() {
+            if !request.unpack_folder.exists() {
+                unpacker.create_dir_all(&request.unpack_folder)?;
+            }
+
+            let unpack_folder = unpacker.canonicalize(&request.unpack_folder)?;
+
+            self.check_exists(session, &unpack_folder)?;
+            self.check_empty(&unpack_folder)?;
+
+            unpack_folders.push(unpack_folder);
         }
 
-        let unpack_folder = unpacker.canonicalize(&request.unpack_folder)?;
+        for (request, top_layer, unpack_folder) in izip!(requests.iter(), top_layers.iter(), unpack_folders.iter()) {
+            let unpack_folder_str = unpack_folder.to_str().unwrap().to_owned();
+            self.printer.println(&format!("Unpacking {} ({}) to {}", &request.reference, top_layer.hash, unpack_folder_str));
+            self.unpack_layer(&session, unpacker, layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
+
+            if unpacker.should_insert() {
+                session.insert_unpacking(Unpacking::new(&top_layer, &unpack_folder_str))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_empty(&self, unpack_folder: &Path) -> ImageManagerResult<()> {
+        if unpack_folder.exists() {
+            if std::fs::read_dir(&unpack_folder)?.count() > 0 {
+                return Err(
+                    ImageManagerError::FolderNotEmpty { path: unpack_folder.to_str().unwrap().to_owned() }
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn check_exists(&self, session: &StateSession, unpack_folder: &Path) -> ImageManagerResult<()> {
         let unpack_folder_str = unpack_folder.to_str().unwrap().to_owned();
 
         if session.unpacking_exist_at(&unpack_folder_str)? {
-            return Err(ImageManagerError::UnpackingExist { path: unpack_folder_str.clone() });
-        }
-
-        if unpack_folder.exists() {
-            if std::fs::read_dir(&unpack_folder)?.count() > 0 {
-                return Err(ImageManagerError::FolderNotEmpty { path: unpack_folder_str.clone() });
-            }
-        }
-
-        self.printer.println(&format!("Unpacking {} ({}) to {}", &request.reference, top_layer.hash, unpack_folder_str));
-        self.unpack_layer(&session, unpacker, layer_manager, &mut HashSet::new(), &top_layer, &unpack_folder)?;
-
-        if unpacker.should_insert() {
-            session.insert_unpacking(
-                Unpacking {
-                    hash: top_layer.hash.clone(),
-                    destination: unpack_folder_str,
-                    time: Local::now()
-                }
-            )?;
+            return Err(ImageManagerError::UnpackingExist { path: unpack_folder_str.to_owned() });
         }
 
         Ok(())
@@ -327,6 +393,63 @@ pub struct UnpackRequest {
     pub dry_run: bool
 }
 
+pub struct UnpackFile {
+    pub requests: Vec<UnpackRequest>
+}
+
+impl UnpackFile {
+    pub fn parse(text: &str, dry_run: bool) -> Result<UnpackFile, UnpackFileParseError> {
+        let mut requests = Vec::new();
+
+        for line in text.lines() {
+            let parts = line.split_whitespace().map(|x| x.to_owned()).collect::<Vec<_>>();
+            if parts.len() >= 2 {
+                let reference = Reference::from_str(&parts[0]).map_err(|error| UnpackFileParseError::InvalidReference { error })?;
+                let unpack_folder = Path::new(&parts[1]).to_owned();
+
+                let mut replace = false;
+                if parts.len() == 3 {
+                    if parts[2] == "--replace" {
+                        replace = true;
+                    }
+                }
+
+                requests.push(
+                    UnpackRequest {
+                        reference,
+                        unpack_folder,
+                        replace,
+                        dry_run
+                    }
+                );
+            } else {
+                return Err(UnpackFileParseError::TooFewArguments);
+            }
+        }
+
+        Ok(
+            UnpackFile {
+                requests
+            }
+        )
+    }
+}
+
+#[derive(Debug)]
+pub enum UnpackFileParseError {
+    TooFewArguments,
+    InvalidReference { error: String }
+}
+
+impl Display for UnpackFileParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UnpackFileParseError::TooFewArguments => write!(f, "Too few arguments, expected at least 2"),
+            UnpackFileParseError::InvalidReference { error } => write!(f, "Failed to parse image reference due to: {}", error)
+        }
+    }
+}
+
 pub trait Unpacker {
     fn should_insert(&self) -> bool;
 
@@ -475,6 +598,69 @@ fn test_unpack() {
 
     assert!(unpack_result.is_ok());
     assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
+}
+
+#[test]
+fn test_unpack_file() {
+    use std::str::FromStr;
+
+    use crate::reference::ImageTag;
+    use crate::image_manager::build::BuildManager;
+    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::printing::{ConsolePrinter};
+    use crate::image_manager::state::StateManager;
+
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+
+    let printer = ConsolePrinter::new();
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config.clone(), printer.clone());
+    let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
+    let mut session = state_manager.session().unwrap();
+
+    super::test_helpers::build_image2(
+        &mut session,
+        &layer_manager,
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap()
+    ).unwrap();
+
+    super::test_helpers::build_image2(
+        &mut session,
+        &layer_manager,
+        &build_manager,
+        Path::new("testdata/definitions/simple5.labarfile"),
+        ImageTag::from_str("test2").unwrap()
+    ).unwrap();
+
+    let unpack_result = unpack_manager.unpack_file(
+        &session,
+        &layer_manager,
+        UnpackFile {
+            requests: vec![
+                UnpackRequest {
+                    reference: Reference::from_str("test").unwrap(),
+                    unpack_folder: tmp_folder.owned().join("unpack"),
+                    replace: false,
+                    dry_run: false,
+                },
+                UnpackRequest {
+                    reference: Reference::from_str("test2").unwrap(),
+                    unpack_folder: tmp_folder.owned().join("unpack2"),
+                    replace: false,
+                    dry_run: false,
+                }
+            ],
+        }
+    );
+
+    assert!(unpack_result.is_ok());
+    assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
+    assert!(tmp_folder.owned().join("unpack2").join("test/file1.txt").exists());
+    assert!(tmp_folder.owned().join("unpack2").join("test/file2.txt").exists());
 }
 
 #[test]
@@ -762,4 +948,20 @@ fn test_extract() {
     let zip_archive = ZipArchive::new(File::open(archive_file).unwrap()).unwrap();
     assert_eq!(vec!["test/file1.txt", "test2/"], zip_archive.file_names().collect::<Vec<_>>());
     assert_eq!(973, zip_archive.decompressed_size().unwrap() as u64);
+}
+
+#[test]
+fn test_parse_unpack_file1() {
+    let content = std::fs::read_to_string("testdata/unpack_file/test1.unpackfile").unwrap();
+    let unpack_file = UnpackFile::parse(&content, false).unwrap();
+
+    assert_eq!(2, unpack_file.requests.len());
+
+    assert_eq!(Reference::from_str("test:latest").unwrap(), unpack_file.requests[0].reference);
+    assert_eq!(Path::new("/home/labar/test").to_owned(), unpack_file.requests[0].unpack_folder);
+    assert_eq!(false, unpack_file.requests[0].replace);
+
+    assert_eq!(Reference::from_str("test2:latest").unwrap(), unpack_file.requests[1].reference);
+    assert_eq!(Path::new("/home/labar/test2").to_owned(), unpack_file.requests[1].unpack_folder);
+    assert_eq!(true, unpack_file.requests[1].replace);
 }

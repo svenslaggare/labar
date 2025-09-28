@@ -4,7 +4,7 @@ use std::path::Path;
 use std::time::Duration;
 use chrono::Local;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError};
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackFile};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
@@ -86,6 +86,12 @@ impl ImageManager {
     pub fn unpack(&mut self, request: UnpackRequest) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
         self.unpack_manager.unpack(&session, &mut self.layer_manager, request)?;
+        Ok(())
+    }
+
+    pub fn unpack_file(&mut self, unpack_file: UnpackFile) -> ImageManagerResult<()> {
+        let session = self.state_manager.pooled_session()?;
+        self.unpack_manager.unpack_file(&session, &mut self.layer_manager, unpack_file)?;
         Ok(())
     }
 

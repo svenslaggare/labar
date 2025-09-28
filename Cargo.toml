@@ -16,6 +16,7 @@ assets = [
 [dependencies]
 regex = "1"
 chrono = { version = "0.4", features = ["serde"] }
+itertools = "0.14"
 
 log = "0.4"
 fern = "0.7"

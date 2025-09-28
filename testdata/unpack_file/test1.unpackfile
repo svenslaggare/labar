@@ -1,0 +1,2 @@
+test:latest /home/labar/test
+test2:latest /home/labar/test2 --replace
