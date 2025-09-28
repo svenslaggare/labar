@@ -230,7 +230,7 @@ impl SqliteAuthProvider {
                 Ok(
                     RegistryUser {
                         username: row.get(0)?,
-                        password: Password::from_hash(row.get(1)?),
+                        password: Password::from_hash(&row.get::<_, String>(1)?),
                         access_rights,
                     }
                 )
@@ -288,8 +288,8 @@ struct RegistryUser {
 pub struct Password(String);
 
 impl Password {
-    pub fn from_hash(hash: String) -> Password {
-        Password(hash)
+    pub fn from_hash(hash: &str) -> Password {
+        Password(hash.to_owned())
     }
 
     pub fn from_plain_text(password: &str) -> Password {
@@ -307,7 +307,7 @@ impl FromStr for Password {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        Ok(Password::from_plain_text(text))
+        Ok(Password::from_hash(text))
     }
 }
 
