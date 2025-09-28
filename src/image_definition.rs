@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use regex::Regex;
-
+use crate::helpers::split_parts;
 use crate::image::LinkType;
 use crate::reference::Reference;
 
@@ -201,7 +201,7 @@ impl ImageDefinition {
                 continue;
             }
 
-            let mut parts = line.split_whitespace().map(|x| x.to_owned()).collect::<Vec<_>>();
+            let mut parts = split_parts(&line);
             if parts.len() >= 1 {
                 for part in parts.iter_mut().skip(1) {
                     for regex in &variable_regex {
@@ -835,6 +835,24 @@ fn test_parse_copy9() {
             LayerOperationDefinition::File {
                 path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
                 link_type: LinkType::Hard, writable: true
+            }
+        ],
+    );
+}
+
+#[test]
+fn test_parse_copy10() {
+    let result = image_definition_from_file2("testdata/parsing/success/copy10.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(1, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file 1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
             }
         ],
     );

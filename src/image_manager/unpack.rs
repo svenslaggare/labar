@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use zip::write::{SimpleFileOptions};
 use zip::ZipWriter;
 
-use crate::helpers::clean_path;
+use crate::helpers::{clean_path, split_parts};
 use crate::image_manager::layer::{LayerManager};
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
@@ -402,7 +402,7 @@ impl UnpackFile {
         let mut requests = Vec::new();
 
         for line in text.lines() {
-            let parts = line.split_whitespace().map(|x| x.to_owned()).collect::<Vec<_>>();
+            let parts = split_parts(&line);
             if parts.len() >= 2 {
                 let reference = Reference::from_str(&parts[0]).map_err(|error| UnpackFileParseError::InvalidReference { error })?;
                 let unpack_folder = Path::new(&parts[1]).to_owned();

@@ -4,6 +4,45 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub fn split_parts(line: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+
+    let mut current = Vec::new();
+    let mut escaped = false;
+    for char in line.chars() {
+        if char.is_whitespace() && !escaped {
+            if !current.is_empty() {
+                parts.push(String::from_iter(current));
+            }
+
+            current = Vec::new();
+        } else if char == '\\' {
+            escaped = true;
+        } else {
+            current.push(char);
+            escaped = false;
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(String::from_iter(current));
+    }
+
+    parts
+}
+
+#[test]
+fn test_split_parts1() {
+    let parts = split_parts("test this");
+    assert_eq!(vec!["test", "this"], parts);
+}
+
+#[test]
+fn test_split_parts2() {
+    let parts = split_parts("test\\ that this");
+    assert_eq!(vec!["test that", "this"], parts);
+}
+
 pub struct TablePrinter {
     rows: Vec<Vec<String>>,
     column_lengths: Vec<usize>
