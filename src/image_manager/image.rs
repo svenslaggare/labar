@@ -185,6 +185,7 @@ impl ImageManager {
         for operation in &layer.operations {
             match operation {
                 LayerOperation::File { source_path, .. } => {
+                    let source_path = self.config.base_folder.join(source_path);
                     reclaimed_size += DataSize(std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
                 },
                 _ => {}
