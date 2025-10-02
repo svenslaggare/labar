@@ -23,7 +23,7 @@ use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
 use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest, UnpackFile};
 use crate::reference::{ImageTag, Reference};
-use crate::registry::auth::{AccessRight, Password, SqliteAuthProvider};
+use crate::registry::auth::{AccessRight, AddUserResult, Password, SqliteAuthProvider};
 use crate::registry::config::{RegistryConfig};
 
 #[derive(Debug, StructOpt)]
@@ -439,9 +439,20 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights, update } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
                     let auth_provider = SqliteAuthProvider::from_registry_config(&registry_config).map_err(|_| "Failed to setup auth provider")?;
-
-                    if !auth_provider.add_user(username, password, access_rights, update) {
-                        return Err("User already exists".to_owned());
+                    
+                    match auth_provider.add_user(username, password, access_rights, update) {
+                        AddUserResult::Failed => {
+                            return Err("Failed to add user.".to_owned());
+                        }
+                        AddUserResult::AlreadyExists => {
+                            return Err("User already exists.".to_owned());
+                        }
+                        AddUserResult::Added => {
+                            println!("Added user.")
+                        }
+                        AddUserResult::Updated => {
+                            println!("Updated user.");
+                        }
                     }
                 }
                 RegistryCommandLineInput::RemoveUser { config_file, username } => {

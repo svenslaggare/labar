@@ -147,22 +147,30 @@ impl SqliteAuthProvider {
         SqliteAuthProvider::new(&registry_config.data_path, registry_config.initial_users.clone())
     }
 
-    pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>, update: bool) -> bool {
+    pub fn add_user(&self, username: String, password: Password, access_rights: Vec<AccessRight>, update: bool) -> AddUserResult {
         fn internal(provider: &SqliteAuthProvider,
                     username: String, password: Password, access_rights: Vec<AccessRight>,
-                    update: bool) -> SqlResult<bool> {
+                    update: bool) -> SqlResult<AddUserResult> {
             let mut session = provider.state_manager.pooled_session()?;
 
             if update {
                 if provider.db_get_user(&mut session, &username)?.is_some() {
-                    return Ok(provider.db_update_user(&mut session, &username, &password, &access_rights).is_ok());
+                    return if provider.db_update_user(&mut session, &username, &password, &access_rights).is_ok() {
+                        Ok(AddUserResult::Updated)
+                    } else {
+                        Ok(AddUserResult::AlreadyExists)
+                    }
                 }
             }
 
-            Ok(provider.db_add_user(&mut session, &username, &password, &access_rights).is_ok())
+            if provider.db_add_user(&mut session, &username, &password, &access_rights).is_ok() {
+                Ok(AddUserResult::Added)
+            } else {
+                Ok(AddUserResult::AlreadyExists)
+            }
         }
 
-        internal(self, username, password, access_rights, update).unwrap_or(false)
+        internal(self, username, password, access_rights, update).unwrap_or(AddUserResult::Failed)
     }
 
     pub fn remove_user(&self, username: &str) -> bool {
@@ -275,6 +283,13 @@ impl AuthProvider for SqliteAuthProvider {
                 Ok(false)
             })
     }
+}
+
+pub enum AddUserResult {
+    Failed,
+    AlreadyExists,
+    Added,
+    Updated
 }
 
 struct RegistryUser {
