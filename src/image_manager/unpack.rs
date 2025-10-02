@@ -404,7 +404,7 @@ impl UnpackFile {
         for line in text.lines() {
             let parts = split_parts(&line);
             if parts.len() >= 2 {
-                let reference = Reference::from_str(&parts[0]).map_err(|error| UnpackFileParseError::InvalidReference { error })?;
+                let reference = Reference::from_str(&parts[0]).map_err(|error| UnpackFileParseError::InvalidReference(error))?;
                 let unpack_folder = Path::new(&parts[1]).to_owned();
 
                 let mut replace = false;
@@ -433,19 +433,26 @@ impl UnpackFile {
             }
         )
     }
+
+    pub fn parse_file(path: &Path, dry_run: bool) -> Result<UnpackFile, UnpackFileParseError> {
+        let content = std::fs::read_to_string(path).map_err(|err| UnpackFileParseError::DefinitionFileNotFound(err))?;
+        UnpackFile::parse(&content, dry_run)
+    }
 }
 
 #[derive(Debug)]
 pub enum UnpackFileParseError {
+    DefinitionFileNotFound(std::io::Error),
     TooFewArguments,
-    InvalidReference { error: String }
+    InvalidReference(String)
 }
 
 impl Display for UnpackFileParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            UnpackFileParseError::DefinitionFileNotFound(error) => write!(f, "Definition file not found: {}", error),
             UnpackFileParseError::TooFewArguments => write!(f, "Too few arguments, expected at least 2"),
-            UnpackFileParseError::InvalidReference { error } => write!(f, "Failed to parse image reference due to: {}", error)
+            UnpackFileParseError::InvalidReference(error) => write!(f, "Failed to parse image reference due to: {}", error)
         }
     }
 }

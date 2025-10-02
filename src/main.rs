@@ -231,9 +231,8 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             println!("Building image {}...", tag);
             let start_time = Instant::now();
-            let image_definition_content = std::fs::read_to_string(file).map_err(|err| format!("Build definition not found: {}", err))?;
-            let image_definition = ImageDefinition::parse(
-                &image_definition_content,
+            let image_definition = ImageDefinition::parse_file(
+                Path::new(&file),
                 &image_definition_context
             ).map_err(|err| format!("Failed parsing build definition: {}", err))?;
 
@@ -379,9 +378,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            let unpack_content = std::fs::read_to_string(file).map_err(|err| format!("Unpack definition not found: {}", err))?;
-            let unpack_file = UnpackFile::parse(&unpack_content, dry_run).map_err(|err| format!("Failed parsing build definition: {}", err))?;
-
+            let unpack_file = UnpackFile::parse_file(Path::new(&file), dry_run).map_err(|err| format!("Failed parsing unpack definition: {}", err))?;
             image_manager.unpack_file(unpack_file).map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::RemoveUnpacking { path, force } => {

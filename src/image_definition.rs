@@ -72,6 +72,7 @@ pub enum LayerOperationDefinition {
 
 #[derive(Debug)]
 pub enum ImageParseError {
+    DefinitionFileNotFound(std::io::Error),
     InvalidLine(String),
     UndefinedCommand(String),
     FromOnlyOnFirst,
@@ -104,6 +105,7 @@ impl From<StripPrefixError> for ImageParseError {
 impl Display for ImageParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            ImageParseError::DefinitionFileNotFound(error) => write!(f, "Definition file not found: {}", error),
             ImageParseError::InvalidLine(line) => write!(f, "Invalid line: {}", line),
             ImageParseError::UndefinedCommand(command) => write!(f, "'{}' is not a defined command", command),
             ImageParseError::FromOnlyOnFirst => write!(f, "FROM statement only allowed on the first line"),
@@ -323,9 +325,13 @@ impl ImageDefinition {
         ImageDefinition::parse(content, &ImageDefinitionContext::new())
     }
 
+    pub fn parse_file(path: &Path, context: &ImageDefinitionContext) -> ImageParseResult<ImageDefinition> {
+        let content = std::fs::read_to_string(path).map_err(|err| ImageParseError::DefinitionFileNotFound(err))?;
+        ImageDefinition::parse(&content, context)
+    }
+
     pub fn parse_file_without_context(path: &Path) -> ImageParseResult<ImageDefinition> {
-        let content = std::fs::read_to_string(path)?;
-        ImageDefinition::parse(&content, &ImageDefinitionContext::new())
+        ImageDefinition::parse_file(path, &ImageDefinitionContext::new())
     }
 
     pub fn create_from_directory(directory: &Path) -> ImageParseResult<ImageDefinition> {
