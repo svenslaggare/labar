@@ -20,6 +20,7 @@ pub fn build_image(image_manager: &mut ImageManager,
         image_definition,
         tag: image_tag,
         force: false,
+        verbose_output: false,
     }).map_err(|err| err.to_string())
 }
 
@@ -38,6 +39,7 @@ pub fn build_image2(session: &mut StateSession,
             image_definition,
             tag: image_tag,
             force: false,
+            verbose_output: false,
         }
     ).map_err(|err| err.to_string())
 }

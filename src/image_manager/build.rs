@@ -52,7 +52,7 @@ impl BuildManager {
             let hash = layer.hash.clone();
 
             image_layers.push(hash.clone());
-            if self.build_layer(session, layer_manager, &request.build_context, layer, request.force)? {
+            if self.build_layer(session, layer_manager, &request.build_context, layer, request.force, request.verbose_output)? {
                 built_layers.push(hash.clone());
             }
 
@@ -82,19 +82,22 @@ impl BuildManager {
                    layer_manager: &LayerManager,
                    build_context: &Path,
                    mut layer: Layer,
-                   force: bool) -> ImageManagerResult<bool> {
+                   force: bool,
+                   verbose_output: bool) -> ImageManagerResult<bool> {
         if !force && layer_manager.layer_exist(session, &layer.hash)? {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
         }
 
-        self.printer.println(&format!("\t* Building layer: {}", layer.hash));
+        self.printer.println(&format!("\t* Building layer: {}...", layer.hash));
 
         let destination_base_path = self.config.get_layer_folder(&layer.hash);
         std::fs::create_dir_all(&destination_base_path)?;
 
         for operation in &mut layer.operations {
-            self.printer.println(&format!("\t* {}", operation));
+            if verbose_output {
+                self.printer.println(&format!("\t* {}", operation));
+            }
 
             match operation {
                 LayerOperation::File { path, source_path, original_source_path, .. } => {
@@ -274,7 +277,8 @@ pub struct BuildRequest {
     pub build_context: PathBuf,
     pub image_definition: ImageDefinition,
     pub tag: ImageTag,
-    pub force: bool
+    pub force: bool,
+    pub verbose_output: bool
 }
 
 #[derive(Debug)]
@@ -425,6 +429,7 @@ fn test_build_with_cache2() {
             image_definition: image_definition.clone(),
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
+            verbose_output: false,
         }
     );
     assert!(first_result.is_ok(), "{}", first_result.unwrap_err());
@@ -440,6 +445,7 @@ fn test_build_with_cache2() {
             image_definition: image_definition.clone(),
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
+            verbose_output: false,
         }
     );
     assert!(second_result.is_ok());
@@ -470,6 +476,7 @@ fn test_build_with_cache2() {
             image_definition,
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
+            verbose_output: false,
         }
     );
     assert!(third_result.is_ok());

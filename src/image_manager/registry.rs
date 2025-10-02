@@ -86,7 +86,10 @@ impl RegistryManager {
         Ok(layer)
     }
 
-    pub async fn download_layer(&self, registry: &RegistrySession, hash: &ImageId) -> RegistryResult<Layer> {
+    pub async fn download_layer(&self,
+                                registry: &RegistrySession,
+                                hash: &ImageId,
+                                verbose_output: bool) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
 
         let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &hash, true).await?;
@@ -152,7 +155,10 @@ impl RegistryManager {
                 }
 
                 if !local_source_path.exists() {
-                    self.printer.println(&format!("\t\t* Downloading file {}...", source_path));
+                    if verbose_output {
+                        self.printer.println(&format!("\t\t* Downloading file '{}'...", source_path));
+                    }
+
                     download_operations.push(download_file(
                         &client,
                         hash,
@@ -161,7 +167,9 @@ impl RegistryManager {
                         content_hash
                     ));
                 } else {
-                    self.printer.println(&format!("\t\t* Skipping downloading file {}.", source_path));
+                    if verbose_output {
+                        self.printer.println(&format!("\t\t* Skipping downloading file {}.", source_path));
+                    }
                 }
             }
 

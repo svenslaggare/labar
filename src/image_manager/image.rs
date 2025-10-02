@@ -62,13 +62,14 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub fn build_image_from_directory(&mut self, directory: &Path, tag: ImageTag, force: bool) -> ImageManagerResult<BuildResult> {
+    pub fn build_image_from_directory(&mut self, directory: &Path, tag: ImageTag, force: bool, verbose_output: bool) -> ImageManagerResult<BuildResult> {
         self.build_image(
             BuildRequest {
                 build_context: Default::default(),
                 image_definition: ImageDefinition::create_from_directory(directory)?,
                 tag,
-                force
+                force,
+                verbose_output
             }
         )
     }
@@ -381,10 +382,10 @@ impl ImageManager {
 
                 visit_layer(&mut stack, &layer);
             } else {
-                self.printer.println(&format!("\t* Downloading layer: {}", current));
+                self.printer.println(&format!("\t* Downloading layer: {}...", current));
                 let mut retries = request.retry.unwrap_or(0);
                 let layer = loop {
-                    let layer = self.registry_manager.download_layer(&registry_session, &current)
+                    let layer = self.registry_manager.download_layer(&registry_session, &current, request.verbose_output)
                         .await
                         .map_err(|error| ImageManagerError::PullFailed { error });
 
@@ -466,7 +467,7 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        let layer = self.registry_manager.download_layer(&registry_session, &hash).await?;
+        let layer = self.registry_manager.download_layer(&registry_session, &hash, false).await?;
         Ok(layer)
     }
 
@@ -494,7 +495,7 @@ impl ImageManager {
                     continue;
                 }
 
-                let layer = self.registry_manager.download_layer(&registry_session, &layer_to_download.hash).await?;
+                let layer = self.registry_manager.download_layer(&registry_session, &layer_to_download.hash, false).await?;
                 let layer_hash = layer.hash.clone();
                 if !commit_layer(&mut session, layer) {
                     // We failed to commit, skip this image
@@ -613,7 +614,8 @@ pub struct PullRequest<'a> {
     pub tag: ImageTag,
     pub default_registry: Option<&'a str>,
     pub new_tag: Option<ImageTag>,
-    pub retry: Option<usize>
+    pub retry: Option<usize>,
+    pub verbose_output: bool
 }
 
 pub struct DownloadResult {
@@ -703,6 +705,7 @@ fn test_build_from_directory() {
         let result = image_manager.build_image_from_directory(
             Path::new("testdata/rawdata2"),
             ImageTag::from_str("test").unwrap(),
+            false,
             false
         );
         assert!(result.is_ok());

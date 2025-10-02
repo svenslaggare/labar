@@ -41,6 +41,8 @@ enum CommandLineInput {
         arguments: Vec<String>,
         #[structopt(long, help="Forces a build, ignoring previously cached layers")]
         force: bool,
+        #[structopt(long, help="Prints more verbose output when building the image")]
+        verbose_output: bool,
     },
     #[structopt(about="Builds an image from a directory, automatically creating the operations")]
     BuildFromDirectory {
@@ -50,11 +52,13 @@ enum CommandLineInput {
         tag: ImageTag,
         #[structopt(long, help="Forces a build, ignoring previously cached layers")]
         force: bool,
+        #[structopt(long, help="Prints more verbose output when building the image")]
+        verbose_output: bool,
     },
     #[structopt(about="Removes an image")]
     RemoveImage {
-        #[structopt(name="tag", help="The tag of the image to remove")]
-        tag: ImageTag
+        #[structopt(name="tags", help="The tag(s) of the image(s) to remove")]
+        tags: Vec<ImageTag>
     },
     #[structopt(about="Tags an image")]
     #[structopt(name="tag")]
@@ -147,7 +151,9 @@ enum CommandLineInput {
         #[structopt(name="new_tag", help="Use this as the tag of the image instead")]
         new_tag: Option<ImageTag>,
         #[structopt(long, name="retry", help="If failed to pull, do this number of retries")]
-        retry: Option<usize>
+        retry: Option<usize>,
+        #[structopt(long, help="Prints more verbose output when downloading the image")]
+        verbose_output: bool,
     },
     #[structopt(about="Pushes a local image to a remote registry")]
     Push {
@@ -211,7 +217,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
     let printer = ConsolePrinter::new();
 
     match command_line_input {
-        CommandLineInput::Build { file, tag, context, arguments, force } => {
+        CommandLineInput::Build { file, tag, context, arguments, force, verbose_output } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
@@ -236,30 +242,43 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 image_definition,
                 tag,
                 force,
+                verbose_output
             };
 
             let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?.image;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
-            println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
+            println!("Built image {} ({}) of size {:.2} in {:.2} seconds.", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }
-        CommandLineInput::BuildFromDirectory { directory, tag, force } => {
+        CommandLineInput::BuildFromDirectory { directory, tag, force, verbose_output } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
             println!("Building image {}...", tag);
             let start_time = Instant::now();
 
-            let image = image_manager.build_image_from_directory(&directory, tag, force).map_err(|err| format!("{}", err))?.image;
+            let image = image_manager.build_image_from_directory(
+                &directory,
+                tag,
+                force,
+                verbose_output
+            ).map_err(|err| format!("{}", err))?.image;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
-            println!("Built image {} ({}) of size {:.2} in {:.2} seconds", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
+            println!("Built image {} ({}) of size {:.2} in {:.2} seconds.", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
         }
-        CommandLineInput::RemoveImage { tag } => {
+        CommandLineInput::RemoveImage { tags } => {
             let _write_lock = create_write_lock(&file_config);
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.remove_image(&tag).map_err(|err| format!("{}", err))?;
-        },
+            let mut results = Vec::new();
+            for tag in tags {
+                results.push(image_manager.remove_image(&tag).map_err(|err| format!("{}", err)));
+            }
+
+            for result in results {
+                result?;
+            }
+        }
         CommandLineInput::TagImage { reference, tag } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
@@ -406,7 +425,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image_manager = create_image_manager(&file_config, printer.clone());
             transform_registry_result(image_manager.push(&tag, file_config.default_registry()).await)?;
         },
-        CommandLineInput::Pull { tag, new_tag, retry } => {
+        CommandLineInput::Pull { tag, new_tag, retry, verbose_output } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
             transform_registry_result(image_manager.pull(
@@ -414,7 +433,8 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     tag,
                     default_registry: file_config.default_registry(),
                     new_tag,
-                    retry
+                    retry,
+                    verbose_output
                 }
             ).await)?;
         },
@@ -439,7 +459,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 RegistryCommandLineInput::AddUser { config_file, username, password, access_rights, update } => {
                     let registry_config = RegistryConfig::load_from_file(&config_file)?;
                     let auth_provider = SqliteAuthProvider::from_registry_config(&registry_config).map_err(|_| "Failed to setup auth provider")?;
-                    
+
                     match auth_provider.add_user(username, password, access_rights, update) {
                         AddUserResult::Failed => {
                             return Err("Failed to add user.".to_owned());
