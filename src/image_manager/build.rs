@@ -4,6 +4,7 @@ use std::time::Instant;
 use sha2::{Sha256, Digest};
 
 use crate::content::compute_content_hash;
+use crate::helpers::DataSize;
 use crate::image_manager::layer::{LayerManager};
 use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
 use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
@@ -183,6 +184,7 @@ impl BuildManager {
         layer_hash.add_parent_hash(parent_hash.as_ref());
 
         let mut added_content_hashes = Vec::new();
+        let mut storage_size = DataSize(0);
         for operation_definition in &layer_definition.operations {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
@@ -204,7 +206,10 @@ impl BuildManager {
                         );
                     }
 
-                    let modified_time = source_path_entry.metadata()?.modified()?;
+                    let metadata = source_path_entry.metadata()?;
+                    storage_size += DataSize(metadata.len() as usize);
+
+                    let modified_time = metadata.modified()?;
                     let modified_time_ms = modified_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
 
                     let content_hash = match session.get_content_hash(source_path, modified_time_ms)? {
@@ -241,7 +246,14 @@ impl BuildManager {
 
         session.insert_content_hashes(added_content_hashes)?;
 
-        Ok(Layer::new(parent_hash.clone(), layer_hash.finalize(), layer_operations))
+        Ok(
+            Layer::new(
+                parent_hash.clone(),
+                layer_hash.finalize(),
+                layer_operations,
+                storage_size
+            )
+        )
     }
 }
 

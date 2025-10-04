@@ -883,6 +883,7 @@ fn test_unpack_replace2() {
 fn test_unpack_self_reference() {
     use std::str::FromStr;
 
+    use crate::helpers::DataSize;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
     use crate::image_manager::state::StateManager;
@@ -897,12 +898,12 @@ fn test_unpack_self_reference() {
     let session = state_manager.session().unwrap();
 
     let hash = ImageId::from_str("3d197ee59b46d114379522e6f68340371f2f1bc1525cb4456caaf5b8430acea3").unwrap();
-    let layer = Layer {
-        parent_hash: None,
-        hash: hash.clone(),
-        operations: vec![LayerOperation::Image { hash: hash.clone() }],
-        created: Local::now(),
-    };
+    let layer = Layer::new(
+        None,
+        hash.clone(),
+        vec![LayerOperation::Image { hash: hash.clone() }],
+        DataSize(0)
+    );
     layer_manager.insert_layer(&session, layer).unwrap();
 
     let unpack_result = unpack_manager.unpack(

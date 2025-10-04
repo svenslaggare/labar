@@ -60,21 +60,22 @@ pub struct Layer {
     pub parent_hash: Option<ImageId>,
     pub hash: ImageId,
     pub operations: Vec<LayerOperation>,
+    pub storage_size: DataSize,
     pub created: DateTime<Local>,
 }
 
 impl Layer {
-    pub fn new(parent_hash: Option<ImageId>, hash: ImageId, operations: Vec<LayerOperation>) -> Layer {
+    pub fn new(parent_hash: Option<ImageId>,
+               hash: ImageId,
+               operations: Vec<LayerOperation>,
+               storage_size: DataSize) -> Layer {
         Layer {
             parent_hash,
             hash,
             operations,
+            storage_size,
             created: Local::now()
         }
-    }
-
-    pub fn created_datetime(&self) -> DateTime<Local> {
-        self.created.into()
     }
 
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {

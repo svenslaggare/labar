@@ -190,7 +190,7 @@ fn test_export_import() {
         assert!(export_result.is_ok(), "{}", export_result.unwrap_err());
         assert!(archive_file.exists());
         let archive_size = std::fs::metadata(&archive_file).unwrap().len();
-        assert!(archive_size >= 3900 && archive_size <= 3930, "Archive size: {}", archive_size);
+        assert!(archive_size >= 3940 && archive_size <= 3970, "Archive size: {}", archive_size);
     }
 
     // Import

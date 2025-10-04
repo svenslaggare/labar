@@ -7,13 +7,13 @@ use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct LayerManager {
-    config: ImageManagerConfig
+    _config: ImageManagerConfig
 }
 
 impl LayerManager {
     pub fn new(config: ImageManagerConfig) -> LayerManager {
         LayerManager {
-            config
+            _config: config
         }
     }
 
@@ -124,7 +124,7 @@ impl LayerManager {
 
     pub fn size_of_reference(&self, session: &StateSession, reference: &Reference, recursive: bool) -> ImageManagerResult<DataSize> {
         let layer = self.get_layer(session, reference)?;
-        let mut total_size = DataSize(0);
+        let mut total_size = layer.storage_size;
 
         if recursive {
             if let Some(parent_hash) = layer.parent_hash.as_ref() {
@@ -136,10 +136,6 @@ impl LayerManager {
             match operation {
                 LayerOperation::Image { hash } => {
                     total_size += self.size_of_reference(session, &hash.clone().to_ref(), true)?;
-                },
-                LayerOperation::File { source_path, .. } => {
-                    let abs_source_path = self.config.base_folder.join(source_path);
-                    total_size += DataSize(std::fs::metadata(abs_source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
                 },
                 _ => {}
             }

@@ -306,7 +306,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             println!("Image id: {}", inspect_result.top_layer.hash);
             println!("Tags: {}", inspect_result.image_tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
-            println!("Created: {}", inspect_result.top_layer.created_datetime().format(DATE_FORMAT));
+            println!("Created: {}", inspect_result.top_layer.created.format(DATE_FORMAT));
             println!("Size: {}", inspect_result.size);
             println!();
             println!("Layers:");
@@ -322,7 +322,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             for layer in inspect_result.layers {
                 table_printer.add_row(vec![
                     layer.hash.to_string(),
-                    layer.created_datetime().format(DATE_FORMAT).to_string(),
+                    layer.created.format(DATE_FORMAT).to_string(),
                     layer.size.to_string(),
                 ]);
             }
