@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-
+use std::time::Instant;
 use sha2::{Sha256, Digest};
 
 use crate::content::compute_content_hash;
@@ -47,12 +47,29 @@ impl BuildManager {
         for (layer_index, layer_definition) in request.image_definition.layers.into_iter().enumerate() {
             self.printer.println(&format!("Step {}/{}: {}", layer_index + 1, num_layers, layer_definition.input_line));
 
+            let start_time = Instant::now();
             let layer_definition = layer_definition.expand(&request.build_context)?;
-            let layer = self.create_layer(session, layer_manager, &request.build_context, layer_definition, &parent_hash)?;
+            let layer = self.create_layer(
+                session,
+                layer_manager,
+                &request.build_context,
+                layer_definition,
+                &parent_hash,
+                request.force
+            )?;
             let hash = layer.hash.clone();
 
             image_layers.push(hash.clone());
-            if self.build_layer(session, layer_manager, &request.build_context, layer, request.force, request.verbose_output)? {
+            let layer_built = self.build_layer(
+                session,
+                layer_manager,
+                &request.build_context,
+                start_time,
+                layer,
+                request.force,
+                request.verbose_output
+            )?;
+            if layer_built {
                 built_layers.push(hash.clone());
             }
 
@@ -81,9 +98,11 @@ impl BuildManager {
                    session: &mut StateSession,
                    layer_manager: &LayerManager,
                    build_context: &Path,
+                   start_time: Instant,
                    mut layer: Layer,
                    force: bool,
                    verbose_output: bool) -> ImageManagerResult<bool> {
+        let build_start_time = Instant::now();
         if !force && layer_manager.layer_exist(session, &layer.hash)? {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
@@ -95,33 +114,21 @@ impl BuildManager {
         std::fs::create_dir_all(&destination_base_path)?;
 
         for operation in &mut layer.operations {
-            if verbose_output {
-                self.printer.println(&format!("\t* {}", operation));
-            }
-
-            match operation {
-                LayerOperation::File { path, source_path, original_source_path, .. } => {
-                    let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
-                    let relative_destination_path = destination_path.strip_prefix(&self.config.base_folder).unwrap();
-
-                    std::fs::copy(&build_context.join(&original_source_path), &destination_path)
-                        .map_err(|err|
-                            ImageManagerError::FileIOError {
-                                message: format!(
-                                    "Failed to copy file {} -> {} due to: {}",
-                                    original_source_path,
-                                    destination_path.to_str().unwrap(),
-                                    err
-                                )
-                            }
-                        )?;
-
-                    *source_path = relative_destination_path.to_str().unwrap().to_owned();
-                    *original_source_path = create_hash(&original_source_path);
-                },
-                _ => {}
-            }
+            self.build_operation(
+                verbose_output,
+                build_context,
+                &destination_base_path,
+                operation
+            )?;
         }
+
+        self.printer.println(&format!(
+            "\t* Layer built in {:.2} seconds (create: {:.2} secs, build: {:.2} secs, {} operations).",
+            start_time.elapsed().as_secs_f64(),
+            build_start_time.duration_since(start_time).as_secs_f64(),
+            build_start_time.elapsed().as_secs_f64(),
+            layer.operations.len()
+        ));
 
         if force {
             layer_manager.insert_or_replace_layer(session, layer)?;
@@ -132,16 +139,53 @@ impl BuildManager {
         Ok(true)
     }
 
+    fn build_operation(&self,
+                       verbose_output: bool,
+                       build_context: &Path,
+                       destination_base_path: &Path,
+                       operation: &mut LayerOperation) -> ImageManagerResult<()> {
+        if verbose_output {
+            self.printer.println(&format!("\t* {}", operation));
+        }
+
+        match operation {
+            LayerOperation::File { path, source_path, original_source_path, .. } => {
+                let destination_path = destination_base_path.join(Path::new(&create_hash(path)));
+                let relative_destination_path = destination_path.strip_prefix(&self.config.base_folder).unwrap();
+
+                std::fs::copy(&build_context.join(&original_source_path), &destination_path)
+                    .map_err(|err|
+                        ImageManagerError::FileIOError {
+                            message: format!(
+                                "Failed to copy file {} -> {} due to: {}",
+                                original_source_path,
+                                destination_path.to_str().unwrap(),
+                                err
+                            )
+                        }
+                    )?;
+
+                *source_path = relative_destination_path.to_str().unwrap().to_owned();
+                *original_source_path = create_hash(&original_source_path);
+            },
+            _ => {}
+        }
+
+        Ok(())
+    }
+
     fn create_layer(&self,
-                    session: &StateSession,
+                    session: &mut StateSession,
                     layer_manager: &LayerManager,
                     build_context: &Path,
                     layer_definition: LayerDefinition,
-                    parent_hash: &Option<ImageId>) -> ImageManagerResult<Layer> {
+                    parent_hash: &Option<ImageId>,
+                    force: bool) -> ImageManagerResult<Layer> {
         let mut layer_operations = Vec::new();
         let mut layer_hash = LayerHash::new();
         layer_hash.add_parent_hash(parent_hash.as_ref());
 
+        let mut added_content_hashes = Vec::new();
         for operation_definition in &layer_definition.operations {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
@@ -167,10 +211,10 @@ impl BuildManager {
                     let modified_time_ms = modified_time.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
 
                     let content_hash = match session.get_content_hash(source_path, modified_time_ms)? {
-                        Some(content_hash) => content_hash,
-                        None => {
+                        Some(content_hash) if !force => content_hash,
+                        _ => {
                             let content_hash = compute_content_hash(source_path_entry)?;
-                            session.add_content_hash(source_path, modified_time_ms, &content_hash)?;
+                            added_content_hashes.push((source_path.clone(), modified_time_ms, content_hash.clone()));
                             content_hash
                         }
                     };
@@ -197,6 +241,8 @@ impl BuildManager {
                 },
             }
         }
+
+        session.insert_content_hashes(added_content_hashes)?;
 
         Ok(Layer::new(parent_hash.clone(), layer_hash.finalize(), layer_operations))
     }
@@ -314,7 +360,8 @@ fn test_build() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;
@@ -352,7 +399,8 @@ fn test_build_with_cache1() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     );
     assert!(first_result.is_ok());
     let first_result = first_result.unwrap();
@@ -363,7 +411,8 @@ fn test_build_with_cache1() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     );
     assert!(second_result.is_ok());
     let second_result = second_result.unwrap();
@@ -488,6 +537,61 @@ fn test_build_with_cache2() {
 }
 
 #[test]
+fn test_build_with_cache_force() {
+    use crate::image_manager::ConsolePrinter;
+    use crate::reference::Reference;
+    use crate::image_manager::state::StateManager;
+
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+
+    let printer = ConsolePrinter::new();
+    let state_manager = StateManager::new(&config.base_folder()).unwrap();
+    let mut layer_manager = LayerManager::new(config.clone());
+    let build_manager = BuildManager::new(config, printer.clone());
+    let mut session = state_manager.session().unwrap();
+
+    // Build first time
+    let first_result = super::test_helpers::build_image2(
+        &mut session,
+        &mut layer_manager,
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap(),
+        false
+    );
+    assert!(first_result.is_ok());
+    let first_result = first_result.unwrap();
+
+    // Build second time
+    let second_result = super::test_helpers::build_image2(
+        &mut session,
+        &mut layer_manager,
+        &build_manager,
+        Path::new("testdata/definitions/simple1.labarfile"),
+        ImageTag::from_str("test").unwrap(),
+        true
+    );
+    assert!(second_result.is_ok());
+    let second_result = second_result.unwrap();
+
+    assert_eq!(ImageTag::from_str("test").unwrap(), second_result.image.tag);
+    assert_eq!(first_result.image.hash, second_result.image.hash);
+    assert_eq!(1, second_result.built_layers.len());
+
+    let session = state_manager.session().unwrap();
+    let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
+    assert!(image.is_ok());
+    let image = image.unwrap();
+    assert_eq!(image.hash, second_result.image.hash);
+
+    assert_eq!(
+        layer_manager.get_image_hash(&session, &ImageTag::from_str("test").unwrap()).unwrap(),
+        Some(second_result.image.hash)
+    );
+}
+
+#[test]
 fn test_build_with_image_ref() {
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
@@ -507,7 +611,8 @@ fn test_build_with_image_ref() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     let result = super::test_helpers::build_image2(
@@ -515,7 +620,8 @@ fn test_build_with_image_ref() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/with_image_ref.labarfile"),
-        ImageTag::from_str("that").unwrap()
+        ImageTag::from_str("that").unwrap(),
+        false
     );
     assert!(result.is_ok());
     let result = result.unwrap().image;

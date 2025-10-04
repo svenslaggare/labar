@@ -589,7 +589,8 @@ fn test_unpack() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
@@ -632,7 +633,8 @@ fn test_unpack_file() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     super::test_helpers::build_image2(
@@ -640,7 +642,8 @@ fn test_unpack_file() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple5.labarfile"),
-        ImageTag::from_str("test2").unwrap()
+        ImageTag::from_str("test2").unwrap(),
+        false
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack_file(
@@ -695,7 +698,8 @@ fn test_unpack_exist() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     unpack_manager.unpack(
@@ -749,7 +753,8 @@ fn test_remove_unpack() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     unpack_manager.unpack(
@@ -800,7 +805,8 @@ fn test_unpack_replace1() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     unpack_manager.unpack(
@@ -854,7 +860,8 @@ fn test_unpack_replace2() {
         &layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple1.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     let unpack_result = unpack_manager.unpack(
@@ -938,7 +945,8 @@ fn test_extract() {
         &mut layer_manager,
         &build_manager,
         Path::new("testdata/definitions/simple3.labarfile"),
-        ImageTag::from_str("test").unwrap()
+        ImageTag::from_str("test").unwrap(),
+        false
     ).unwrap();
 
     let archive_file = tmp_folder.owned().join("extract.zip");

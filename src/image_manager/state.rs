@@ -199,18 +199,10 @@ impl StateSession {
     }
 
     pub fn insert_or_replace_layer(&mut self, layer: Layer) -> SqlResult<()> {
-        let transaction = self.connection.transaction()?;
-
-        if StateSession::layer_exists_internal(&transaction, &layer.hash)? {
-            transaction.execute(
-                "UPDATE layers set metadata=?2 WHERE hash=?1",
-                (&layer.hash, &serde_json::to_value(&layer).unwrap())
-            )?;
-        } else {
-            StateSession::insert_layer_internal(&transaction, layer)?;
-        }
-
-        transaction.commit()?;
+        self.connection.execute(
+            "REPLACE INTO layers (hash, metadata) VALUES (?1, ?2)",
+            (&layer.hash, &serde_json::to_value(&layer).unwrap())
+        )?;
         Ok(())
     }
 
@@ -267,24 +259,12 @@ impl StateSession {
 
     #[allow(dead_code)]
     pub fn insert_image(&self, image: Image) -> SqlResult<()> {
-        StateSession::insert_image_internal(&self.connection, image)
-    }
-
-    fn insert_image_internal(connection: &Connection, image: Image) -> SqlResult<()> {
-        connection.execute("INSERT INTO images (tag, hash) VALUES (?1, ?2)", (&image.tag, &image.hash))?;
+        self.connection.execute("INSERT INTO images (tag, hash) VALUES (?1, ?2)", (&image.tag, &image.hash))?;
         Ok(())
     }
 
     pub fn insert_or_replace_image(&mut self, image: Image) -> ImageManagerResult<()> {
-        let transaction = self.connection.transaction()?;
-
-        if StateSession::image_exists_internal(&transaction, &image.tag)? {
-            transaction.execute("UPDATE images SET hash=?2 WHERE tag=?1", (&image.tag, &image.hash))?;
-        } else {
-            StateSession::insert_image_internal(&transaction, image)?;
-        }
-
-        transaction.commit()?;
+        self.connection.execute("REPLACE INTO images (tag, hash) VALUES (?1, ?2)", (&image.tag, &image.hash))?;
         Ok(())
     }
 
@@ -346,8 +326,24 @@ impl StateSession {
         ).optional()
     }
 
-    pub fn add_content_hash(&self, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
-        self.connection.execute("INSERT INTO content_hash_cache (file, modified, hash) VALUES (?1, ?2, ?3)", (file, modified, hash))?;
+    pub fn insert_content_hash(&self, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
+        StateSession::insert_content_hash_internal(&self.connection, file, modified, hash)?;
+        Ok(())
+    }
+
+    pub fn insert_content_hashes(&mut self, hashes: Vec<(String, u64, String)>) -> SqlResult<()> {
+        let transaction = self.connection.transaction()?;
+
+        for (file, modified, hash) in hashes {
+            StateSession::insert_content_hash_internal(&transaction, &file, modified, &hash)?;
+        }
+
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn insert_content_hash_internal(connection: &Connection, file: &str, modified: u64, hash: &str) -> SqlResult<()> {
+        connection.execute("REPLACE INTO content_hash_cache (file, modified, hash) VALUES (?1, ?2, ?3)", (file, modified, hash))?;
         Ok(())
     }
 

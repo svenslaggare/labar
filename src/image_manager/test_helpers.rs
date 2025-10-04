@@ -28,7 +28,8 @@ pub fn build_image2(session: &mut StateSession,
                     layer_manager: &LayerManager,
                     build_manager: &BuildManager,
                     path: &Path,
-                    image_tag: ImageTag) -> Result<BuildResult, String> {
+                    image_tag: ImageTag,
+                    force: bool) -> Result<BuildResult, String> {
     let image_definition = ImageDefinition::parse_file_without_context(path).map_err(|err| err.to_string())?;
 
     build_manager.build_image(
@@ -38,7 +39,7 @@ pub fn build_image2(session: &mut StateSession,
             build_context: Path::new("").to_path_buf(),
             image_definition,
             tag: image_tag,
-            force: false,
+            force,
             verbose_output: false,
         }
     ).map_err(|err| err.to_string())

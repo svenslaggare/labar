@@ -4,6 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use regex::Regex;
+
 use crate::helpers::split_parts;
 use crate::image::LinkType;
 use crate::reference::Reference;
@@ -357,7 +358,7 @@ impl ImageDefinition {
 
             layers.push(
                 LayerDefinition {
-                    input_line: String::new(),
+                    input_line: format!("directory: {}", current_directory.display()),
                     operations: vec![
                         LayerOperationDefinition::File {
                             path: current_directory_relative.to_str().unwrap().to_owned(),
@@ -375,7 +376,7 @@ impl ImageDefinition {
 
             layers.push(
                 LayerDefinition {
-                    input_line: String::new(),
+                    input_line: format!("root file: {}", file_relative.display()),
                     operations: vec![
                         LayerOperationDefinition::File {
                             path: file_relative.to_str().unwrap().to_owned(),

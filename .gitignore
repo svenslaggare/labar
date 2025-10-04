@@ -8,3 +8,4 @@ scripts
 completions
 certificate
 *.zip
+benchmark.sh

@@ -27,7 +27,7 @@ impl ContentHash {
 pub fn compute_content_hash(path: &Path) -> std::io::Result<String> {
     let mut reader = BufReader::new(File::open(path)?);
 
-    let mut buffer = vec![0; 4096];
+    let mut buffer = [0; 4096];
     let mut hasher = ContentHash::new();
     loop {
         let count = reader.read(&mut buffer)?;

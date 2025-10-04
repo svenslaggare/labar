@@ -175,7 +175,8 @@ fn test_export_import() {
             &layer_manager,
             &build_manager,
             Path::new("testdata/definitions/simple5.labarfile"),
-            ImageTag::from_str("test").unwrap()
+            ImageTag::from_str("test").unwrap(),
+            false
         ).unwrap();
         expected_layers = build_result.layers;
 
