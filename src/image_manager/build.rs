@@ -102,7 +102,6 @@ impl BuildManager {
                    mut layer: Layer,
                    force: bool,
                    verbose_output: bool) -> ImageManagerResult<bool> {
-        let build_start_time = Instant::now();
         if !force && layer_manager.layer_exist(session, &layer.hash)? {
             self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
             return Ok(false);
@@ -123,10 +122,8 @@ impl BuildManager {
         }
 
         self.printer.println(&format!(
-            "\t* Layer built in {:.2} seconds (create: {:.2} secs, build: {:.2} secs, {} operations).",
+            "\t* Layer built in {:.2} seconds ({} operations).",
             start_time.elapsed().as_secs_f64(),
-            build_start_time.duration_since(start_time).as_secs_f64(),
-            build_start_time.elapsed().as_secs_f64(),
             layer.operations.len()
         ));
 
