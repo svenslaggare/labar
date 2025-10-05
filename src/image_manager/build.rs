@@ -129,9 +129,9 @@ impl BuildManager {
         ));
 
         if force {
-            layer_manager.insert_or_replace_layer(session, layer)?;
+            layer_manager.insert_or_replace_layer(session, &layer)?;
         } else {
-            layer_manager.insert_layer(session, layer)?;
+            layer_manager.insert_layer(session, &layer)?;
         }
 
         Ok(true)

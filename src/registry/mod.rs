@@ -35,7 +35,7 @@ use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerError};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
-use crate::registry::config::RegistryUpstreamConfig;
+use crate::registry::config::{RegistryUpstreamConfig, StorageMode};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
@@ -395,7 +395,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let mut image_manager = helpers::create_image_manager(&state, &token);
     let mut state_session = image_manager.pooled_state_session()?;
 
     let pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
@@ -417,11 +417,16 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         );
     }
 
+    let pending_upload_layer_hash = pending_upload_layer.hash.clone();
     state_session.registry_end_layer_upload(
         pending_upload_layer
     ).map_err(|err| ImageManagerError::Sql(err))?;
 
     info!("Finished upload of layer {} (id: {})", pending_upload_layer_hash, upload_id);
+
+    if state.config.storage_mode == StorageMode::Compressed {
+        image_manager.compress_layer(&pending_upload_layer_hash)?;
+    }
 
     Ok(
         Json(
@@ -468,6 +473,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     tokio::fs::create_dir_all(parent).await?;
                 }
 
+                let compressed_content_hash = operation.compressed_content_hash();
+
                 let mut file = tokio::fs::File::create(&temp_file_path).await?;
 
                 let mut stream = request.into_body().into_data_stream();
@@ -484,8 +491,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                         }
                     }
                 }
-                
-                let check_content_hash = operation.compressed_content_hash().unwrap_or(content_hash);
+
+                let check_content_hash = compressed_content_hash.unwrap_or(content_hash);
                 if &content_hasher.finalize() != check_content_hash {
                     tokio::fs::remove_file(&temp_file_path).await?;
                     return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));

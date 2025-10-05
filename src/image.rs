@@ -119,6 +119,25 @@ impl Layer {
         None
     }
 
+    pub fn storage_modes(&self) -> (usize, usize) {
+        let mut uncompressed = 0;
+        let mut compressed = 0;
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } => {
+                    uncompressed += 1;
+                }
+                LayerOperation::CompressedFile { .. } => {
+                    compressed += 1;
+                }
+            }
+        }
+
+        (uncompressed, compressed)
+    }
+
     pub fn verify_path_exists(&self, base_folder: &Path) -> bool {
         for operation in &self.operations {
             match operation {

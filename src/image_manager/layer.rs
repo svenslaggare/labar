@@ -36,12 +36,12 @@ impl LayerManager {
         Ok(session.layer_exists(&hash)?)
     }
 
-    pub fn insert_layer(&self, session: &StateSession, layer: Layer) -> ImageManagerResult<()> {
+    pub fn insert_layer(&self, session: &StateSession, layer: &Layer) -> ImageManagerResult<()> {
         session.insert_layer(layer)?;
         Ok(())
     }
 
-    pub fn insert_or_replace_layer(&self, session: &mut StateSession, layer: Layer) -> ImageManagerResult<()> {
+    pub fn insert_or_replace_layer(&self, session: &mut StateSession, layer: &Layer) -> ImageManagerResult<()> {
         session.insert_or_replace_layer(layer)?;
         Ok(())
     }

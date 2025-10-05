@@ -194,11 +194,11 @@ impl StateSession {
         Ok(count > 0)
     }
 
-    pub fn insert_layer(&self, layer: Layer) -> SqlResult<()> {
+    pub fn insert_layer(&self, layer: &Layer) -> SqlResult<()> {
         StateSession::insert_layer_internal(&self.connection, layer)
     }
 
-    pub fn insert_or_replace_layer(&mut self, layer: Layer) -> SqlResult<()> {
+    pub fn insert_or_replace_layer(&mut self, layer: &Layer) -> SqlResult<()> {
         let transaction = self.connection.transaction()?;
 
         if StateSession::layer_exists_internal(&transaction, &layer.hash)? {
@@ -214,7 +214,7 @@ impl StateSession {
         Ok(())
     }
 
-    fn insert_layer_internal(connection: &Connection, layer: Layer) -> SqlResult<()> {
+    fn insert_layer_internal(connection: &Connection, layer: &Layer) -> SqlResult<()> {
         connection.execute(
             "INSERT INTO layers (hash, metadata) VALUES (?1, ?2)",
             (&layer.hash, &serde_json::to_value(&layer).unwrap())
@@ -399,7 +399,7 @@ impl StateSession {
             return Ok(false);
         }
 
-        StateSession::insert_layer_internal(&transaction, layer)?;
+        StateSession::insert_layer_internal(&transaction, &layer)?;
 
         transaction.commit()?;
         Ok(true)

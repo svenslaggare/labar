@@ -133,7 +133,7 @@ impl TransferManager {
                     return Err(ImageManagerError::InvalidImageImport);
                 }
 
-                layer_manager.insert_layer(session, layer)?;
+                layer_manager.insert_layer(session, &layer)?;
                 import_result.layers.push(hash.clone());
             }
         }

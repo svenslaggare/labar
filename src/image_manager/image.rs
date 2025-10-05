@@ -342,46 +342,57 @@ impl ImageManager {
 
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
-            let mut layer = self.get_layer(&layer_id.to_ref())?;
-
-            for operation in &mut layer.operations {
-                match operation {
-                    LayerOperation::Image { .. } => {}
-                    LayerOperation::Directory { .. } => {}
-                    LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
-                        let abs_source_path = self.config.base_folder.join(&source_path);
-
-                        let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                        let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                        {
-                            let mut reader = BufReader::new(File::open(&abs_source_path)?);
-                            let mut writer = BufWriter::new(GzEncoder::new(File::create(&temp_source_path)?, Compression::default()));
-                            std::io::copy(&mut reader, &mut writer)?;
-                        }
-
-                        let compressed_content_hash = compute_content_hash(&temp_source_path)?;
-
-                        std::fs::rename(temp_source_path, abs_source_path)?;
-                        *operation = LayerOperation::CompressedFile {
-                            path: path.clone(),
-                            source_path: source_path.clone(),
-                            original_source_path: original_source_path.clone(),
-                            content_hash: content_hash.clone(),
-                            link_type: *link_type,
-                            writable: *writable,
-                            compressed_content_hash
-                        };
-                    }
-                    LayerOperation::CompressedFile { .. } => {}
-                }
-            }
-
+            let layer = self.compress_layer_internal(&mut session, &layer_id)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
-            self.layer_manager.insert_or_replace_layer(&mut session, layer)?;
         }
 
         Ok(())
+    }
+
+    pub fn compress_layer(&mut self, hash: &ImageId) -> ImageManagerResult<()> {
+        let mut session = self.state_manager.pooled_session()?;
+        self.compress_layer_internal(&mut session, hash)?;
+        Ok(())
+    }
+
+    fn compress_layer_internal(&mut self, session: &mut StateSession, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let mut layer = self.get_layer(&hash.clone().to_ref())?;
+
+        for operation in &mut layer.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
+                    let abs_source_path = self.config.base_folder.join(&source_path);
+
+                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
+                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                    {
+                        let mut reader = BufReader::new(File::open(&abs_source_path)?);
+                        let mut writer = BufWriter::new(GzEncoder::new(File::create(&temp_source_path)?, Compression::default()));
+                        std::io::copy(&mut reader, &mut writer)?;
+                    }
+
+                    let compressed_content_hash = compute_content_hash(&temp_source_path)?;
+
+                    std::fs::rename(temp_source_path, abs_source_path)?;
+                    *operation = LayerOperation::CompressedFile {
+                        path: path.clone(),
+                        source_path: source_path.clone(),
+                        original_source_path: original_source_path.clone(),
+                        content_hash: content_hash.clone(),
+                        link_type: *link_type,
+                        writable: *writable,
+                        compressed_content_hash
+                    };
+                }
+                LayerOperation::CompressedFile { .. } => {}
+            }
+        }
+
+        self.layer_manager.insert_or_replace_layer(session, &layer)?;
+        Ok(layer)
     }
 
     pub fn decompress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
@@ -422,7 +433,7 @@ impl ImageManager {
             }
 
             layer.visit_image_ids(|id| stack.push(id.clone()));
-            self.layer_manager.insert_or_replace_layer(&mut session, layer)?;
+            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
         }
 
         Ok(())
@@ -685,7 +696,7 @@ impl ImageManager {
 
     pub fn insert_layer(&mut self, layer: Layer) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
-        self.layer_manager.insert_layer(&session, layer)?;
+        self.layer_manager.insert_layer(&session, &layer)?;
         Ok(())
     }
 
@@ -722,6 +733,18 @@ pub struct PullRequest<'a> {
     pub new_tag: Option<ImageTag>,
     pub retry: Option<usize>,
     pub verbose_output: bool
+}
+
+impl<'a> PullRequest<'a> {
+    pub fn from_tag(tag: &ImageTag) -> PullRequest<'a> {
+        PullRequest {
+            tag: tag.clone(),
+            default_registry: None,
+            new_tag: None,
+            retry: None,
+            verbose_output: false,
+        }
+    }
 }
 
 pub struct DownloadResult {

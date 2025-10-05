@@ -21,7 +21,7 @@ use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image_manager::printing::{PrinterRef};
 use crate::image_manager::state::StateSession;
-use crate::reference::{ImageId, Reference};
+use crate::reference::{ImageId, ImageTag, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Unpacking {
@@ -433,6 +433,17 @@ pub struct UnpackRequest {
     pub unpack_folder: PathBuf,
     pub replace: bool,
     pub dry_run: bool
+}
+
+impl UnpackRequest {
+    pub fn from_tag(tag: &ImageTag, unpack_folder: &Path) -> UnpackRequest {
+        UnpackRequest {
+            reference: tag.clone().to_ref(),
+            unpack_folder: unpack_folder.to_owned(),
+            replace: false,
+            dry_run: false
+        }
+    }
 }
 
 pub struct UnpackFile {
@@ -963,7 +974,7 @@ fn test_unpack_self_reference() {
         vec![LayerOperation::Image { hash: hash.clone() }],
         DataSize(0)
     );
-    layer_manager.insert_layer(&session, layer).unwrap();
+    layer_manager.insert_layer(&session, &layer).unwrap();
 
     let unpack_result = unpack_manager.unpack(
         &session,
