@@ -45,6 +45,7 @@ impl TransferManager {
                     LayerOperation::Image { hash } => {
                         stack.push(hash.clone());
                     }
+                    LayerOperation::Directory { .. } => {}
                     LayerOperation::File { source_path, .. } => {
                         let abs_source_path = self.config.base_folder.join(source_path);
                         let mut reader = BufReader::new(File::open(&abs_source_path)?);
@@ -52,7 +53,13 @@ impl TransferManager {
                         writer.start_file_from_path(source_path, SimpleFileOptions::default())?;
                         std::io::copy(&mut reader, &mut writer)?;
                     }
-                    LayerOperation::Directory { .. } => {}
+                    LayerOperation::CompressedFile { source_path, .. } => {
+                        let abs_source_path = self.config.base_folder.join(source_path);
+                        let mut reader = BufReader::new(File::open(&abs_source_path)?);
+
+                        writer.start_file_from_path(source_path, SimpleFileOptions::default())?;
+                        std::io::copy(&mut reader, &mut writer)?;
+                    }
                 }
             }
 
@@ -103,6 +110,8 @@ impl TransferManager {
 
                 for operation in &layer.operations {
                     match operation {
+                        LayerOperation::Image { .. } => {}
+                        LayerOperation::Directory { .. } => {}
                         LayerOperation::File { source_path, .. } => {
                             let mut archive_file = archive.by_name(&source_path)?;
 
@@ -110,8 +119,13 @@ impl TransferManager {
                             let mut file = File::create(&abs_source_path)?;
                             std::io::copy(&mut archive_file, &mut file)?;
                         }
-                        LayerOperation::Image { .. } => {}
-                        LayerOperation::Directory { .. } => {}
+                        LayerOperation::CompressedFile { source_path, .. } => {
+                            let mut archive_file = archive.by_name(&source_path)?;
+
+                            let abs_source_path = self.config.base_folder.join(&source_path);
+                            let mut file = File::create(&abs_source_path)?;
+                            std::io::copy(&mut archive_file, &mut file)?;
+                        }
                     }
                 }
 

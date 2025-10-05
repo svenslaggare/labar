@@ -140,9 +140,17 @@ impl RegistryManager {
         let mut file_index = 0;
         let mut file_operations = Vec::new();
         for operation in &mut layer.operations {
-            if let LayerOperation::File { source_path, content_hash, .. } = operation {
-                file_operations.push((source_path.clone(), content_hash.clone(), file_index));
-                file_index += 1;
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, content_hash, .. } => {
+                    file_operations.push((source_path.clone(), content_hash.clone(), file_index));
+                    file_index += 1;
+                }
+                LayerOperation::CompressedFile { source_path, compressed_content_hash, .. } => {
+                    file_operations.push((source_path.clone(), compressed_content_hash.clone(), file_index));
+                    file_index += 1;
+                }
             }
         }
 
@@ -263,21 +271,25 @@ impl RegistryManager {
         // Upload every file
         let mut file_index = 0;
         for operation in &layer.operations {
-            if let LayerOperation::File { source_path, .. } = operation {
-                let mut request = client.build_post_request(
-                    &format!("layers/{}/upload/{}", layer.hash, file_index)
-                )
-                    .header(model::UPLOAD_ID_HEADER, upload_id.clone())
-                    .build()?;
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
+                    let mut request = client.build_post_request(
+                        &format!("layers/{}/upload/{}", layer.hash, file_index)
+                    )
+                        .header(model::UPLOAD_ID_HEADER, upload_id.clone())
+                        .build()?;
 
-                let file = tokio::fs::File::open(self.config.base_folder.join(source_path)).await?;
-                let body = Body::from(file);
-                *request.body_mut() = Some(body);
+                    let file = tokio::fs::File::open(self.config.base_folder.join(source_path)).await?;
+                    let body = Body::from(file);
+                    *request.body_mut() = Some(body);
 
-                let response = client.execute(request).await?;
-                RegistryError::from_response(response, format!("file {}", file_index)).await?;
+                    let response = client.execute(request).await?;
+                    RegistryError::from_response(response, format!("file {}", file_index)).await?;
 
-                file_index += 1;
+                    file_index += 1;
+                }
             }
         }
 

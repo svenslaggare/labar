@@ -199,10 +199,18 @@ impl StateSession {
     }
 
     pub fn insert_or_replace_layer(&mut self, layer: Layer) -> SqlResult<()> {
-        self.connection.execute(
-            "REPLACE INTO layers (hash, metadata) VALUES (?1, ?2)",
-            (&layer.hash, &serde_json::to_value(&layer).unwrap())
-        )?;
+        let transaction = self.connection.transaction()?;
+
+        if StateSession::layer_exists_internal(&transaction, &layer.hash)? {
+            transaction.execute(
+                "UPDATE layers set metadata=?2 WHERE hash=?1",
+                (&layer.hash, &serde_json::to_value(&layer).unwrap())
+            )?;
+        } else {
+            StateSession::insert_layer_internal(&transaction, layer)?;
+        }
+
+        transaction.commit()?;
         Ok(())
     }
 

@@ -5,6 +5,7 @@ use std::io::{BufReader};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use chrono::{DateTime, Local};
+
 use itertools::izip;
 use rusqlite::Row;
 
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use zip::write::{SimpleFileOptions};
 use zip::ZipWriter;
+use flate2::read::GzDecoder;
 
 use crate::helpers::{clean_path, split_parts};
 use crate::image_manager::layer::{LayerManager};
@@ -227,6 +229,10 @@ impl UnpackManager {
                         &unpack_folder
                     )?;
                 },
+                LayerOperation::Directory { path } => {
+                    self.printer.println(&format!("\t* Creating directory {}", path));
+                    unpacker.create_dir_all(&unpack_folder.join(path))?;
+                },
                 LayerOperation::File { path, source_path, link_type, writable, .. } => {
                     let abs_source_path = self.config.base_folder.canonicalize()?.join(source_path);
                     if abs_source_path != clean_path(&abs_source_path) {
@@ -262,9 +268,33 @@ impl UnpackManager {
                         unpacker.set_readonly(&destination_path)?;
                     }
                 },
-                LayerOperation::Directory { path } => {
-                    self.printer.println(&format!("\t* Creating directory {}", path));
-                    unpacker.create_dir_all(&unpack_folder.join(path))?;
+                LayerOperation::CompressedFile { path, source_path, writable, .. } => {
+                    let abs_source_path = self.config.base_folder.canonicalize()?.join(source_path);
+                    if abs_source_path != clean_path(&abs_source_path) {
+                        return Err(ImageManagerError::InvalidUnpack);
+                    }
+
+                    has_files = true;
+                    let destination_path = unpack_folder.join(path);
+                    if destination_path != clean_path(&destination_path) {
+                        return Err(ImageManagerError::InvalidUnpack);
+                    }
+
+                    self.printer.println(&format!("\t* Unpacking compressed file {} -> {}", path, destination_path.to_str().unwrap()));
+
+                    if let Some(parent_dir) = destination_path.parent() {
+                        unpacker.create_dir_all(parent_dir)?;
+                    }
+
+                    #[allow(unused_must_use)] {
+                        unpacker.remove_file(&destination_path);
+                    }
+
+                    unpacker.decompress_file(&abs_source_path, &destination_path)?;
+
+                    if !writable {
+                        unpacker.set_readonly(&destination_path)?;
+                    }
                 },
             }
         }
@@ -316,15 +346,20 @@ impl UnpackManager {
                         &layer_manager.get_layer(session, &Reference::ImageId(hash.clone()))?
                     )?;
                 },
+                LayerOperation::Directory { path } => {
+                    let path = unpack_folder.join(path);
+                    self.printer.println(&format!("\t* Deleting directory {}", path.to_str().unwrap()));
+                    std::fs::remove_dir(path)?
+                },
                 LayerOperation::File { path, .. } => {
                     let destination_path = unpack_folder.join(path);
                     self.printer.println(&format!("\t* Deleting link of file {}", destination_path.to_str().unwrap()));
                     std::fs::remove_file(destination_path)?;
                 },
-                LayerOperation::Directory { path } => {
-                    let path = unpack_folder.join(path);
-                    self.printer.println(&format!("\t* Deleting directory {}", path.to_str().unwrap()));
-                    std::fs::remove_dir(path)?
+                LayerOperation::CompressedFile { path, .. } => {
+                    let destination_path = unpack_folder.join(path);
+                    self.printer.println(&format!("\t* Deleting uncompressed file {}", destination_path.to_str().unwrap()));
+                    std::fs::remove_file(destination_path)?;
                 },
             }
         }
@@ -362,6 +397,9 @@ impl UnpackManager {
                         let layer = layer_manager.get_layer(&session, &hash.clone().to_ref())?;
                         inner(config, session, layer_manager, &layer, writer)?;
                     }
+                    LayerOperation::Directory { path } => {
+                        writer.add_directory_from_path(path, SimpleFileOptions::default())?
+                    }
                     LayerOperation::File { path, source_path, .. } => {
                         let abs_source_path = config.base_folder.join(source_path);
                         let mut reader = BufReader::new(File::open(&abs_source_path)?);
@@ -369,8 +407,12 @@ impl UnpackManager {
                         writer.start_file_from_path(path, SimpleFileOptions::default())?;
                         std::io::copy(&mut reader, writer)?;
                     }
-                    LayerOperation::Directory { path } => {
-                        writer.add_directory_from_path(path, SimpleFileOptions::default())?
+                    LayerOperation::CompressedFile { path, source_path, .. } => {
+                        let abs_source_path = config.base_folder.join(source_path);
+                        let mut reader = BufReader::new(GzDecoder::new(File::open(&abs_source_path)?));
+
+                        writer.start_file_from_path(path, SimpleFileOptions::default())?;
+                        std::io::copy(&mut reader, writer)?;
                     }
                 }
             }
@@ -465,6 +507,7 @@ pub trait Unpacker {
     fn remove_file(&self, path: &Path) -> ImageManagerResult<()>;
     fn create_soft_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()>;
     fn create_hard_link(&self, source: &Path, target: &Path) -> ImageManagerResult<()>;
+    fn decompress_file(&self, source: &Path, target: &Path) -> ImageManagerResult<()>;
     fn set_readonly(&self, path: &Path) -> ImageManagerResult<()>;
 }
 
@@ -505,6 +548,13 @@ impl Unpacker for StandardUnpacker {
                     message: format!("Failed to unpack file {} due to: {}", target.display(), err)
                 }
             )?;
+        Ok(())
+    }
+
+    fn decompress_file(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        let mut reader = GzDecoder::new(File::open(source)?);
+        let mut writer = File::create(target)?;
+        std::io::copy(&mut reader, &mut writer)?;
         Ok(())
     }
 
@@ -558,6 +608,11 @@ impl Unpacker for DryRunUnpacker {
         Ok(())
     }
 
+    fn decompress_file(&self, source: &Path, target: &Path) -> ImageManagerResult<()> {
+        self.printer.println(&format!("\t\t* Decompressing file {} -> {}", source.display(), target.display()));
+        Ok(())
+    }
+
     fn set_readonly(&self, path: &Path) -> ImageManagerResult<()> {
         self.printer.println(&format!("\t\t* Setting {} to read only", path.display()));
         Ok(())
@@ -606,6 +661,10 @@ fn test_unpack() {
 
     assert!(unpack_result.is_ok());
     assert!(tmp_folder.owned().join("unpack").join("file1.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(Path::new("testdata/rawdata/file1.txt")).unwrap(),
+        std::fs::read_to_string(tmp_folder.owned().join("unpack").join("file1.txt")).unwrap()
+    );
 }
 
 #[test]

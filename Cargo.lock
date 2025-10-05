@@ -1293,6 +1293,7 @@ dependencies = [
  "croner",
  "dirs",
  "fern",
+ "flate2",
  "futures",
  "itertools 0.14.0",
  "log",

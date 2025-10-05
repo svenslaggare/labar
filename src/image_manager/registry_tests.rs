@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use croner::Cron;
 
@@ -14,12 +15,21 @@ use crate::registry::auth::AccessRight;
 use crate::registry::config::RegistryUpstreamConfig;
 use crate::registry::RegistryConfig;
 
+static REGISTRY_PORT: Mutex<u16> = Mutex::new(9560);
+
+fn generate_registry_address() -> String {
+    let mut registry_port = REGISTRY_PORT.lock().unwrap();
+    let url = format!("0.0.0.0:{}", registry_port);
+    *registry_port += 1;
+    url
+}
+
 #[tokio::test]
 async fn test_pull() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let address: SocketAddr = "0.0.0.0:9560".parse().unwrap();
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
 
     let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
 
@@ -85,7 +95,7 @@ async fn test_push_pull() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let address: SocketAddr = "0.0.0.0:9561".parse().unwrap();
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
@@ -158,7 +168,7 @@ async fn test_push_pull_default_registry() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let address: SocketAddr = "0.0.0.0:9562".parse().unwrap();
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
@@ -233,7 +243,7 @@ async fn test_push_pull_with_ref() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let address: SocketAddr = "0.0.0.0:9563".parse().unwrap();
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
     tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
 
     // Wait until registry starts
@@ -309,13 +319,87 @@ async fn test_push_pull_with_ref() {
 }
 
 #[tokio::test]
+async fn test_push_pull_compressed() {
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
+
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
+    tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
+
+    // Wait until registry starts
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
+
+        let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
+
+        // Build
+        let image = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            image_tag.clone()
+        ).unwrap().image;
+        image_manager.compress(&image_tag).unwrap();
+
+        // Push
+        let push_result = image_manager.push(&image.tag, None).await;
+        assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+        let push_result = push_result.unwrap();
+        assert_eq!(1, push_result);
+
+        // List remote
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(1, remote_images.len());
+        assert_eq!(&image_tag, &remote_images[0].image.tag);
+
+        // Remove in order to pull
+        assert!(image_manager.remove_image(&image.tag).is_ok());
+
+        // Pull
+        let pull_result = image_manager.pull(PullRequest {
+            tag: image_tag.clone(),
+            default_registry: None,
+            new_tag: None,
+            retry: None,
+            verbose_output: false,
+        }).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+
+        // List images
+        let images = image_manager.list_images();
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!(&image_tag, &images[0].image.tag);
+
+        // Check content
+        let reference = Reference::ImageTag(image.tag.clone());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference).unwrap();
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
+    }
+}
+
+#[tokio::test]
 async fn test_sync() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
     let tmp_secondary_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let primary_address: SocketAddr = "0.0.0.0:9564".parse().unwrap();
-    let secondary_address: SocketAddr = "0.0.0.0:9565".parse().unwrap();
+    let primary_address: SocketAddr = generate_registry_address().parse().unwrap();
+    let secondary_address: SocketAddr = generate_registry_address().parse().unwrap();
 
     // Build image inside primary registry
     let mut image = {
@@ -413,8 +497,8 @@ async fn test_pull_through() {
     let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
     let tmp_secondary_registry_folder = crate::test_helpers::TempFolder::new();
 
-    let primary_address: SocketAddr = "0.0.0.0:9566".parse().unwrap();
-    let secondary_address: SocketAddr = "0.0.0.0:9567".parse().unwrap();
+    let primary_address: SocketAddr = generate_registry_address().parse().unwrap();
+    let secondary_address: SocketAddr = generate_registry_address().parse().unwrap();
 
     // Build image inside primary registry
     let mut image = {

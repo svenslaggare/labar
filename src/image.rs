@@ -28,6 +28,7 @@ impl Display for LinkType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerOperation {
     Image { hash: ImageId },
+    Directory { path: String },
     File {
         path: String,
         source_path: String,
@@ -36,7 +37,25 @@ pub enum LayerOperation {
         link_type: LinkType,
         writable: bool
     },
-    Directory { path: String }
+    CompressedFile {
+        path: String,
+        source_path: String,
+        original_source_path: String,
+        content_hash: String,
+        link_type: LinkType,
+        writable: bool,
+        compressed_content_hash: String
+    },
+}
+
+impl LayerOperation {
+    pub fn compressed_content_hash(&self) -> Option<&str> {
+        if let LayerOperation::CompressedFile { compressed_content_hash, .. } = self {
+            Some(compressed_content_hash)
+        } else {
+            None
+        }
+    }
 }
 
 impl Display for LayerOperation {
@@ -50,6 +69,9 @@ impl Display for LayerOperation {
             }
             LayerOperation::File { path, source_path, .. } => {
                 write!(f, "File {} -> {}", source_path, path)
+            }
+            LayerOperation::CompressedFile { path, source_path, .. } => {
+                write!(f, "File (compressed) {} -> {}", source_path, path)
             }
         }
     }
@@ -81,12 +103,16 @@ impl Layer {
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {
         let mut current_index = 0;
         for operation in &self.operations {
-            if let LayerOperation::File { .. } = operation {
-                if current_index == index {
-                    return Some(operation);
-                }
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
+                    if current_index == index {
+                        return Some(operation);
+                    }
 
-                current_index += 1;
+                    current_index += 1;
+                }
             }
         }
 
@@ -96,12 +122,13 @@ impl Layer {
     pub fn verify_path_exists(&self, base_folder: &Path) -> bool {
         for operation in &self.operations {
             match operation {
-                LayerOperation::File { source_path, .. } => {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                     if !base_folder.join(source_path).exists() {
                         return false;
                     }
                 }
-                _ => {}
             }
         }
 
@@ -114,13 +141,14 @@ impl Layer {
 
             for operation in &layer.operations {
                 match operation {
-                    LayerOperation::File { source_path, .. } => {
+                    LayerOperation::Image { .. } => {}
+                    LayerOperation::Directory { .. } => {}
+                    LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                         let abs_source_path = base_folder.join(source_path);
                         if abs_source_path != clean_path(&abs_source_path) {
                             return Ok(false);
                         }
                     }
-                    _ => {}
                 }
             }
 

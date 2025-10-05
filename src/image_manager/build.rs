@@ -277,11 +277,14 @@ impl LayerHash {
                 LayerOperation::Image { hash } => {
                     layer_hash.add_image_ref(&hash);
                 }
+                LayerOperation::Directory { path } => {
+                    layer_hash.add_directory(path);
+                },
                 LayerOperation::File { .. } => {
                     layer_hash.add_file(&operation, true);
                 },
-                LayerOperation::Directory { path } => {
-                    layer_hash.add_directory(path);
+                LayerOperation::CompressedFile { .. } => {
+                    layer_hash.add_compressed_file(&operation, true);
                 },
             }
         }
@@ -305,6 +308,25 @@ impl LayerHash {
 
     pub fn add_file(&mut self, operation: &LayerOperation, hashed: bool) {
         if let LayerOperation::File { path, original_source_path, content_hash, link_type, writable, .. } = operation {
+            let original_source_path = if hashed {
+                original_source_path.clone()
+            } else {
+                create_hash(&original_source_path)
+            };
+
+            self.hash_input += &format!(
+                "{}{}{}{}{}",
+                path,
+                original_source_path,
+                content_hash,
+                link_type,
+                writable
+            );
+        }
+    }
+
+    pub fn add_compressed_file(&mut self, operation: &LayerOperation, hashed: bool) {
+        if let LayerOperation::CompressedFile { path, original_source_path, content_hash, link_type, writable, .. } = operation {
             let original_source_path = if hashed {
                 original_source_path.clone()
             } else {

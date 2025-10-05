@@ -297,24 +297,28 @@ async fn download_layer(State(state): State<Arc<AppState>>,
     let base_folder = image_manager.config().base_folder().to_path_buf();
 
     if let Some(operation) = layer.get_file_operation(file_index) {
-        if let LayerOperation::File { source_path, .. } = operation {
-            let source_path = std::path::Path::new(source_path);
-            let abs_source_path = base_folder.join(source_path);
+        match operation {
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
+            LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
+                let source_path = std::path::Path::new(source_path);
+                let abs_source_path = base_folder.join(source_path);
 
-            let file = tokio::fs::File::open(&abs_source_path).await?;
-            let stream = ReaderStream::with_capacity(file, 4096);
-            let body = Body::from_stream(stream);
+                let file = tokio::fs::File::open(&abs_source_path).await?;
+                let stream = ReaderStream::with_capacity(file, 4096);
+                let body = Body::from_stream(stream);
 
-            return Ok(
-                Response::builder()
-                    .header("Content-Type", "application/octet-stream")
-                    .header(
-                        "Content-Disposition",
-                        format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
-                    )
-                    .body(body)
-                    .unwrap()
-            );
+                return Ok(
+                    Response::builder()
+                        .header("Content-Type", "application/octet-stream")
+                        .header(
+                            "Content-Disposition",
+                            format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
+                        )
+                        .body(body)
+                        .unwrap()
+                );
+            }
         }
     }
 
@@ -452,41 +456,46 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
-        if let LayerOperation::File { source_path, content_hash, .. } = operation {
-            let abs_source_path = base_folder.join(source_path);
+        match operation {
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
+            LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
+                let abs_source_path = base_folder.join(source_path);
 
-            let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-            let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
-            if let Some(parent) = temp_file_path.parent() {
-                tokio::fs::create_dir_all(parent).await?;
-            }
+                let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
+                let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
+                if let Some(parent) = temp_file_path.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
 
-            let mut file = tokio::fs::File::create(&temp_file_path).await?;
+                let mut file = tokio::fs::File::create(&temp_file_path).await?;
 
-            let mut stream = request.into_body().into_data_stream();
-            let mut content_hasher = ContentHash::new();
-            while let Some(chunk) = stream.next().await {
-                match chunk {
-                    Ok(chunk) => {
-                        content_hasher.add(chunk.as_ref());
-                        file.write_all(chunk.as_ref()).await?;
-                    }
-                    Err(err) => {
-                        tokio::fs::remove_file(&temp_file_path).await?;
-                        return Err(AppError::FailedToUploadLayerFile(err.to_string()));
+                let mut stream = request.into_body().into_data_stream();
+                let mut content_hasher = ContentHash::new();
+                while let Some(chunk) = stream.next().await {
+                    match chunk {
+                        Ok(chunk) => {
+                            content_hasher.add(chunk.as_ref());
+                            file.write_all(chunk.as_ref()).await?;
+                        }
+                        Err(err) => {
+                            tokio::fs::remove_file(&temp_file_path).await?;
+                            return Err(AppError::FailedToUploadLayerFile(err.to_string()));
+                        }
                     }
                 }
+                
+                let check_content_hash = operation.compressed_content_hash().unwrap_or(content_hash);
+                if &content_hasher.finalize() != check_content_hash {
+                    tokio::fs::remove_file(&temp_file_path).await?;
+                    return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
+                }
+
+                tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+
+                info!("Uploaded layer file: {}:{}", layer.hash, file_index);
+                return Ok(Json(json!({ "status": "uploaded" })));
             }
-
-            if &content_hasher.finalize() != content_hash {
-                tokio::fs::remove_file(&temp_file_path).await?;
-                return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
-            }
-
-            tokio::fs::rename(&temp_file_path, abs_source_path).await?;
-
-            info!("Uploaded layer file: {}:{}", layer.hash, file_index);
-            return Ok(Json(json!({ "status": "uploaded" })));
         }
     }
 
