@@ -40,3 +40,15 @@ impl Drop for TempFolder {
         }
     }
 }
+
+#[macro_export]
+macro_rules! assert_file_content_eq {
+    ($left:expr, $right:expr) => {
+        {
+           assert_eq!(
+               std::fs::read_to_string($left).unwrap(),
+               std::fs::read_to_string($right).unwrap()
+           )
+        }
+    };
+}

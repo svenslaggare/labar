@@ -974,10 +974,7 @@ fn test_compress() {
             dry_run: false,
         });
         assert!(result.is_ok(), "{}", result.unwrap_err());
-        assert_eq!(
-            std::fs::read_to_string(Path::new("testdata/rawdata/file1.txt")).unwrap(),
-            std::fs::read_to_string(unpack_folder.join("file1.txt")).unwrap()
-        );
+        crate::assert_file_content_eq!(Path::new("testdata/rawdata/file1.txt"), unpack_folder.join("file1.txt"));
     }
 }
 
@@ -1015,9 +1012,6 @@ fn test_decompress() {
             dry_run: false,
         });
         assert!(result.is_ok(), "{}", result.unwrap_err());
-        assert_eq!(
-            std::fs::read_to_string(Path::new("testdata/rawdata/file1.txt")).unwrap(),
-            std::fs::read_to_string(unpack_folder.join("file1.txt")).unwrap()
-        );
+        crate::assert_file_content_eq!(Path::new("testdata/rawdata/file1.txt"), unpack_folder.join("file1.txt"));
     }
 }

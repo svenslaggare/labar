@@ -8,7 +8,7 @@ use croner::Cron;
 use tokio::time::Instant;
 
 use crate::helpers::DataSize;
-use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, PullRequest, Reference};
+use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, PullRequest, Reference, UnpackRequest};
 use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::auth::AccessRight;
@@ -389,6 +389,17 @@ async fn test_push_pull_compressed() {
         assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
         let files = image_manager.list_content(&reference).unwrap();
         assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
+
+        let unpack_folder = tmp_folder.join("unpack");
+        let result = image_manager.unpack(UnpackRequest {
+            reference: image_tag.clone().to_ref(),
+            unpack_folder: unpack_folder.clone(),
+            replace: false,
+            dry_run: false,
+        });
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        crate::assert_file_content_eq!(Path::new("testdata/rawdata/file1.txt"), unpack_folder.join("file1.txt"));
+        crate::assert_file_content_eq!(Path::new("testdata/rawdata/file2.txt"), unpack_folder.join("file2.txt"));
     }
 }
 
