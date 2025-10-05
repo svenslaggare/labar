@@ -143,7 +143,8 @@ pub struct ImageManagerConfig {
     base_folder: PathBuf,
     pub accept_self_signed: bool,
     pub max_wait_for_upstream_pull: f64,
-    pub upstream_pull_check: f64
+    pub upstream_pull_check: f64,
+    pub storage_mode: StorageMode
 }
 
 impl ImageManagerConfig {
@@ -152,7 +153,8 @@ impl ImageManagerConfig {
             base_folder: dirs::home_dir().unwrap().join(".labar"),
             accept_self_signed: true,
             max_wait_for_upstream_pull: 5.0 * 60.0,
-            upstream_pull_check: 1.0
+            upstream_pull_check: 1.0,
+            storage_mode: StorageMode::AlwaysUncompressed
         }
     }
 
@@ -179,6 +181,14 @@ impl Default for ImageManagerConfig {
     fn default() -> Self {
         ImageManagerConfig::new()
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum StorageMode {
+    AlwaysUncompressed,
+    AlwaysCompressed,
+    PreferUncompressed,
+    PreferCompressed
 }
 
 pub use image::ImageManager;

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use croner::Cron;
 use serde::{Deserialize, Serialize};
 
-use crate::image_manager::ImageManagerConfig;
+use crate::image_manager::{ImageManagerConfig, StorageMode};
 use crate::registry::auth::{UsersSpec};
 
 #[derive(Debug, Serialize,  Deserialize)]
@@ -12,7 +12,7 @@ pub struct RegistryConfig {
     pub data_path: PathBuf,
     #[serde(default="default_storage_mode")]
     pub storage_mode: StorageMode,
-    
+
     pub address: SocketAddr,
 
     #[serde(default="default_pending_upload_expiration")]
@@ -36,14 +36,8 @@ impl RegistryConfig {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum StorageMode {
-    Uncompressed,
-    Compressed
-}
-
 fn default_storage_mode() -> StorageMode {
-    StorageMode::Uncompressed
+    StorageMode::PreferCompressed
 }
 
 fn default_pending_upload_expiration() -> f64 {

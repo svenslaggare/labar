@@ -11,7 +11,7 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use crate::content::compute_content_hash;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackFile};
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
@@ -400,43 +400,48 @@ impl ImageManager {
 
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
-            let mut layer = self.get_layer(&layer_id.to_ref())?;
-
-            for operation in &mut layer.operations {
-                match operation {
-                    LayerOperation::Image { .. } => {}
-                    LayerOperation::Directory { .. } => {}
-                    LayerOperation::File { .. } => {}
-                    LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
-                        let abs_source_path = self.config.base_folder.join(&source_path);
-
-                        let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                        let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                        {
-                            let mut reader = GzDecoder::new(BufReader::new(File::open(&abs_source_path)?));
-                            let mut writer = BufWriter::new(File::create(&temp_source_path)?);
-                            std::io::copy(&mut reader, &mut writer)?;
-                        }
-
-                        std::fs::rename(temp_source_path, abs_source_path)?;
-                        *operation = LayerOperation::File {
-                            path: path.clone(),
-                            source_path: source_path.clone(),
-                            original_source_path: original_source_path.clone(),
-                            content_hash: content_hash.clone(),
-                            link_type: *link_type,
-                            writable: *writable
-                        };
-                    }
-                }
-            }
-
+            let layer = self.decompress_layer_internal(&mut session, &layer_id)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
-            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
         }
 
         Ok(())
+    }
+
+    fn decompress_layer_internal(&mut self, session: &mut StateSession, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let mut layer = self.get_layer(&hash.clone().to_ref())?;
+
+        for operation in &mut layer.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } => {}
+                LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
+                    let abs_source_path = self.config.base_folder.join(&source_path);
+
+                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
+                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                    {
+                        let mut reader = GzDecoder::new(BufReader::new(File::open(&abs_source_path)?));
+                        let mut writer = BufWriter::new(File::create(&temp_source_path)?);
+                        std::io::copy(&mut reader, &mut writer)?;
+                    }
+
+                    std::fs::rename(temp_source_path, abs_source_path)?;
+                    *operation = LayerOperation::File {
+                        path: path.clone(),
+                        source_path: source_path.clone(),
+                        original_source_path: original_source_path.clone(),
+                        content_hash: content_hash.clone(),
+                        link_type: *link_type,
+                        writable: *writable
+                    };
+                }
+            }
+        }
+
+        self.layer_manager.insert_or_replace_layer(session, &layer)?;
+        Ok(layer)
     }
 
     pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
@@ -539,8 +544,20 @@ impl ImageManager {
             }
         }
 
-        let image = Image::new(top_level_hash.unwrap(), request.new_tag.unwrap_or_else(|| request.tag.clone()));
+        let image_tag = request.new_tag.unwrap_or_else(|| request.tag.clone());
+        let image = Image::new(top_level_hash.unwrap(), image_tag.clone());
         self.insert_or_replace_image(image.clone())?;
+
+        match self.config.storage_mode {
+            StorageMode::AlwaysUncompressed => {
+                self.decompress(&image_tag)?;
+            }
+            StorageMode::AlwaysCompressed => {
+                self.compress(&image_tag)?;
+            }
+            StorageMode::PreferCompressed => {}
+            StorageMode::PreferUncompressed => {}
+        }
 
         Ok(image)
     }

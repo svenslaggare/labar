@@ -32,10 +32,10 @@ pub use crate::registry::config::RegistryConfig;
 
 use crate::content::ContentHash;
 use crate::image::{Image, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerError};
+use crate::image_manager::{ImageManagerError, StorageMode};
 use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
-use crate::registry::config::{RegistryUpstreamConfig, StorageMode};
+use crate::registry::config::{RegistryUpstreamConfig};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
@@ -424,8 +424,12 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 
     info!("Finished upload of layer {} (id: {})", pending_upload_layer_hash, upload_id);
 
-    if state.config.storage_mode == StorageMode::Compressed {
-        image_manager.compress_layer(&pending_upload_layer_hash)?;
+    match state.config.storage_mode {
+        StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => { 
+            image_manager.compress_layer(&pending_upload_layer_hash)?;
+        }
+        StorageMode::AlwaysUncompressed => {}
+        StorageMode::PreferUncompressed => {}
     }
 
     Ok(
