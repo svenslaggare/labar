@@ -395,10 +395,10 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
-    let mut image_manager = helpers::create_image_manager(&state, &token);
+    let image_manager = helpers::create_image_manager(&state, &token);
     let mut state_session = image_manager.pooled_state_session()?;
 
-    let pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
+    let mut pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
 
     if !pending_upload_layer.verify_path_exists(image_manager.config().base_folder()) {
@@ -417,20 +417,20 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         );
     }
 
+    match state.config.storage_mode {
+        StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
+            image_manager.compress_layer(&mut pending_upload_layer)?;
+        }
+        StorageMode::AlwaysUncompressed => {}
+        StorageMode::PreferUncompressed => {}
+    }
+
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
     state_session.registry_end_layer_upload(
         pending_upload_layer
     ).map_err(|err| ImageManagerError::Sql(err))?;
 
     info!("Finished upload of layer {} (id: {})", pending_upload_layer_hash, upload_id);
-
-    match state.config.storage_mode {
-        StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => { 
-            image_manager.compress_layer(&pending_upload_layer_hash)?;
-        }
-        StorageMode::AlwaysUncompressed => {}
-        StorageMode::PreferUncompressed => {}
-    }
 
     Ok(
         Json(

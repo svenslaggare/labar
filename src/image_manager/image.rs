@@ -342,22 +342,16 @@ impl ImageManager {
 
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
-            let layer = self.compress_layer_internal(&mut session, &layer_id)?;
+            let mut layer = self.get_layer(&layer_id.to_ref())?;
+             self.compress_layer(&mut layer)?;
+            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
         }
 
         Ok(())
     }
 
-    pub fn compress_layer(&mut self, hash: &ImageId) -> ImageManagerResult<()> {
-        let mut session = self.state_manager.pooled_session()?;
-        self.compress_layer_internal(&mut session, hash)?;
-        Ok(())
-    }
-
-    fn compress_layer_internal(&mut self, session: &mut StateSession, hash: &ImageId) -> ImageManagerResult<Layer> {
-        let mut layer = self.get_layer(&hash.clone().to_ref())?;
-
+    pub fn compress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         for operation in &mut layer.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
@@ -391,8 +385,7 @@ impl ImageManager {
             }
         }
 
-        self.layer_manager.insert_or_replace_layer(session, &layer)?;
-        Ok(layer)
+        Ok(())
     }
 
     pub fn decompress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
@@ -400,16 +393,16 @@ impl ImageManager {
 
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
-            let layer = self.decompress_layer_internal(&mut session, &layer_id)?;
+            let mut layer = self.get_layer(&layer_id.clone().to_ref())?;
+            self.decompress_layer(&mut layer)?;
+            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
         }
 
         Ok(())
     }
 
-    fn decompress_layer_internal(&mut self, session: &mut StateSession, hash: &ImageId) -> ImageManagerResult<Layer> {
-        let mut layer = self.get_layer(&hash.clone().to_ref())?;
-
+    pub fn decompress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         for operation in &mut layer.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
@@ -440,8 +433,22 @@ impl ImageManager {
             }
         }
 
-        self.layer_manager.insert_or_replace_layer(session, &layer)?;
-        Ok(layer)
+        Ok(())
+    }
+
+    fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {
+        match self.config.storage_mode {
+            StorageMode::AlwaysUncompressed => {
+                self.decompress_layer(layer)?;
+            }
+            StorageMode::AlwaysCompressed => {
+                self.compress_layer(layer)?;
+            }
+            StorageMode::PreferCompressed => {}
+            StorageMode::PreferUncompressed => {}
+        }
+
+        Ok(())
     }
 
     pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
@@ -513,7 +520,8 @@ impl ImageManager {
                         .map_err(|error| ImageManagerError::PullFailed { error });
 
                     match layer {
-                        Ok(layer) => {
+                        Ok(mut layer) => {
+                            self.handle_compression(&mut layer)?;
                             break layer;
                         },
                         Err(err) => {
@@ -547,17 +555,6 @@ impl ImageManager {
         let image_tag = request.new_tag.unwrap_or_else(|| request.tag.clone());
         let image = Image::new(top_level_hash.unwrap(), image_tag.clone());
         self.insert_or_replace_image(image.clone())?;
-
-        match self.config.storage_mode {
-            StorageMode::AlwaysUncompressed => {
-                self.decompress(&image_tag)?;
-            }
-            StorageMode::AlwaysCompressed => {
-                self.compress(&image_tag)?;
-            }
-            StorageMode::PreferCompressed => {}
-            StorageMode::PreferUncompressed => {}
-        }
 
         Ok(image)
     }
@@ -601,7 +598,7 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        let layer = self.registry_manager.download_layer(&registry_session, &hash, false).await?;
+        let layer = self.download_layer(&registry_session, hash).await?;
         Ok(layer)
     }
 
@@ -629,7 +626,7 @@ impl ImageManager {
                     continue;
                 }
 
-                let layer = self.registry_manager.download_layer(&registry_session, &layer_to_download.hash, false).await?;
+                let layer = self.download_layer(&registry_session, &layer_to_download.hash).await?;
                 let layer_hash = layer.hash.clone();
                 if !commit_layer(&mut session, layer) {
                     // We failed to commit, skip this image
@@ -649,6 +646,12 @@ impl ImageManager {
         }
 
         Ok(download_result)
+    }
+
+    async fn download_layer(&self, registry_session: &RegistrySession, hash: &ImageId) -> ImageManagerResult<Layer> {
+        let mut layer = self.registry_manager.download_layer(&registry_session, &hash, false).await?;
+        self.handle_compression(&mut layer)?;
+        Ok(layer)
     }
 
     async fn resolve_image_in_registry_internal(&self,
