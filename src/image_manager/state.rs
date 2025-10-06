@@ -128,7 +128,7 @@ impl StateManager {
     }
 
     fn open_connection(base_folder: &Path) -> SqlResult<Connection> {
-        Connection::open(base_folder.join("state.sqlite3"))
+        Connection::open(base_folder.join(STATE_FILENAME))
     }
 
     pub fn pooled_session(&self) -> SqlResult<PooledStateSession> {
@@ -139,6 +139,8 @@ impl StateManager {
         }
     }
 }
+
+pub const STATE_FILENAME: &str = "state.sqlite3";
 
 pub struct StateSession {
     pub connection: Connection
@@ -159,6 +161,26 @@ impl StateSession {
             [registry],
             |row| Ok((row.get(0)?, row.get(1)?))
         ).optional()
+    }
+
+    pub fn number_of_layers(&self) -> SqlResult<usize> {
+        let count = self.connection.query_one(
+            "SELECT COUNT(*) FROM layers",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?;
+
+        Ok(count as usize)
+    }
+
+    pub fn number_of_images(&self) -> SqlResult<usize> {
+        let count = self.connection.query_one(
+            "SELECT COUNT(*) FROM images",
+            [],
+            |row| row.get::<_, i64>(0)
+        )?;
+
+        Ok(count as usize)
     }
 
     pub fn all_layers(&self) -> SqlResult<Vec<Layer>> {

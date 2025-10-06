@@ -86,6 +86,12 @@ impl TablePrinter {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DataSize(pub usize);
 
+impl DataSize {
+    pub fn from_file(path: &Path) -> DataSize {
+        DataSize(std::fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0) as usize)
+    }
+}
+
 impl Display for DataSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:.2} MB", self.0 as f64 / 1024.0 / 1024.0)

@@ -29,6 +29,10 @@ use crate::registry::config::{RegistryConfig};
 #[derive(Debug, StructOpt)]
 #[structopt(name="labar", about="Layer Based Archive")]
 enum CommandLineInput {
+    #[structopt(about="Shows storage use on the system")]
+    SystemUsage {
+
+    },
     #[structopt(about="Builds an image")]
     Build {
         #[structopt(name="file", help="The file with the build definition")]
@@ -217,6 +221,16 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
     let printer = ConsolePrinter::new();
 
     match command_line_input {
+        CommandLineInput::SystemUsage { } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            let system_usage = image_manager.system_usage().map_err(|err| format!("{}", err))?;
+
+            println!("System usage:");
+            println!("Number of layers: {}", system_usage.layers);
+            println!("Number of images: {}", system_usage.images);
+            println!("State storage size: {}", system_usage.state_storage_size);
+            println!("File storage size: {}", system_usage.file_storage_size);
+        }
         CommandLineInput::Build { file, tag, context, arguments, force, verbose_output } => {
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());

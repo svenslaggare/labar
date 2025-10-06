@@ -19,7 +19,7 @@ use crate::helpers::DataSize;
 use crate::image_definition::{ImageDefinition};
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
-use crate::image_manager::state::{PooledStateSession, StateManager, StateSession};
+use crate::image_manager::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
 use crate::image_manager::transfer::TransferManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
@@ -60,6 +60,36 @@ impl ImageManager {
 
     pub fn pooled_state_session(&self) -> ImageManagerResult<PooledStateSession> {
         Ok(self.state_manager.pooled_session()?)
+    }
+
+    pub fn system_usage(&self) -> ImageManagerResult<SystemUsage> {
+        let session = self.state_manager.pooled_session()?;
+
+        let mut file_storage_size = DataSize(0);
+
+        let mut stack = vec![self.config.layers_base_folder()];
+
+        while let Some(current) = stack.pop() {
+            let mut read_dir = std::fs::read_dir(&current)?;
+            while let Some(entry) = read_dir.next() {
+                let entry = entry?;
+
+                if entry.path().is_file() {
+                    file_storage_size += DataSize::from_file(&entry.path());
+                } else {
+                    stack.push(entry.path());
+                }
+            }
+        }
+
+        Ok(
+            SystemUsage {
+                layers: session.number_of_layers()?,
+                images: session.number_of_images()?,
+                state_storage_size: DataSize::from_file(&self.config.base_folder.join(STATE_FILENAME)),
+                file_storage_size,
+            }
+        )
     }
 
     pub fn build_image(&mut self, request: BuildRequest) -> ImageManagerResult<BuildResult> {
@@ -195,11 +225,11 @@ impl ImageManager {
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, .. } => {
                     let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize(std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
+                    reclaimed_size += DataSize::from_file(&source_path);
                 }
                 LayerOperation::CompressedFile { source_path, .. } => {
                     let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize(std::fs::metadata(source_path).map(|metadata| metadata.len()).unwrap_or(0) as usize);
+                    reclaimed_size += DataSize::from_file(&source_path);
                 }
             }
         }
@@ -745,6 +775,13 @@ impl ImageManager {
         self.layer_manager.insert_or_replace_image(&mut session, image)?;
         Ok(())
     }
+}
+
+pub struct SystemUsage {
+    pub layers: usize,
+    pub images: usize,
+    pub state_storage_size: DataSize,
+    pub file_storage_size: DataSize
 }
 
 pub struct PullRequest<'a> {
