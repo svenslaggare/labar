@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::Path;
 
@@ -84,6 +85,8 @@ pub struct Layer {
     pub operations: Vec<LayerOperation>,
     pub storage_size: DataSize,
     pub created: DateTime<Local>,
+    #[serde(skip)]
+    file_operation_mapping: HashMap<usize, usize>
 }
 
 impl Layer {
@@ -96,11 +99,30 @@ impl Layer {
             hash,
             operations,
             storage_size,
-            created: Local::now()
+            created: Local::now(),
+            file_operation_mapping: HashMap::new()
+        }
+    }
+
+    pub fn accelerate(&mut self) {
+        let mut current_file_index = 0;
+        for (operation_index, operation) in self.operations.iter().enumerate() {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
+                    self.file_operation_mapping.insert(current_file_index, operation_index);
+                    current_file_index += 1;
+                }
+            }
         }
     }
 
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {
+        if let Some(operation_index) = self.file_operation_mapping.get(&index) {
+            return Some(&self.operations[*operation_index]);
+        }
+
         let mut current_index = 0;
         for operation in &self.operations {
             match operation {

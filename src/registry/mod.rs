@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc};
 use std::time::Instant;
 
 use chrono::Local;
@@ -28,12 +28,12 @@ pub mod auth;
 pub mod config;
 mod helpers;
 
-pub use crate::registry::config::RegistryConfig;
-
 use crate::content::ContentHash;
 use crate::image::{Image, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerError, StorageMode};
+use crate::image_manager::{ImageManager, ImageManagerError, ImageManagerResult, PooledStateSession, StorageMode};
 use crate::reference::{ImageId, ImageTag, Reference};
+
+use crate::registry::config::RegistryConfig;
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::{RegistryUpstreamConfig};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
@@ -131,7 +131,9 @@ impl Display for RunRegistryError {
 struct AppState {
     config: RegistryConfig,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
-    delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>
+    delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
+    layer_cache: Mutex<HashMap<ImageId, Arc<Layer>>>,
+    pending_upload_layer_cache: Mutex<HashMap<String, Arc<Layer>>>
 }
 
 impl AppState {
@@ -146,10 +148,47 @@ impl AppState {
                 AppState {
                     config,
                     access_provider: Box::new(access_provider),
-                    delayed_image_inserts: Mutex::new(HashMap::new())
+                    delayed_image_inserts: Mutex::new(HashMap::new()),
+                    layer_cache: Mutex::new(HashMap::new()),
+                    pending_upload_layer_cache: Mutex::new(HashMap::new())
                 }
             )
         )
+    }
+
+    pub async fn get_layer(&self, image_manager: &ImageManager, hash: &ImageId) -> ImageManagerResult<Arc<Layer>> {
+        let mut cache = self.layer_cache.lock().await;
+        match cache.get(hash) {
+            Some(layer) => Ok(layer.clone()),
+            None => {
+                let mut layer = image_manager.get_layer(&hash.clone().to_ref())?;
+                layer.accelerate()
+
+                let layer = Arc::new(layer);
+                cache.insert(hash.clone(), layer.clone());
+                Ok(layer)
+            }
+        }
+    }
+
+    pub async fn get_pending_upload_layer_by_id(&self, state_session: PooledStateSession, upload_id: &str) -> AppResult<Arc<Layer>> {
+        let mut cache = self.pending_upload_layer_cache.lock().await;
+        match cache.get(upload_id) {
+            Some(layer) => Ok(layer.clone()),
+            None => {
+                let mut layer = helpers::get_pending_upload_layer_by_id(&state_session, upload_id)?;
+                layer.accelerate();
+
+                let layer = Arc::new(layer);
+                cache.insert(upload_id.to_owned(), layer.clone());
+                Ok(layer)
+            }
+        }
+    }
+
+    pub async fn remove_pending_upload_layer_by_id(&self, upload_id: &str) {
+        let mut cache = self.pending_upload_layer_cache.lock().await;
+        cache.remove(upload_id);
     }
 }
 
@@ -243,8 +282,7 @@ async fn get_layer_exists(State(state): State<Arc<AppState>>,
 
     let image_manager = helpers::create_image_manager(&state, &token);
 
-    let layer_reference = hash.clone().to_ref();
-    let exists = match image_manager.get_layer(&layer_reference) {
+    let exists = match state.get_layer(&image_manager, &hash).await {
         Ok(_) => true,
         Err(ImageManagerError::ReferenceNotFound { .. }) => false,
         Err(err) => { return Err(err.into()); }
@@ -267,9 +305,8 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
 
     let image_manager = helpers::create_image_manager(&state, &token);
 
-    let layer_reference = hash.clone().to_ref();
-    match image_manager.get_layer(&layer_reference) {
-        Ok(layer) => Ok(Json(json!(layer)).into_response()),
+    match state.get_layer(&image_manager, &hash).await {
+        Ok(layer) => Ok(Json(json!(layer.as_ref())).into_response()),
         Err(ImageManagerError::ReferenceNotFound { .. }) if query.can_pull_through && state.config.can_pull_through_upstream() => {
             let upstream_config = state.config.upstream.as_ref().unwrap();
             let layer = image_manager.get_layer_from_registry(&upstream_config.hostname, &hash).await?;
@@ -292,8 +329,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 
     let image_manager = helpers::create_image_manager(&state, &token);
 
-    let layer_reference = hash.to_ref();
-    let layer = image_manager.get_layer(&layer_reference)?;
+    let layer = state.get_layer(&image_manager, &hash).await?;
     let base_folder = image_manager.config().base_folder().to_path_buf();
 
     if let Some(operation) = layer.get_file_operation(file_index) {
@@ -332,7 +368,7 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
     let layer: Layer = helpers::decode_json(request).await?;
 
     let image_manager = helpers::create_image_manager(&state, &token);
-    if image_manager.get_layer(&Reference::ImageId(layer.hash.clone())).is_ok() {
+    if state.get_layer(&image_manager, &layer.hash).await.is_ok() {
         return Ok(
             Json(json!(
                 UploadLayerResponse {
@@ -430,6 +466,8 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         pending_upload_layer
     ).map_err(|err| ImageManagerError::Sql(err))?;
 
+    state.remove_pending_upload_layer_by_id(&upload_id).await;
+
     info!("Finished upload of layer {} (id: {})", pending_upload_layer_hash, upload_id);
 
     Ok(
@@ -454,7 +492,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
         let image_manager = helpers::create_image_manager(&state, &token);
         let state_session = image_manager.pooled_state_session()?;
 
-        let pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
+        let pending_upload_layer = state.get_pending_upload_layer_by_id(state_session, &upload_id).await?;
         if layer_hash != pending_upload_layer.hash {
             return Err(AppError::LayerFileNotFound);
         }

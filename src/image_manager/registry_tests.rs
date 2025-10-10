@@ -13,7 +13,7 @@ use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::auth::AccessRight;
 use crate::registry::config::{RegistryUpstreamConfig};
-use crate::registry::RegistryConfig;
+use crate::registry::config::RegistryConfig;
 
 static REGISTRY_PORT: Mutex<u16> = Mutex::new(9560);
 
