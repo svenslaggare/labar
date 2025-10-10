@@ -162,7 +162,7 @@ impl AppState {
             Some(layer) => Ok(layer.clone()),
             None => {
                 let mut layer = image_manager.get_layer(&hash.clone().to_ref())?;
-                layer.accelerate()
+                layer.accelerate();
 
                 let layer = Arc::new(layer);
                 cache.insert(hash.clone(), layer.clone());
