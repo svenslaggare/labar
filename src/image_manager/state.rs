@@ -1,10 +1,10 @@
-use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc};
 
 use chrono::{DateTime, Local};
 use rusqlite::{Connection, OptionalExtension};
 
+use crate::helpers::{PooledResource, ResourcePool};
 use crate::image::{Image, Layer};
 use crate::image_manager::ImageManagerResult;
 use crate::image_manager::unpack::Unpacking;
@@ -14,7 +14,7 @@ pub type SqlResult<T> = rusqlite::Result<T>;
 
 pub struct StateManager {
     base_folder: PathBuf,
-    pool: Arc<StateSessionPool>
+    pool: Arc<ResourcePool<StateSession>>
 }
 
 impl StateManager {
@@ -114,7 +114,7 @@ impl StateManager {
         Ok(
             StateManager {
                 base_folder: base_folder.to_path_buf(),
-                pool: Arc::new(StateSessionPool::new(vec![StateSession { connection }]))
+                pool: Arc::new(ResourcePool::new(vec![StateSession { connection }]))
             }
         )
     }
@@ -132,7 +132,7 @@ impl StateManager {
     }
 
     pub fn pooled_session(&self) -> SqlResult<PooledStateSession> {
-        if let Some(session) = self.pool.get_session() {
+        if let Some(session) = self.pool.get_resource() {
             Ok(PooledStateSession::new(self.pool.clone(), session))
         } else {
             Ok(PooledStateSession::new(self.pool.clone(), self.session()?))
@@ -433,58 +433,4 @@ impl StateSession {
     }
 }
 
-pub struct PooledStateSession {
-    pool: Arc<StateSessionPool>,
-    session: Option<StateSession>
-}
-
-impl PooledStateSession {
-    fn new(pool: Arc<StateSessionPool>, session: StateSession) -> PooledStateSession {
-        PooledStateSession {
-            pool,
-            session: Some(session)
-        }
-    }
-}
-
-impl Drop for PooledStateSession {
-    fn drop(&mut self) {
-        if let Some(session) = self.session.take() {
-            self.pool.return_session(session);
-        }
-    }
-}
-
-impl Deref for PooledStateSession {
-    type Target = StateSession;
-
-    fn deref(&self) -> &Self::Target {
-        self.session.as_ref().unwrap()
-    }
-}
-
-impl DerefMut for PooledStateSession {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.session.as_mut().unwrap()
-    }
-}
-
-struct StateSessionPool {
-    sessions: Mutex<Vec<StateSession>>
-}
-
-impl StateSessionPool {
-    pub fn new(initial: Vec<StateSession>) -> StateSessionPool {
-        StateSessionPool {
-            sessions: Mutex::new(initial)
-        }
-    }
-
-    pub fn return_session(&self, session: StateSession) {
-        self.sessions.lock().unwrap().push(session);
-    }
-
-    pub fn get_session(&self) -> Option<StateSession> {
-        self.sessions.lock().unwrap().pop()
-    }
-}
+pub type PooledStateSession = PooledResource<StateSession>;

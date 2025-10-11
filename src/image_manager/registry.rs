@@ -164,7 +164,7 @@ impl RegistryManager {
 
                 if !local_source_path.exists() {
                     if verbose_output {
-                        self.printer.println(&format!("\t\t* Downloading file '{}'...", source_path));
+                        self.printer.println(&format!("\t\t\t* Downloading file '{}'...", source_path));
                     }
 
                     download_operations.push(download_file(
@@ -176,7 +176,7 @@ impl RegistryManager {
                     ));
                 } else {
                     if verbose_output {
-                        self.printer.println(&format!("\t\t* Skipping downloading file {}.", source_path));
+                        self.printer.println(&format!("\t\t\t* Skipping downloading file {}.", source_path));
                     }
                 }
             }

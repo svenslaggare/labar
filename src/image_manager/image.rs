@@ -469,9 +469,11 @@ impl ImageManager {
     fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         match self.config.storage_mode {
             StorageMode::AlwaysUncompressed => {
+                self.printer.println("\t\t* Decompressing...");
                 self.decompress_layer(layer)?;
             }
             StorageMode::AlwaysCompressed => {
+                self.printer.println("\t\t* Compressing...");
                 self.compress_layer(layer)?;
             }
             StorageMode::PreferCompressed => {}
@@ -543,12 +545,15 @@ impl ImageManager {
 
                 visit_layer(&mut stack, &layer);
             } else {
-                self.printer.println(&format!("\t* Downloading layer: {}...", current));
+                self.printer.println(&format!("\t* Pulling layer: {}...", current));
                 let mut retries = request.retry.unwrap_or(0);
                 let layer = loop {
+                    self.printer.println("\t\t* Downloading...");
                     let layer = self.registry_manager.download_layer(&registry_session, &current, request.verbose_output)
                         .await
                         .map_err(|error| ImageManagerError::PullFailed { error });
+
+                    self.printer.println("\t\t* Downloaded.");
 
                     match layer {
                         Ok(mut layer) => {

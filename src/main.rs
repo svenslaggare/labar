@@ -45,7 +45,7 @@ enum CommandLineInput {
         arguments: Vec<String>,
         #[structopt(long, help="Forces a build, ignoring previously cached layers")]
         force: bool,
-        #[structopt(long, help="Prints more verbose output when building the image")]
+        #[structopt(long, short, help="Prints more verbose output when building the image")]
         verbose_output: bool,
     },
     #[structopt(about="Builds an image from a directory, automatically creating the operations")]
@@ -56,7 +56,7 @@ enum CommandLineInput {
         tag: ImageTag,
         #[structopt(long, help="Forces a build, ignoring previously cached layers")]
         force: bool,
-        #[structopt(long, help="Prints more verbose output when building the image")]
+        #[structopt(long, short, help="Prints more verbose output when building the image")]
         verbose_output: bool,
     },
     #[structopt(about="Removes an image")]
@@ -156,7 +156,7 @@ enum CommandLineInput {
         new_tag: Option<ImageTag>,
         #[structopt(long, name="retry", help="If failed to pull, do this number of retries")]
         retry: Option<usize>,
-        #[structopt(long, help="Prints more verbose output when downloading the image")]
+        #[structopt(long, short, help="Prints more verbose output when downloading the image")]
         verbose_output: bool,
     },
     #[structopt(about="Pushes a local image to a remote registry")]

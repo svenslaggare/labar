@@ -6,6 +6,7 @@ use axum::extract::{FromRequest, Request};
 use axum::Json;
 use axum::response::IntoResponse;
 
+use crate::helpers::{PooledResource};
 use crate::image::Layer;
 use crate::image_manager::{EmptyPrinter, ImageManager, ImageManagerError, StateSession};
 use crate::registry::{model, AppState, RegistryConfig, RunRegistryError};
@@ -64,6 +65,8 @@ pub fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManage
         EmptyPrinter::new()
     ).unwrap()
 }
+
+pub type PooledImageManager = PooledResource<ImageManager>;
 
 pub async fn decode_json<T: DeserializeOwned>(request: Request) -> AppResult<T> {
     let value = Json::<T>::from_request(request, &()).await.map_err(|err| AppError::Other(err.into_response()))?;

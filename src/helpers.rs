@@ -1,6 +1,7 @@
 use std::fmt::{Display, Formatter};
-use std::ops::{Add, AddAssign};
+use std::ops::{Add, AddAssign, Deref, DerefMut};
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -183,5 +184,61 @@ pub fn edit_key_value(input: &str) -> Result<(&str, Option<&str>), String> {
         Ok((key, value_opt))
     } else {
         Err("Expected key=value".to_owned())
+    }
+}
+
+pub struct ResourcePool<T> {
+    resources: Mutex<Vec<T>>
+}
+
+impl<T> ResourcePool<T> {
+    pub fn new(initial: Vec<T>) -> ResourcePool<T> {
+        ResourcePool {
+            resources: Mutex::new(initial)
+        }
+    }
+
+    pub fn return_resource(&self, resource: T) {
+        self.resources.lock().unwrap().push(resource);
+    }
+
+    pub fn get_resource(&self) -> Option<T> {
+        self.resources.lock().unwrap().pop()
+    }
+}
+
+pub struct PooledResource<T> {
+    pool: Arc<ResourcePool<T>>,
+    resource: Option<T>
+}
+
+impl<T> PooledResource<T> {
+    pub fn new(pool: Arc<ResourcePool<T>>, resource: T) -> PooledResource<T> {
+        PooledResource {
+            pool,
+            resource: Some(resource)
+        }
+    }
+}
+
+impl<T> Drop for PooledResource<T> {
+    fn drop(&mut self) {
+        if let Some(resource) = self.resource.take() {
+            self.pool.return_resource(resource);
+        }
+    }
+}
+
+impl<T> Deref for PooledResource<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.resource.as_ref().unwrap()
+    }
+}
+
+impl<T> DerefMut for PooledResource<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.resource.as_mut().unwrap()
     }
 }

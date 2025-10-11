@@ -29,6 +29,7 @@ pub mod config;
 mod helpers;
 
 use crate::content::ContentHash;
+use crate::helpers::ResourcePool;
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManager, ImageManagerError, ImageManagerResult, PooledStateSession, StorageMode};
 use crate::reference::{ImageId, ImageTag, Reference};
@@ -36,6 +37,7 @@ use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::config::RegistryConfig;
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::{RegistryUpstreamConfig};
+use crate::registry::helpers::{PooledImageManager};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
@@ -132,6 +134,7 @@ impl Display for RunRegistryError {
 
 struct AppState {
     config: RegistryConfig,
+    image_manager_pool: Arc<ResourcePool<ImageManager>>,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
     delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
     layer_cache: Mutex<HashMap<ImageId, Arc<Layer>>>,
@@ -149,6 +152,7 @@ impl AppState {
             Arc::new(
                 AppState {
                     config,
+                    image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
                     access_provider: Box::new(access_provider),
                     delayed_image_inserts: Mutex::new(HashMap::new()),
                     layer_cache: Mutex::new(HashMap::new()),
@@ -156,6 +160,14 @@ impl AppState {
                 }
             )
         )
+    }
+
+    pub fn pooled_image_manager(&self, token: &AuthToken) -> PooledImageManager {
+        if let Some(image_manager) = self.image_manager_pool.get_resource() {
+            PooledImageManager::new(self.image_manager_pool.clone(), image_manager)
+        } else {
+            PooledImageManager::new(self.image_manager_pool.clone(), helpers::create_image_manager(self, token))
+        }
     }
 
     pub async fn get_layer(&self, image_manager: &ImageManager, hash: &ImageId) -> ImageManagerResult<Arc<Layer>> {
@@ -212,7 +224,7 @@ async fn list_images(State(state): State<Arc<AppState>>,
                      request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let image_manager = state.pooled_image_manager(&token);
     let images = image_manager.list_images()?;
 
     Ok(Json(json!(images)).into_response())
@@ -224,7 +236,7 @@ async fn set_image(State(state): State<Arc<AppState>>,
 
     let spec: ImageSpec = helpers::decode_json(request).await?;
 
-    let mut image_manager = helpers::create_image_manager(&state, &token);
+    let mut image_manager = state.pooled_image_manager(&token);
     image_manager.tag_image(&Reference::ImageId(spec.hash.clone()), &spec.tag)?;
 
     info!("Uploaded image: {} ({})", spec.tag, spec.hash);
@@ -243,7 +255,7 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
                        request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let image_manager = state.pooled_image_manager(&token);
     let image = match image_manager.resolve_image(&tag) {
         Ok(image) => image,
         Err(ImageManagerError::ReferenceNotFound { .. }) if state.config.can_pull_through_upstream() && query.can_pull_through => {
@@ -273,7 +285,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
                       request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
 
-    let mut image_manager = helpers::create_image_manager(&state, &token);
+    let mut image_manager = state.pooled_image_manager(&token);
     image_manager.remove_image(&tag)?;
 
     state.clear_layer_cache().await;
@@ -288,8 +300,7 @@ async fn get_layer_exists(State(state): State<Arc<AppState>>,
                           request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
-
+    let image_manager = state.pooled_image_manager(&token);
     let exists = match state.get_layer(&image_manager, &hash).await {
         Ok(_) => true,
         Err(ImageManagerError::ReferenceNotFound { .. }) => false,
@@ -311,8 +322,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
                             request: Request) -> AppResult<Response> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
-
+    let image_manager = state.pooled_image_manager(&token);
     match state.get_layer(&image_manager, &hash).await {
         Ok(layer) => Ok(Json(json!(layer.as_ref())).into_response()),
         Err(ImageManagerError::ReferenceNotFound { .. }) if query.can_pull_through && state.config.can_pull_through_upstream() => {
@@ -335,10 +345,13 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let (layer, base_folder) = {
+        let image_manager = state.pooled_image_manager(&token);
+        let layer = state.get_layer(&image_manager, &hash).await?;
+        let base_folder = image_manager.config().base_folder().to_path_buf();
 
-    let layer = state.get_layer(&image_manager, &hash).await?;
-    let base_folder = image_manager.config().base_folder().to_path_buf();
+        (layer, base_folder)
+    };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
@@ -375,7 +388,7 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
 
     let layer: Layer = helpers::decode_json(request).await?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let image_manager = state.pooled_image_manager(&token);
     if state.get_layer(&image_manager, &layer.hash).await.is_ok() {
         return Ok(
             Json(json!(
@@ -439,7 +452,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
-    let image_manager = helpers::create_image_manager(&state, &token);
+    let image_manager = state.pooled_image_manager(&token);
     let mut state_session = image_manager.pooled_state_session()?;
 
     let mut pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
@@ -501,7 +514,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
     let (layer, base_folder) = {
-        let image_manager = helpers::create_image_manager(&state, &token);
+        let image_manager = state.pooled_image_manager(&token);
         let state_session = image_manager.pooled_state_session()?;
 
         let pending_upload_layer = state.get_pending_upload_layer_by_id(state_session, &upload_id).await?;
