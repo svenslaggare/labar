@@ -459,7 +459,7 @@ impl ImageManager {
                         let mut writer = BufWriter::new(File::create(&temp_source_path)?);
                         std::io::copy(&mut reader, &mut writer)?;
                     }
-                    
+
                     decompressed_operations.push((
                         operation_index,
                         temp_source_path,
@@ -490,10 +490,12 @@ impl ImageManager {
             StorageMode::AlwaysUncompressed => {
                 self.printer.println("\t\t* Decompressing...");
                 self.decompress_layer(layer)?;
+                self.printer.println("\t\t* Decompressed.");
             }
             StorageMode::AlwaysCompressed => {
                 self.printer.println("\t\t* Compressing...");
                 self.compress_layer(layer)?;
+                self.printer.println("\t\t* Compressed.");
             }
             StorageMode::PreferCompressed => {}
             StorageMode::PreferUncompressed => {}
