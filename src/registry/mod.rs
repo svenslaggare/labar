@@ -171,6 +171,10 @@ impl AppState {
         }
     }
 
+    pub async fn clear_layer_cache(&self) {
+        self.layer_cache.lock().await.clear();
+    }
+
     pub async fn get_pending_upload_layer_by_id(&self, state_session: PooledStateSession, upload_id: &str) -> AppResult<Arc<Layer>> {
         let mut cache = self.pending_upload_layer_cache.lock().await;
         match cache.get(upload_id) {
@@ -269,6 +273,8 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 
     let mut image_manager = helpers::create_image_manager(&state, &token);
     image_manager.remove_image(&tag)?;
+
+    state.clear_layer_cache().await;
 
     info!("Removed image: {}", tag);
 
@@ -443,6 +449,8 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
             &upload_id
         ).map_err(|err| ImageManagerError::Sql(err))?;
 
+        state.remove_pending_upload_layer_by_id(&upload_id).await;
+
         return Ok(
             Json(json!(
                 UploadLayerResponse {
@@ -457,7 +465,9 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
             image_manager.compress_layer(&mut pending_upload_layer)?;
         }
-        StorageMode::AlwaysUncompressed => {}
+        StorageMode::AlwaysUncompressed => {
+            image_manager.decompress_layer(&mut pending_upload_layer)?;
+        }
         StorageMode::PreferUncompressed => {}
     }
 
