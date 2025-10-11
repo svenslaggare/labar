@@ -154,7 +154,8 @@ impl RegistryManager {
             }
         }
 
-        for chunk in file_operations.chunks(8) {
+        let num_parallel = if file_operations.len() >= 100 { 16 } else { 8 };
+        for chunk in file_operations.chunks(num_parallel) {
             let mut download_operations = Vec::new();
             for (source_path, content_hash, file_index) in chunk {
                 let local_source_path = self.config.base_folder.canonicalize()?.join(Path::new(source_path));
