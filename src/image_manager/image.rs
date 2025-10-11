@@ -373,7 +373,7 @@ impl ImageManager {
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
             let mut layer = self.get_layer(&layer_id.to_ref())?;
-             self.compress_layer(&mut layer)?;
+            self.compress_layer(&mut layer)?;
             self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
         }
@@ -382,7 +382,8 @@ impl ImageManager {
     }
 
     pub fn compress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
-        for operation in &mut layer.operations {
+        let mut compressed_operations = Vec::new();
+        for (operation_index, operation) in layer.operations.iter().enumerate() {
             match operation {
                 LayerOperation::Image { .. } => {}
                 LayerOperation::Directory { .. } => {}
@@ -399,20 +400,28 @@ impl ImageManager {
                     }
 
                     let compressed_content_hash = compute_content_hash(&temp_source_path)?;
-
-                    std::fs::rename(temp_source_path, abs_source_path)?;
-                    *operation = LayerOperation::CompressedFile {
-                        path: path.clone(),
-                        source_path: source_path.clone(),
-                        original_source_path: original_source_path.clone(),
-                        content_hash: content_hash.clone(),
-                        link_type: *link_type,
-                        writable: *writable,
-                        compressed_content_hash
-                    };
+                    compressed_operations.push((
+                        operation_index,
+                        temp_source_path,
+                        abs_source_path,
+                        LayerOperation::CompressedFile {
+                            path: path.clone(),
+                            source_path: source_path.clone(),
+                            original_source_path: original_source_path.clone(),
+                            content_hash: content_hash.clone(),
+                            link_type: *link_type,
+                            writable: *writable,
+                            compressed_content_hash
+                        }
+                    ));
                 }
                 LayerOperation::CompressedFile { .. } => {}
             }
+        }
+
+        for (operation_index, temp_source_path, abs_source_path, new_operation) in compressed_operations {
+            std::fs::rename(temp_source_path, abs_source_path)?;
+            layer.operations[operation_index] = new_operation;
         }
 
         Ok(())
@@ -433,7 +442,8 @@ impl ImageManager {
     }
 
     pub fn decompress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
-        for operation in &mut layer.operations {
+        let mut decompressed_operations = Vec::new();
+        for (operation_index, operation) in layer.operations.iter().enumerate() {
             match operation {
                 LayerOperation::Image { .. } => {}
                 LayerOperation::Directory { .. } => {}
@@ -449,18 +459,27 @@ impl ImageManager {
                         let mut writer = BufWriter::new(File::create(&temp_source_path)?);
                         std::io::copy(&mut reader, &mut writer)?;
                     }
-
-                    std::fs::rename(temp_source_path, abs_source_path)?;
-                    *operation = LayerOperation::File {
-                        path: path.clone(),
-                        source_path: source_path.clone(),
-                        original_source_path: original_source_path.clone(),
-                        content_hash: content_hash.clone(),
-                        link_type: *link_type,
-                        writable: *writable
-                    };
+                    
+                    decompressed_operations.push((
+                        operation_index,
+                        temp_source_path,
+                        abs_source_path,
+                        LayerOperation::File {
+                            path: path.clone(),
+                            source_path: source_path.clone(),
+                            original_source_path: original_source_path.clone(),
+                            content_hash: content_hash.clone(),
+                            link_type: *link_type,
+                            writable: *writable
+                        }
+                    ));
                 }
             }
+        }
+
+        for (operation_index, temp_source_path, abs_source_path, new_operation) in decompressed_operations {
+            std::fs::rename(temp_source_path, abs_source_path)?;
+            layer.operations[operation_index] = new_operation;
         }
 
         Ok(())
