@@ -362,7 +362,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                 let abs_source_path = base_folder.join(source_path);
 
                 let file = tokio::fs::File::open(&abs_source_path).await?;
-                let stream = ReaderStream::with_capacity(file, 4096);
+                let stream = ReaderStream::new(file);
                 let body = Body::from_stream(stream);
 
                 return Ok(
