@@ -696,6 +696,7 @@ fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> Re
         data_path: tmp_registry_folder.to_path_buf(),
         storage_mode: StorageMode::PreferUncompressed,
         address,
+        payload_max_size: 1 * 1024 * 1024,
         pending_upload_expiration: 30.0,
         ssl_cert_path: None,
         ssl_key_path: None,

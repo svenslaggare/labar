@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::ops::Deref;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Local;
 use flate2::Compression;
@@ -521,7 +521,8 @@ impl ImageManager {
         let registry = pull_tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        self.printer.println(&format!("Pulling image {}", pull_tag));
+        let t0 = Instant::now();
+        self.printer.println(&format!("Pulling image: {}", pull_tag));
 
         let image_metadata = self.resolve_image_in_registry_internal(&registry_session, &pull_tag, true).await?;
 
@@ -586,6 +587,8 @@ impl ImageManager {
         let image = Image::new(top_level_hash.unwrap(), image_tag.clone());
         self.insert_or_replace_image(image.clone())?;
 
+        self.printer.println(&format!("Pull complete in {:.1} seconds.", t0.elapsed().as_secs_f64()));
+
         Ok(image)
     }
 
@@ -599,7 +602,8 @@ impl ImageManager {
         let registry = tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        self.printer.println(&format!("Pushing image {}", tag));
+        let t0 = Instant::now();
+        self.printer.println(&format!("Pushing image: {}", tag));
 
         let mut stack = Vec::new();
         stack.push(top_layer.hash.clone());
@@ -620,6 +624,7 @@ impl ImageManager {
 
         self.registry_manager.upload_image(&registry_session, &top_layer.hash, &tag).await?;
 
+        self.printer.println(&format!("Push complete in {:.1} seconds.", t0.elapsed().as_secs_f64()));
         self.printer.println("");
         Ok(layers_uploaded)
     }

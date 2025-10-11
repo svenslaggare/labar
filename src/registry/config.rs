@@ -15,6 +15,9 @@ pub struct RegistryConfig {
 
     pub address: SocketAddr,
 
+    #[serde(default="default_payload_max_size")]
+    pub payload_max_size: usize,
+
     #[serde(default="default_pending_upload_expiration")]
     pub pending_upload_expiration: f64,
 
@@ -38,6 +41,10 @@ impl RegistryConfig {
 
 fn default_storage_mode() -> StorageMode {
     StorageMode::PreferCompressed
+}
+
+fn default_payload_max_size() -> usize {
+    16 * 1024 * 1024
 }
 
 fn default_pending_upload_expiration() -> f64 {

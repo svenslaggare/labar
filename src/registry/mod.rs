@@ -5,7 +5,7 @@ use std::sync::{Arc};
 use std::time::Instant;
 
 use chrono::Local;
-use log::{error, info};
+use log::{debug, error, info};
 
 use serde_json::json;
 use serde::Deserialize;
@@ -18,7 +18,7 @@ use tokio::sync::Mutex;
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
@@ -47,6 +47,7 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
     let tls_config = RustlsConfig::from_pem_chain_file(cert_path, key_path).await
         .map_err(|err| RunRegistryError::InvalidCertificate { reason: err.to_string() })?;
 
+    let payload_max_size = config.payload_max_size;
     let state = AppState::new(config)?;
 
     let app = Router::new()
@@ -65,6 +66,7 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
         .route("/layers/begin-upload", post(begin_layer_upload))
         .route("/layers/end-upload", post(end_layer_upload))
         .route("/layers/{layer}/upload/{index}", post(upload_layer_file))
+        .layer(DefaultBodyLimit::max(payload_max_size))
         .with_state(state.clone())
     ;
 
@@ -552,7 +554,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
                 tokio::fs::rename(&temp_file_path, abs_source_path).await?;
 
-                info!("Uploaded layer file: {}:{}", layer.hash, file_index);
+                debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
                 return Ok(Json(json!({ "status": "uploaded" })));
             }
         }

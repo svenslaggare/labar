@@ -417,9 +417,10 @@ pub enum RegistryError {
     InvalidContentHash,
     IncorrectLayer { expected: ImageId, actual: ImageId },
     FailToPullThrough,
+    TooLargePayload,
     Operation { status_code: StatusCode, message: String, operation: String },
     Http(reqwest::Error),
-    Deserialize(serde_json::Error),
+    Serialization(serde_json::Error),
     IO(std::io::Error)
 }
 
@@ -431,6 +432,8 @@ impl RegistryError {
             Err(RegistryError::InvalidAuthentication)
         } else if response.status() == StatusCode::NOT_FOUND {
             Err(RegistryError::ReferenceNotFound)
+        } else if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
+            Err(RegistryError::TooLargePayload)
         } else {
             let status_code = response.status();
             let text = response.text().await?;
@@ -458,10 +461,11 @@ impl Display for RegistryError {
             RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
             RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in enough time"),
+            RegistryError::TooLargePayload => write!(f, "The payload is too large to be uploaded"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
-            RegistryError::Http(err) => write!(f, "Http: {}", err),
-            RegistryError::Deserialize(err) => write!(f, "Deserialize: {}", err),
-            RegistryError::IO(err) => write!(f, "I/O: {}", err)
+            RegistryError::Http(err) => write!(f, "Http error: {}", err),
+            RegistryError::Serialization(err) => write!(f, "Serialization error: {}", err),
+            RegistryError::IO(err) => write!(f, "I/O error: {}", err)
         }
     }
 }
@@ -474,7 +478,7 @@ impl From<reqwest::Error> for RegistryError {
 
 impl From<serde_json::Error> for RegistryError {
     fn from(value: serde_json::Error) -> Self {
-        RegistryError::Deserialize(value)
+        RegistryError::Serialization(value)
     }
 }
 
