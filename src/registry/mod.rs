@@ -478,7 +478,10 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 
     match state.config.storage_mode {
         StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
-            image_manager.compress_layer(&mut pending_upload_layer)?;
+            image_manager.compress_layer(
+                &mut pending_upload_layer,
+                state.config.storage_mode == StorageMode::AlwaysCompressed
+            )?;
         }
         StorageMode::AlwaysUncompressed => {
             image_manager.decompress_layer(&mut pending_upload_layer)?;

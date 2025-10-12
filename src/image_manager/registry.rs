@@ -154,9 +154,17 @@ impl RegistryManager {
             }
         }
 
-        let bytes_per_operation = layer.storage_size.0 / file_operations.len();
-        let target_throughput = 1 * 1024 * 1024;
-        let num_parallel = (target_throughput / bytes_per_operation).clamp(4, 16);
+
+        let num_parallel = {
+            if file_operations.len() > 0 {
+                let bytes_per_operation = layer.storage_size.0 / file_operations.len();
+                let target_throughput = 1 * 1024 * 1024;
+                (target_throughput / bytes_per_operation).clamp(4, 16)
+            } else {
+                1
+            }
+        };
+
         for chunk in file_operations.chunks(num_parallel) {
             let mut download_operations = Vec::new();
             for (source_path, content_hash, file_index) in chunk {

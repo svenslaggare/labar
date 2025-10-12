@@ -373,7 +373,7 @@ impl ImageManager {
         let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
         while let Some(layer_id) = stack.pop() {
             let mut layer = self.get_layer(&layer_id.to_ref())?;
-            self.compress_layer(&mut layer)?;
+            self.compress_layer(&mut layer, true)?;
             self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
             layer.visit_image_ids(|id| stack.push(id.clone()));
         }
@@ -381,7 +381,7 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn compress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
+    pub fn compress_layer(&self, layer: &mut Layer, always: bool) -> ImageManagerResult<()> {
         let mut compressed_operations = Vec::new();
         for (operation_index, operation) in layer.operations.iter().enumerate() {
             match operation {
@@ -389,6 +389,11 @@ impl ImageManager {
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
                     let abs_source_path = self.config.base_folder.join(&source_path);
+                    if !always {
+                        if DataSize::from_file(&abs_source_path) < DataSize(1024) {
+                            continue;
+                        }
+                    }
 
                     let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
                     let temp_source_path = Path::new(&temp_source_path).to_path_buf();
@@ -494,7 +499,7 @@ impl ImageManager {
             }
             StorageMode::AlwaysCompressed => {
                 self.printer.println("\t\t* Compressing...");
-                self.compress_layer(layer)?;
+                self.compress_layer(layer, true)?;
                 self.printer.println("\t\t* Compressed.");
             }
             StorageMode::PreferCompressed => {}

@@ -385,7 +385,7 @@ async fn test_push_pull_compressed_storage_mode() {
 
     let address: SocketAddr = generate_registry_address().parse().unwrap();
     let mut registry_config = create_registry_config(address, &tmp_registry_folder);
-    registry_config.storage_mode = StorageMode::PreferCompressed;
+    registry_config.storage_mode = StorageMode::AlwaysCompressed;
     tokio::spawn(crate::registry::run(registry_config));
 
     // Wait until registry starts
