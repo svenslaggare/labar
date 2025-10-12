@@ -283,13 +283,16 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            let mut results = Vec::new();
+            let mut failed = false;
             for tag in tags {
-                results.push(image_manager.remove_image(&tag).map_err(|err| format!("{}", err)));
+                if let Err(err) = image_manager.remove_image(&tag) {
+                    println!("{}", err);
+                    failed = true;
+                }
             }
 
-            for result in results {
-                result?;
+            if failed {
+                return Err(String::new());
             }
         }
         CommandLineInput::TagImage { reference, tag } => {
@@ -542,7 +545,10 @@ async fn main() -> Result<(), String> {
     let command_line_input = CommandLineInput::from_args();
 
     if let Err(err) = main_run(file_config, command_line_input).await {
-        println!("{}", err);
+        if !err.is_empty() {
+            println!("{}", err);
+        }
+        
         std::process::exit(1);
     }
 
