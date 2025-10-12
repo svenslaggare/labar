@@ -7,7 +7,7 @@ use futures::{future, StreamExt};
 
 use reqwest::{Body, Client, Request, Response, StatusCode};
 use reqwest::header::{HeaderMap, HeaderValue};
-
+use tokio::io::AsyncWriteExt;
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
@@ -122,9 +122,9 @@ impl RegistryManager {
             let mut content_hasher = ContentHash::new();
             while let Some(item) = byte_stream.next().await {
                 let data = item?;
-                let mut data = data.as_ref();
+                let data = data.as_ref();
                 content_hasher.add(data);
-                tokio::io::copy(&mut data, &mut file).await?;
+                file.write_all(data).await?;
             }
 
             if &content_hasher.finalize() != &content_hash {
