@@ -113,10 +113,10 @@ enum CommandLineInput {
     },
     #[structopt(about="Removes an unpacking")]
     RemoveUnpacking {
-        #[structopt(name="path", name="The unpacking to remove")]
-        path: String,
+        #[structopt(name="path", name="The unpacking(s) to remove")]
+        paths: Vec<String>,
         #[structopt(long, help="Force removes an unpacking, not guaranteeing that all files are removed, but entry removed")]
-        force: bool,
+        force: bool
     },
     #[structopt(about="Extracts an image to an archive file")]
     Extract {
@@ -407,11 +407,21 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let unpack_file = UnpackFile::parse_file(Path::new(&file), dry_run).map_err(|err| format!("Failed parsing unpack definition: {}", err))?;
             image_manager.unpack_file(unpack_file).map_err(|err| format!("{}", err))?;
         },
-        CommandLineInput::RemoveUnpacking { path, force } => {
+        CommandLineInput::RemoveUnpacking { paths, force } => {
             let _unpack_lock = create_unpack_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            image_manager.remove_unpacking(&Path::new(&path), force).map_err(|err| format!("{}", err))?;
+            let mut failed = false;
+            for path in paths {
+                if let Err(err) = image_manager.remove_unpacking(&Path::new(&path), force) {
+                    println!("{}", err);
+                    failed = true;
+                }
+            }
+
+            if failed {
+                return Err(String::new());
+            }
         }
         CommandLineInput::Extract { reference, archive } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
