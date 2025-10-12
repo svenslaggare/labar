@@ -260,13 +260,7 @@ impl ImageManager {
         Ok(hard_references)
     }
 
-    pub fn list_images(&self, filter: Option<&str>) -> ImageManagerResult<Vec<ImageMetadata>> {
-        let filter = if let Some(filter) = filter {
-            Some(Regex::new(filter).map_err(|err| ImageManagerError::Regex(err))?)
-        } else {
-            None
-        };
-
+    pub fn list_images(&self, filter: Option<&Regex>) -> ImageManagerResult<Vec<ImageMetadata>> {
         let session = self.state_manager.pooled_session()?;
 
         let mut images = Vec::new();
@@ -375,9 +369,18 @@ impl ImageManager {
         Ok(files)
     }
 
-    pub fn list_unpackings(&self) -> ImageManagerResult<Vec<Unpacking>> {
+    pub fn list_unpackings(&self, filter: Option<&Regex>) -> ImageManagerResult<Vec<Unpacking>> {
         let session = self.state_manager.pooled_session()?;
-        self.unpack_manager.unpackings(&session)
+        let mut unpackings = self.unpack_manager.unpackings(&session)?;
+        unpackings.retain(|unpacking| {
+            if let Some(filter) = filter {
+                filter.is_match(&unpacking.destination)
+            } else {
+                true
+            }
+        });
+
+        Ok(unpackings)
     }
 
     pub fn compress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {

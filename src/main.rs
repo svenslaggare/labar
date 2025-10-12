@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use chrono::{DateTime, Local};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
 use structopt::StructOpt;
@@ -74,8 +75,8 @@ enum CommandLineInput {
     },
     #[structopt(about="Lists the available images")]
     ListImages {
-        #[structopt(long, help="Only show images matching the given regex")]
-        filter: Option<String>,
+        #[structopt(long, help="Only show images matching the given regex (for image tag)")]
+        filter: Option<Regex>,
         #[structopt(long, short, help="Only show image IDs")]
         quiet: bool
     },
@@ -91,7 +92,10 @@ enum CommandLineInput {
     },
     #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
-
+        #[structopt(long, help="Only show unpackings matching the given regex (for destination)")]
+        filter: Option<Regex>,
+        #[structopt(long, short, help="Only show image IDs")]
+        quiet: bool
     },
     #[structopt(about="Unpacks an image to a directory")]
     Unpack {
@@ -308,7 +312,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::ListImages { filter, quiet } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let images = image_manager.list_images(filter.as_ref().map(|x| x.as_str())).map_err(|err| format!("{}", err))?;
+            let images = image_manager.list_images(filter.as_ref()).map_err(|err| format!("{}", err))?;
             if !quiet {
                 print_images(&images);
             } else {
@@ -355,37 +359,44 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
 
             table_printer.print();
         }
-        CommandLineInput::ListUnpackings {} => {
+        CommandLineInput::ListUnpackings { filter, quiet } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let unpackings = image_manager.list_unpackings().map_err(|err| format!("{}", err))?;
-            let mut table_printer = TablePrinter::new(
-                vec![
-                    "PATH".to_owned(),
-                    "IMAGE TAG".to_owned(),
-                    "IMAGE ID".to_owned(),
-                    "CREATED".to_owned()
-                ]
-            );
+            let unpackings = image_manager.list_unpackings(filter.as_ref()).map_err(|err| format!("{}", err))?;
 
-            let images = image_manager.list_images(None).map_err(|err| format!("{}", err))?;
+            if !quiet {
+                let mut table_printer = TablePrinter::new(
+                    vec![
+                        "PATH".to_owned(),
+                        "IMAGE TAG".to_owned(),
+                        "IMAGE ID".to_owned(),
+                        "CREATED".to_owned()
+                    ]
+                );
 
-            for unpacking in unpackings {
-                let datetime: DateTime<Local> = unpacking.time.into();
-                let image_tag = images
-                    .iter()
-                    .find(|image| image.image.hash == unpacking.hash)
-                    .map(|image| &image.image.tag);
+                let images = image_manager.list_images(None).map_err(|err| format!("{}", err))?;
 
-                table_printer.add_row(vec![
-                    unpacking.destination.clone(),
-                    image_tag.map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
-                    unpacking.hash.to_string(),
-                    datetime.format(DATE_FORMAT).to_string()
-                ]);
+                for unpacking in unpackings {
+                    let datetime: DateTime<Local> = unpacking.time.into();
+                    let image_tag = images
+                        .iter()
+                        .find(|image| image.image.hash == unpacking.hash)
+                        .map(|image| &image.image.tag);
+
+                    table_printer.add_row(vec![
+                        unpacking.destination.clone(),
+                        image_tag.map(|tag| tag.to_string()).unwrap_or_else(|| "N/A".to_owned()),
+                        unpacking.hash.to_string(),
+                        datetime.format(DATE_FORMAT).to_string()
+                    ]);
+                }
+
+                table_printer.print();
+            } else {
+                for unpacking in unpackings {
+                    println!("{}", unpacking.destination);
+                }
             }
-
-            table_printer.print();
         }
         CommandLineInput::Unpack { reference, destination, replace, dry_run } => {
             let _unpack_lock = create_unpack_lock(&file_config);
