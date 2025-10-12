@@ -36,6 +36,7 @@ pub enum ImageManagerError {
     ZIPError(ZipError),
     Sql(rusqlite::Error),
     Serialization(serde_json::Error),
+    Regex(regex::Error),
     OtherError { message: String }
 }
 
@@ -128,6 +129,9 @@ impl std::fmt::Display for ImageManagerError {
             }
             ImageManagerError::Serialization(err) => {
                 write!(f, "Serialization: {}", err)
+            }
+            ImageManagerError::Regex(err) => {
+                write!(f, "Regex: {}", err)
             }
             ImageManagerError::OtherError { message } => {
                 write!(f, "{}", message)

@@ -9,6 +9,7 @@ use chrono::Local;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
+use regex::Regex;
 use crate::content::compute_content_hash;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
@@ -259,12 +260,24 @@ impl ImageManager {
         Ok(hard_references)
     }
 
-    pub fn list_images(&self) -> ImageManagerResult<Vec<ImageMetadata>> {
+    pub fn list_images(&self, filter: Option<&str>) -> ImageManagerResult<Vec<ImageMetadata>> {
+        let filter = if let Some(filter) = filter {
+            Some(Regex::new(filter).map_err(|err| ImageManagerError::Regex(err))?)
+        } else {
+            None
+        };
+
         let session = self.state_manager.pooled_session()?;
 
         let mut images = Vec::new();
 
         for image in self.layer_manager.images_iter(&session)? {
+            if let Some(filter) = filter.as_ref() {
+                if !filter.is_match(&image.tag.to_string()) {
+                    continue;
+                }
+            }
+
             images.push(self.get_image_metadata(&image)?);
         }
 
@@ -974,7 +987,7 @@ fn test_remove_image1() {
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
 
-    let images = image_manager.list_images();
+    let images = image_manager.list_images(None);
     assert!(result.is_ok());
     let images = images.unwrap();
 
@@ -1015,7 +1028,7 @@ fn test_remove_image2() {
     let result = image_manager.remove_image(&ImageTag::from_str("test").unwrap());
     assert!(result.is_ok());
 
-    let images = image_manager.list_images();
+    let images = image_manager.list_images(None);
     assert!(result.is_ok());
     let images = images.unwrap();
 

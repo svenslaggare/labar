@@ -225,7 +225,7 @@ async fn list_images(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
 
     let image_manager = state.pooled_image_manager(&token);
-    let images = image_manager.list_images()?;
+    let images = image_manager.list_images(None)?;
 
     Ok(Json(json!(images)).into_response())
 }

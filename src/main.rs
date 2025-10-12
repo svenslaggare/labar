@@ -74,7 +74,10 @@ enum CommandLineInput {
     },
     #[structopt(about="Lists the available images")]
     ListImages {
-
+        #[structopt(long, help="Only show images matching the given regex")]
+        filter: Option<String>,
+        #[structopt(long, short, help="Only show image IDs")]
+        quiet: bool
     },
     #[structopt(about="Lists the content of an image")]
     ListContent {
@@ -302,11 +305,17 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let image = image_manager.tag_image(&reference, &tag).map_err(|err| format!("{}", err))?;
             println!("Tagged {} ({}) as {}", reference, image.hash, image.tag);
         },
-        CommandLineInput::ListImages {} => {
+        CommandLineInput::ListImages { filter, quiet } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
-            print_images(&images);
+            let images = image_manager.list_images(filter.as_ref().map(|x| x.as_str())).map_err(|err| format!("{}", err))?;
+            if !quiet {
+                print_images(&images);
+            } else {
+                for image in images {
+                    println!("{}", image.image.hash);
+                }
+            }
         }
         CommandLineInput::ListContent { reference } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
@@ -359,7 +368,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 ]
             );
 
-            let images = image_manager.list_images().map_err(|err| format!("{}", err))?;
+            let images = image_manager.list_images(None).map_err(|err| format!("{}", err))?;
 
             for unpacking in unpackings {
                 let datetime: DateTime<Local> = unpacking.time.into();
@@ -548,7 +557,7 @@ async fn main() -> Result<(), String> {
         if !err.is_empty() {
             println!("{}", err);
         }
-        
+
         std::process::exit(1);
     }
 

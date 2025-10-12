@@ -71,7 +71,7 @@ async fn test_pull() {
         assert_eq!((2, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
@@ -139,7 +139,7 @@ async fn test_push_pull() {
         assert_eq!((2, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
@@ -221,7 +221,7 @@ async fn test_push_pull_default_registry() {
         assert_eq!((2, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
@@ -296,7 +296,7 @@ async fn test_push_pull_with_ref() {
         assert_eq!((1, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
@@ -361,7 +361,7 @@ async fn test_push_pull_compressed() {
         assert_eq!((0, 2), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert_eq!(1, images.unwrap().len());
 
         // Check content
@@ -429,7 +429,7 @@ async fn test_push_pull_compressed_storage_mode() {
         assert_eq!((0, 2), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert_eq!(1, images.unwrap().len());
 
         // Check content
@@ -497,7 +497,7 @@ async fn test_push_pull_compressed_decompress_on_download() {
         assert_eq!((2, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert_eq!(1, images.unwrap().len());
 
         // Check content
@@ -593,7 +593,7 @@ async fn test_sync() {
         assert_eq!(image, pull_image);
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
@@ -677,7 +677,7 @@ async fn test_pull_through() {
         assert_eq!(image, pull_image);
 
         // List images
-        let images = image_manager.list_images();
+        let images = image_manager.list_images(None);
         assert!(images.is_ok());
         let images = images.unwrap();
         assert_eq!(1, images.len());
