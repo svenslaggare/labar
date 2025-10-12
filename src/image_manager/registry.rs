@@ -1,13 +1,14 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration};
 
 use futures::{future, StreamExt};
 
 use reqwest::{Body, Client, Request, Response, StatusCode};
 use reqwest::header::{HeaderMap, HeaderValue};
 use tokio::io::AsyncWriteExt;
+
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
@@ -92,7 +93,7 @@ impl RegistryManager {
                                 verbose_output: bool) -> RegistryResult<Layer> {
         let client = RegistryClient::new(&self.config, registry)?;
 
-        let (mut layer, pull_through) = Self::get_layer_definition_internal(&client, &hash, true).await?;
+        let (layer, pull_through) = Self::get_layer_definition_internal(&client, &hash, true).await?;
         let layer_folder = self.config.get_layer_folder(&layer.hash);
 
         let computed_hash = LayerHash::from_layer(&layer);
@@ -139,7 +140,7 @@ impl RegistryManager {
 
         let mut file_index = 0;
         let mut file_operations = Vec::new();
-        for operation in &mut layer.operations {
+        for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
                 LayerOperation::Directory { .. } => {}
@@ -154,12 +155,11 @@ impl RegistryManager {
             }
         }
 
-
         let num_parallel = {
             if file_operations.len() > 0 {
                 let bytes_per_operation = layer.storage_size.0 / file_operations.len();
                 let target_throughput = 1 * 1024 * 1024;
-                (target_throughput / bytes_per_operation).clamp(4, 16)
+                (target_throughput / bytes_per_operation).clamp(4, 32)
             } else {
                 1
             }
