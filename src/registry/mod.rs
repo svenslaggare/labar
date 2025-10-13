@@ -29,7 +29,7 @@ pub mod config;
 mod helpers;
 
 use crate::content::ContentHash;
-use crate::helpers::ResourcePool;
+use crate::helpers::{DeferredFileDelete, ResourcePool};
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManager, ImageManagerError, ImageManagerResult, PooledStateSession, StorageMode};
 use crate::reference::{ImageId, ImageTag, Reference};
@@ -546,6 +546,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 let compressed_content_hash = operation.compressed_content_hash();
 
                 let mut file = tokio::fs::File::create(&temp_file_path).await?;
+                let mut deferred_delete = DeferredFileDelete::new(temp_file_path.clone());
 
                 let mut stream = request.into_body().into_data_stream();
                 let mut content_hasher = ContentHash::new();
@@ -556,7 +557,6 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                             file.write_all(chunk.as_ref()).await?;
                         }
                         Err(err) => {
-                            tokio::fs::remove_file(&temp_file_path).await?;
                             return Err(AppError::FailedToUploadLayerFile(err.to_string()));
                         }
                     }
@@ -564,11 +564,11 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
                 let check_content_hash = compressed_content_hash.unwrap_or(content_hash);
                 if &content_hasher.finalize() != check_content_hash {
-                    tokio::fs::remove_file(&temp_file_path).await?;
                     return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
                 }
 
                 tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+                deferred_delete.skip();
 
                 debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
                 return Ok(Json(json!({ "status": "uploaded" })));
