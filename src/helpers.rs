@@ -95,7 +95,13 @@ impl DataSize {
 
 impl Display for DataSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:.2} MB", self.0 as f64 / 1024.0 / 1024.0)
+        let megabytes = self.0 as f64 / 1024.0 / 1024.0;
+
+        if megabytes > 0.1 {
+            write!(f, "{:.2} MB", megabytes)
+        } else {
+            write!(f, "{:.2} KB", megabytes * 1024.0)
+        }
     }
 }
 

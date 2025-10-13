@@ -1,4 +1,5 @@
-use std::collections::{HashSet};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::ops::Deref;
@@ -6,10 +7,12 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use chrono::Local;
+use regex::Regex;
+
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use regex::Regex;
+
 use crate::content::compute_content_hash;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
@@ -327,10 +330,36 @@ impl ImageManager {
         self.layer_manager.size_of_reference(&session, reference, false)
     }
 
-    pub fn list_content(&self, reference: &Reference) -> ImageManagerResult<Vec<String>> {
+    pub fn list_content(&self, reference: &Reference, max_depth: Option<usize>) -> ImageManagerResult<Vec<ListContentEntry>> {
         let session = self.state_manager.pooled_session()?;
 
-        let mut files = Vec::new();
+        let mut files = BTreeSet::new();
+
+        let mut add_file = |path: &str, source_path: &str, is_file: bool| {
+            let parts = path.split("/").collect::<Vec<_>>();
+            for index in 0..parts.len() - 1 {
+                let depth = index + 1;
+                let partial_path = parts[0..index + 1].join("/");
+
+                if !max_depth.map(|max_depth| depth > max_depth).unwrap_or(false) {
+                    files.insert(ListContentEntry::Directory { path: partial_path });
+                }
+            }
+
+            let depth = parts.len();
+            if !max_depth.map(|max_depth| depth > max_depth).unwrap_or(false) {
+                files.insert(
+                    if is_file {
+                        ListContentEntry::File {
+                            path: path.to_owned(),
+                            size: DataSize::from_file(&self.config.base_folder().join(source_path))
+                        }
+                    } else {
+                        ListContentEntry::Directory { path: path.to_owned() }
+                    }
+                );
+            }
+        };
 
         let mut stack = Vec::new();
         stack.push(reference.clone());
@@ -341,32 +370,22 @@ impl ImageManager {
                 stack.push(parent_hash.clone().to_ref());
             }
 
-            let mut local_files = Vec::new();
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { hash } => {
                         stack.push(hash.clone().to_ref());
                     }
                     LayerOperation::Directory { path } => {
-                        local_files.push(path.clone());
+                        add_file(path, path, false);
                     }
-                    LayerOperation::File { path, ..  } => {
-                        local_files.push(path.clone());
-                    }
-                    LayerOperation::CompressedFile { path, ..  } => {
-                        local_files.push(path.clone());
+                    LayerOperation::File { path, source_path, ..  } | LayerOperation::CompressedFile { path, source_path, ..  }  => {
+                        add_file(path, source_path, true);
                     }
                 }
             }
-
-            local_files.reverse();
-
-            files.append(&mut local_files);
         }
 
-        files.reverse();
-
-        Ok(files)
+        Ok(files.into_iter().collect::<Vec<_>>())
     }
 
     pub fn list_unpackings(&self, filter: Option<&Regex>) -> ImageManagerResult<Vec<Unpacking>> {
@@ -836,6 +855,40 @@ pub struct SystemUsage {
     pub file_storage_size: DataSize
 }
 
+pub enum ListContentEntry {
+    File { path: String, size: DataSize },
+    Directory { path: String }
+}
+
+impl PartialEq for ListContentEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.path().eq(other.path())
+    }
+}
+
+impl Eq for ListContentEntry {}
+
+impl PartialOrd for ListContentEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.path().partial_cmp(other.path())
+    }
+}
+
+impl Ord for ListContentEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.path().cmp(other.path())
+    }
+}
+
+impl ListContentEntry {
+    pub fn path(&self) -> &str {
+        match self {
+            ListContentEntry::File { path, .. } => path,
+            ListContentEntry::Directory { path, .. } => path
+        }
+    }
+}
+
 pub struct PullRequest<'a> {
     pub tag: ImageTag,
     pub default_registry: Option<&'a str>,
@@ -1064,13 +1117,13 @@ fn test_list_content() {
             ImageTag::from_str("that").unwrap()
         ).unwrap();
 
-        let files = image_manager.list_content(&Reference::from_str("that").unwrap());
+        let files = image_manager.list_content(&Reference::from_str("that").unwrap(), None);
         assert!(files.is_ok());
         let files = files.unwrap();
 
         assert_eq!(2, files.len());
-        assert_eq!("file1.txt", files[0]);
-        assert_eq!("file2.txt", files[1]);
+        assert_eq!("file1.txt", files[0].path());
+        assert_eq!("file2.txt", files[1].path());
     }
 }
 

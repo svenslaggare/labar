@@ -22,7 +22,7 @@ use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
 use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
 use crate::lock::FileLock;
-use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest, UnpackFile};
+use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest, UnpackFile, ListContentEntry};
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, AddUserResult, Password, SqliteAuthProvider};
 use crate::registry::config::{RegistryConfig};
@@ -83,7 +83,9 @@ enum CommandLineInput {
     #[structopt(about="Lists the content of an image")]
     ListContent {
         #[structopt(name="reference", help="The reference to list for")]
-        reference: Reference
+        reference: Reference,
+        #[structopt(long, short, help="The maximum depth to show")]
+        max_depth: Option<usize>
     },
     #[structopt(about="Inspects an image")]
     Inspect {
@@ -321,12 +323,19 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 }
             }
         }
-        CommandLineInput::ListContent { reference } => {
+        CommandLineInput::ListContent { reference, max_depth } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let content = image_manager.list_content(&reference).map_err(|err| format!("{}", err))?;
-            for path in content {
-                println!("{}", path);
+            let content = image_manager.list_content(&reference, max_depth).map_err(|err| format!("{}", err))?;
+            for entry in content {
+                match entry {
+                    ListContentEntry::File { path, size } => {
+                        println!("{}: {}", path, size);
+                    }
+                    ListContentEntry::Directory { path } => {
+                        println!("{}", path);
+                    }
+                }
             }
         }
         CommandLineInput::Inspect { reference } => {
