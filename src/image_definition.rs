@@ -797,8 +797,8 @@ fn test_parse_label2() {
         vec![
             LayerOperationDefinition::Label {
                 key_values: vec![
+                    ("owner".to_owned(), "me".to_owned()),
                     ("version".to_owned(), "1.2.3".to_owned()),
-                    ("owner".to_owned(), "me".to_owned())
                 ]
             }
         ],

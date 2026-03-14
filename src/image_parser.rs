@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::{Display, Formatter};
 use std::path::StripPrefixError;
 use std::str::FromStr;
@@ -171,19 +171,21 @@ impl<'a> ImageParser<'a> {
     }
 
     fn parse_label(&mut self, line: &str, parts: &mut Vec<String>) -> ImageParseResult<()> {
-        let mut key_values = Vec::new();
+        let mut key_values = BTreeMap::new();
         for argument in parts.iter().skip(1) {
             for capture in self.label_regex.captures_iter(argument) {
                 let key = capture.get(1).unwrap().as_str();
                 let value = capture.get(2).unwrap().as_str();
-                key_values.push((key.to_owned(), value.to_owned()));
+                key_values.insert(key.to_owned(), value.to_owned());
             }
         }
 
         if !key_values.is_empty() {
             self.add_operation(
                 line,
-                LayerOperationDefinition::Label { key_values }
+                LayerOperationDefinition::Label {
+                    key_values: key_values.into_iter().collect()
+                }
             );
 
             Ok(())
