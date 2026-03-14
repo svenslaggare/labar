@@ -60,6 +60,7 @@ impl TransferManager {
                         writer.start_file_from_path(source_path, SimpleFileOptions::default())?;
                         std::io::copy(&mut reader, &mut writer)?;
                     }
+                    LayerOperation::Label { .. } => {}
                 }
             }
 
@@ -126,6 +127,7 @@ impl TransferManager {
                             let mut file = File::create(&abs_source_path)?;
                             std::io::copy(&mut archive_file, &mut file)?;
                         }
+                        LayerOperation::Label { .. } => {}
                     }
                 }
 

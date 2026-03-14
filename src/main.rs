@@ -92,6 +92,13 @@ enum CommandLineInput {
         #[structopt(name="tag", help="The image to inspect")]
         reference: Reference
     },
+    #[structopt(about="Gets the value of the given label in the given image")]
+    GetLabel {
+        #[structopt(name="tag", help="The image to get for")]
+        reference: Reference,
+        #[structopt(name="key", help="The name of the label")]
+        key: String
+    },
     #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
         #[structopt(long, help="Only show unpackings matching the given regex (for destination)")]
@@ -347,6 +354,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             println!("Tags: {}", inspect_result.image_tags.iter().map(|tag| tag.to_string()).collect::<Vec<_>>().join(", "));
             println!("Created: {}", inspect_result.top_layer.created.format(DATE_FORMAT));
             println!("Size: {}", inspect_result.size);
+            println!("Labels: {}", inspect_result.labels.iter().map(|(key, value)| format!("{}={}", key, value)).collect::<Vec<_>>().join(", "));
             println!();
             println!("Layers:");
 
@@ -367,6 +375,23 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             }
 
             table_printer.print();
+        }
+        CommandLineInput::GetLabel { reference, key } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+
+            let inspect_result = image_manager.inspect(&reference).map_err(|err| format!("{}", err))?;
+            let mut label_value = None;
+            for (current_key, current_value) in inspect_result.labels {
+                if current_key == key {
+                    label_value = Some(current_value);
+                }
+            }
+
+            if let Some(label_value) = label_value {
+                println!("{}", label_value);
+            } else {
+                return Err(format!("Key '{}' not found im image {}.", key, reference));
+            }
         }
         CommandLineInput::ListUnpackings { filter, quiet } => {
             let image_manager = create_image_manager(&file_config, printer.clone());

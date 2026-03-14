@@ -152,6 +152,7 @@ impl RegistryManager {
                     file_operations.push((source_path.clone(), compressed_content_hash.clone(), file_index));
                     file_index += 1;
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -301,6 +302,7 @@ impl RegistryManager {
 
                     file_index += 1;
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 

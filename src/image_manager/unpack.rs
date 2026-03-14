@@ -296,6 +296,7 @@ impl UnpackManager {
                         unpacker.set_readonly(&destination_path)?;
                     }
                 },
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -361,6 +362,7 @@ impl UnpackManager {
                     self.printer.println(&format!("\t* Deleting uncompressed file {}", destination_path.to_str().unwrap()));
                     std::fs::remove_file(destination_path)?;
                 },
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -414,6 +416,7 @@ impl UnpackManager {
                         writer.start_file_from_path(path, SimpleFileOptions::default())?;
                         std::io::copy(&mut reader, writer)?;
                     }
+                    LayerOperation::Label { .. } => {}
                 }
             }
 

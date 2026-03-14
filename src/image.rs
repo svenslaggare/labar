@@ -3,6 +3,7 @@ use std::fmt::{Display, Formatter};
 use std::path::Path;
 
 use chrono::{DateTime, Local};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use rusqlite::Row;
@@ -47,6 +48,9 @@ pub enum LayerOperation {
         writable: bool,
         compressed_content_hash: String
     },
+    Label {
+        key_values: Vec<(String, String)>
+    }
 }
 
 impl LayerOperation {
@@ -73,6 +77,9 @@ impl Display for LayerOperation {
             }
             LayerOperation::CompressedFile { path, source_path, .. } => {
                 write!(f, "File (compressed) {} -> {}", source_path, path)
+            }
+            LayerOperation::Label { key_values } => {
+                write!(f, "{}", key_values.iter().map(|(key, value)| format!("{}={}", key, value)).join(", "))
             }
         }
     }
@@ -114,6 +121,7 @@ impl Layer {
                     self.file_operation_mapping.insert(current_file_index, operation_index);
                     current_file_index += 1;
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
     }
@@ -135,6 +143,7 @@ impl Layer {
 
                     current_index += 1;
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -154,6 +163,7 @@ impl Layer {
                 LayerOperation::CompressedFile { .. } => {
                     compressed += 1;
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -170,6 +180,7 @@ impl Layer {
                         return false;
                     }
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -190,6 +201,7 @@ impl Layer {
                             return Ok(false);
                         }
                     }
+                    LayerOperation::Label { .. } => {}
                 }
             }
 
@@ -209,6 +221,19 @@ impl Layer {
                 LayerOperation::Image { hash } => {
                     f(hash);
                 },
+                _ => {}
+            }
+        }
+    }
+
+    pub fn visit_labels<F: FnMut(&str, &str)>(&self, mut f: F) {
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::Label { key_values } => {
+                    for (key, value) in key_values {
+                        f(key, value);
+                    }
+                }
                 _ => {}
             }
         }

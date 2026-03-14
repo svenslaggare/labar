@@ -376,6 +376,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         .unwrap()
                 );
             }
+            LayerOperation::Label { .. } => {}
         }
     }
 
@@ -573,6 +574,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
                 return Ok(Json(json!({ "status": "uploaded" })));
             }
+            LayerOperation::Label { .. } => {}
         }
     }
 

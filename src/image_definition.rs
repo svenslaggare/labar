@@ -69,6 +69,7 @@ pub enum LayerOperationDefinition {
     Image { reference: Reference },
     Directory { path: String },
     File { path: String, source_path: String, link_type: LinkType, writable: bool },
+    Label { key_values: Vec<(String, String)> }
 }
 
 #[derive(Debug)]
@@ -78,7 +79,7 @@ pub enum ImageParseError {
     UndefinedCommand(String),
     FromOnlyOnFirst,
     ExpectedArguments { expected: usize, actual: usize },
-    ExpectedSubcomand,
+    ExpectedSubcommand,
     NotWithinSubLayer,
     AlreadyWithinSubLayer,
     SubLayerNotEnded,
@@ -88,6 +89,7 @@ pub enum ImageParseError {
     IsAbsolutePath(String),
     IO(std::io::Error),
     StripPrefix(StripPrefixError),
+    ExpectedKeyValue(String),
     Other(String),
 }
 
@@ -111,7 +113,7 @@ impl Display for ImageParseError {
             ImageParseError::UndefinedCommand(command) => write!(f, "'{}' is not a defined command", command),
             ImageParseError::FromOnlyOnFirst => write!(f, "FROM statement only allowed on the first line"),
             ImageParseError::ExpectedArguments { expected, actual } => write!(f, "Expected {} arguments but got {}", expected, actual),
-            ImageParseError::ExpectedSubcomand => write!(f, "Expected subcommand"),
+            ImageParseError::ExpectedSubcommand => write!(f, "Expected subcommand"),
             ImageParseError::InvalidSubcommand(subcommand) => write!(f, "'{}' is not a valid subcommand", subcommand),
             ImageParseError::NotWithinSubLayer => write!(f, "Not within a sublayer"),
             ImageParseError::AlreadyWithinSubLayer => write!(f, "Already within a sublayer"),
@@ -120,6 +122,7 @@ impl Display for ImageParseError {
             ImageParseError::InvalidImageReference(error) => write!(f, "Invalid image reference: {}", error),
             ImageParseError::IsAbsolutePath(path) => write!(f, "The path '{}' is absolute", path),
             ImageParseError::StripPrefix(error) => write!(f, "Failed to strip prefix due to: {}", error),
+            ImageParseError::ExpectedKeyValue(argument) => write!(f, "Expected key=value but got: {}", argument),
             ImageParseError::IO(error) => write!(f, "IO error: {}", error),
             ImageParseError::Other(error) => write!(f, "{}", error),
         }
@@ -133,6 +136,8 @@ impl ImageDefinition {
             Regex::new("\\$([A-Za-z0-9_]+)").unwrap(),
             Regex::new("\\$\\{([A-Za-z0-9_]+)}").unwrap()
         ];
+
+        let label_regex = Regex::new("(.*)\\s*=\\s*(.*)\\s?").unwrap();
 
         let mut is_first_line = true;
 
@@ -292,7 +297,7 @@ impl ImageDefinition {
                     }
                     "BEGIN" => {
                         if num_arguments != 1 {
-                            return Err(ImageParseError::ExpectedSubcomand)
+                            return Err(ImageParseError::ExpectedSubcommand)
                         }
 
                         let subcommand = &parts[1];
@@ -308,7 +313,29 @@ impl ImageDefinition {
                     "END" => {
                         active_layer.end_layer(&mut image_definition)?;
                     }
-                    _ => { return Err(ImageParseError::UndefinedCommand(command.to_owned())); }
+                    "LABEL" => {
+                        let mut key_values = Vec::new();
+                        for argument in parts.iter().skip(1) {
+                            for capture in label_regex.captures_iter(argument) {
+                                let key = capture.get(1).unwrap().as_str();
+                                let value = capture.get(2).unwrap().as_str();
+                                key_values.push((key.to_owned(), value.to_owned()));
+                            }
+                        }
+
+                        if !key_values.is_empty() {
+                            active_layer.add_operation(
+                                &mut image_definition,
+                                line,
+                                LayerOperationDefinition::Label { key_values }
+                            );
+                        } else {
+                            return Err(ImageParseError::ExpectedKeyValue(line.to_owned()));
+                        }
+                    }
+                    _ => {
+                        return Err(ImageParseError::UndefinedCommand(command.to_owned()));
+                    }
                 }
             } else if !line.trim().is_empty() {
                 return Err(ImageParseError::InvalidLine(line.to_owned()));
@@ -456,6 +483,9 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
             LayerOperationDefinition::Directory { path } => {
                 expanded_operations.push(LayerOperationDefinition::Directory { path });
             },
+            LayerOperationDefinition::Label { key_values } => {
+                expanded_operations.push(LayerOperationDefinition::Label { key_values })
+            }
         }
     }
 
@@ -1127,6 +1157,99 @@ fn test_parse_sublayer2() {
         ],
     );
 }
+
+#[test]
+fn test_parse_label1() {
+    let result = image_definition_from_file2("testdata/parsing/success/label1.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(2, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
+    );
+
+    assert_eq!(
+        result.layers[1].operations,
+        vec![
+            LayerOperationDefinition::Label {
+                key_values: vec![
+                    ("version".to_owned(), "1.2.3".to_owned())
+                ]
+            }
+        ],
+    );
+}
+
+#[test]
+fn test_parse_label2() {
+    let result = image_definition_from_file2("testdata/parsing/success/label2.labarfile");
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(2, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
+    );
+
+    assert_eq!(
+        result.layers[1].operations,
+        vec![
+            LayerOperationDefinition::Label {
+                key_values: vec![
+                    ("version".to_owned(), "1.2.3".to_owned()),
+                    ("owner".to_owned(), "me".to_owned())
+                ]
+            }
+        ],
+    );
+}
+
+#[test]
+fn test_parse_label3() {
+    let result = image_definition_from_file(
+        "testdata/parsing/success/label3.labarfile",
+        ImageDefinitionContext::new()
+            .add_variable("VERSION", "4.5.6")
+    );
+    assert!(result.is_ok(), "{}", result.unwrap_err());
+    let result = result.unwrap();
+
+    assert_eq!(2, result.layers.len());
+    assert_eq!(
+        result.layers[0].operations,
+        vec![
+            LayerOperationDefinition::File {
+                path: "file1.txt".to_owned(), source_path: "testdata/rawdata/file1.txt".to_owned(),
+                link_type: LinkType::Hard, writable: false
+            }
+        ],
+    );
+
+    assert_eq!(
+        result.layers[1].operations,
+        vec![
+            LayerOperationDefinition::Label {
+                key_values: vec![
+                    ("version".to_owned(), "4.5.6".to_owned())
+                ]
+            }
+        ],
+    );
+}
+
 
 #[test]
 fn test_failed_parse_mkdir1() {

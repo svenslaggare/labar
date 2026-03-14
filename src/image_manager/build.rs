@@ -241,6 +241,13 @@ impl BuildManager {
                     layer_operations.push(LayerOperation::Directory { path: path.clone() });
                     layer_hash.add_directory(path);
                 },
+                LayerOperationDefinition::Label { key_values } => {
+                    layer_operations.push(LayerOperation::Label { key_values: key_values.clone() });
+                    
+                    for (key, value) in key_values {
+                        layer_hash.add_key_value(key, value);
+                    }
+                }
             }
         }
 
@@ -286,6 +293,11 @@ impl LayerHash {
                 LayerOperation::CompressedFile { .. } => {
                     layer_hash.add_compressed_file(&operation, true);
                 },
+                LayerOperation::Label { key_values } => {
+                    for (key, value) in key_values {
+                        layer_hash.add_key_value(key, value);
+                    }
+                }
             }
         }
 
@@ -342,6 +354,11 @@ impl LayerHash {
                 writable
             );
         }
+    }
+    
+    pub fn add_key_value(&mut self, key: &str, value: &str) {
+        self.hash_input += key;
+        self.hash_input += value;
     }
 
     pub fn finalize(self) -> ImageId {

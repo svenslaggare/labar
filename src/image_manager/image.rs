@@ -235,6 +235,7 @@ impl ImageManager {
                     let source_path = self.config.base_folder.join(source_path);
                     reclaimed_size += DataSize::from_file(&source_path);
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -302,8 +303,11 @@ impl ImageManager {
     pub fn inspect(&self, reference: &Reference) -> ImageManagerResult<InspectResult> {
         let top_layer = self.get_layer(&reference)?;
         let mut layers = Vec::new();
+        let mut labels = Vec::new();
         for layer in self.get_layers(&reference)? {
             let size = self.layer_size(&layer.hash.clone().to_ref())?;
+            layer.visit_labels(|key, value| labels.push((key.to_owned(), value.to_owned())));
+            
             layers.push(InspectLayerResult {
                 layer,
                 size
@@ -315,6 +319,7 @@ impl ImageManager {
                 top_layer,
                 image_tags: self.get_image_tags(reference)?,
                 size: self.image_size(reference)?,
+                labels,
                 layers
             }
         )
@@ -381,6 +386,7 @@ impl ImageManager {
                     LayerOperation::File { path, source_path, ..  } | LayerOperation::CompressedFile { path, source_path, ..  }  => {
                         add_file(path, source_path, true);
                     }
+                    LayerOperation::Label { .. } => {}
                 }
             }
         }
@@ -456,6 +462,7 @@ impl ImageManager {
                     ));
                 }
                 LayerOperation::CompressedFile { .. } => {}
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -514,6 +521,7 @@ impl ImageManager {
                         }
                     ));
                 }
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -927,6 +935,7 @@ pub struct InspectResult {
     pub top_layer: Layer,
     pub image_tags: Vec<ImageTag>,
     pub size: DataSize,
+    pub labels: Vec<(String, String)>,
     pub layers: Vec<InspectLayerResult>
 }
 

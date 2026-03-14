@@ -29,6 +29,13 @@ Merges the referred to image into the current image.
 
 * `IMAGE test:latest`
 
+## LABEL
+Adds a new label to the image.
+
+**Examples**:
+
+* `LABEL version=1.2.3`
+
 ## BEGIN LAYER
 Creates a new layer. All operations within the layer block will be part of the same layer.
 
