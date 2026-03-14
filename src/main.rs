@@ -105,7 +105,7 @@ enum CommandLineInput {
     ListUnpackings {
         #[structopt(long, help="Only show unpackings matching the given regex (for destination)")]
         filter: Option<Regex>,
-        #[structopt(long, short, help="Only show image IDs")]
+        #[structopt(long, short, help="Only show image destinations")]
         quiet: bool
     },
     #[structopt(about="Unpacks an image to a directory")]
