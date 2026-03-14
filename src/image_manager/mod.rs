@@ -197,7 +197,7 @@ pub enum StorageMode {
 
 pub use image::ImageManager;
 pub use printing::{PrinterRef, ConsolePrinter, EmptyPrinter, Printer};
-pub use crate::image_definition::ImageParseError;
+pub use crate::image_parser::ImageParseError;
 pub use crate::image_manager::registry::RegistryError;
 pub use crate::reference::{ImageId, Reference};
 pub use crate::image_manager::image::{PullRequest, ListContentEntry};

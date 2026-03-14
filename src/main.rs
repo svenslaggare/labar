@@ -9,6 +9,7 @@ use structopt::StructOpt;
 pub mod helpers;
 pub mod lock;
 pub mod image_definition;
+pub mod image_parser;
 pub mod image;
 pub mod image_manager;
 pub mod registry;
@@ -20,9 +21,10 @@ pub mod test_helpers;
 
 use crate::helpers::{edit_key_value, TablePrinter};
 use crate::image::ImageMetadata;
-use crate::image_definition::{ImageDefinition, ImageDefinitionContext};
+use crate::image_definition::{ImageDefinition};
 use crate::lock::FileLock;
 use crate::image_manager::{PrinterRef, BuildRequest, ConsolePrinter, ImageManager, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, UnpackRequest, PullRequest, UnpackFile, ListContentEntry};
+use crate::image_parser::ImageParserContext;
 use crate::reference::{ImageTag, Reference};
 use crate::registry::auth::{AccessRight, AddUserResult, Password, SqliteAuthProvider};
 use crate::registry::config::{RegistryConfig};
@@ -251,11 +253,11 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let _write_lock = create_write_lock(&file_config);
             let mut image_manager = create_image_manager(&file_config, printer.clone());
 
-            let mut image_definition_context = ImageDefinitionContext::new();
+            let mut image_parser_context = ImageParserContext::new();
             for argument in arguments {
                 let parts = argument.split("=").collect::<Vec<_>>();
                 if parts.len() == 2 {
-                    image_definition_context.add_variable(parts[0], parts[1]);
+                    image_parser_context.add_variable(parts[0], parts[1]);
                 }
             }
 
@@ -263,7 +265,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             let start_time = Instant::now();
             let image_definition = ImageDefinition::parse_file(
                 Path::new(&file),
-                &image_definition_context
+                &image_parser_context
             ).map_err(|err| format!("Failed parsing build definition: {}", err))?;
 
             let request = BuildRequest {
