@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::ops::Deref;
@@ -303,10 +303,10 @@ impl ImageManager {
     pub fn inspect(&self, reference: &Reference) -> ImageManagerResult<InspectResult> {
         let top_layer = self.get_layer(&reference)?;
         let mut layers = Vec::new();
-        let mut labels = Vec::new();
+        let mut labels = BTreeMap::new();
         for layer in self.get_layers(&reference)? {
             let size = self.layer_size(&layer.hash.clone().to_ref())?;
-            layer.visit_labels(|key, value| labels.push((key.to_owned(), value.to_owned())));
+            layer.visit_labels(|key, value| { labels.insert(key.to_owned(), value.to_owned()); });
             
             layers.push(InspectLayerResult {
                 layer,
@@ -319,10 +319,19 @@ impl ImageManager {
                 top_layer,
                 image_tags: self.get_image_tags(reference)?,
                 size: self.image_size(reference)?,
-                labels,
+                labels: labels.into_iter().collect(),
                 layers
             }
         )
+    }
+    
+    pub fn get_labels(&self, reference: &Reference) -> ImageManagerResult<Vec<(String, String)>> {
+        let mut labels = BTreeMap::new();
+        for layer in self.get_layers(&reference)? {
+            layer.visit_labels(|key, value| { labels.insert(key.to_owned(), value.to_owned()); });
+        }
+        
+        Ok(labels.into_iter().collect())
     }
 
     pub fn image_size(&self, reference: &Reference) -> ImageManagerResult<DataSize> {

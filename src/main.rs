@@ -379,14 +379,8 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
         CommandLineInput::GetLabel { reference, key } => {
             let image_manager = create_image_manager(&file_config, printer.clone());
 
-            let inspect_result = image_manager.inspect(&reference).map_err(|err| format!("{}", err))?;
-            let mut label_value = None;
-            for (current_key, current_value) in inspect_result.labels {
-                if current_key == key {
-                    label_value = Some(current_value);
-                }
-            }
-
+            let labels = image_manager.get_labels(&reference).map_err(|err| format!("{}", err))?;
+            let label_value = labels.iter().find(|(current_key, _)| current_key == &key).map(|(_, value)| value);
             if let Some(label_value) = label_value {
                 println!("{}", label_value);
             } else {
