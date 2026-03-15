@@ -13,6 +13,8 @@ pub struct RegistryConfig {
     #[serde(default="default_storage_mode")]
     pub storage_mode: StorageMode,
 
+    pub s3_storage: Option<S3Storage>,
+
     pub address: SocketAddr,
 
     #[serde(default="default_payload_max_size")]
@@ -49,6 +51,16 @@ fn default_payload_max_size() -> usize {
 
 fn default_pending_upload_expiration() -> f64 {
     30.0 * 60.0
+}
+
+#[derive(Debug, Serialize,  Deserialize)]
+pub struct S3Storage {
+    pub bucket: String,
+    pub region: String,
+    pub endpoint_url: Option<String>,
+
+    pub access_key_id: String,
+    pub secret_access_key: String
 }
 
 #[derive(Debug, Serialize,  Deserialize)]

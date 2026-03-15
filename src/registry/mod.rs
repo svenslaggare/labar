@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::{Arc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::Local;
 use log::{debug, error, info};
+
+use rand::distr::{Alphanumeric, SampleString};
 
 use serde_json::json;
 use serde::Deserialize;
@@ -15,13 +17,19 @@ use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
+
+use aws_config::Region;
+use aws_credential_types::Credentials;
+use aws_sdk_s3::config::SharedCredentialsProvider;
+use aws_sdk_s3::presigning::PresigningConfig;
+use aws_sdk_s3::primitives::ByteStream;
 
 pub mod model;
 pub mod auth;
@@ -134,6 +142,7 @@ impl Display for RunRegistryError {
 
 struct AppState {
     config: RegistryConfig,
+    s3_client: Option<(aws_sdk_s3::Client, String)>,
     image_manager_pool: Arc<ResourcePool<ImageManager>>,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
     delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
@@ -148,10 +157,27 @@ impl AppState {
             std::mem::take(&mut config.initial_users)
         ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
 
+        let s3_client = config.s3_storage.as_ref().map(|s3_storage| {
+            let credentials = Credentials::from_keys(s3_storage.access_key_id.clone(), s3_storage.secret_access_key.clone(), None);
+
+            let mut aws_config = aws_config::SdkConfig::builder()
+                .credentials_provider(SharedCredentialsProvider::new(credentials))
+                .region(Region::new(s3_storage.region.clone()));
+
+            if let Some(endpoint_url) = s3_storage.endpoint_url.as_ref() {
+                aws_config = aws_config.endpoint_url(endpoint_url.clone());
+            }
+
+            info!("Using S3 storage mode - bucket: {}.", s3_storage.bucket);
+
+            (aws_sdk_s3::Client::new(&aws_config.build()), s3_storage.bucket.clone())
+        });
+
         Ok(
             Arc::new(
                 AppState {
                     config,
+                    s3_client,
                     image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
                     access_provider: Box::new(access_provider),
                     delayed_image_inserts: Mutex::new(HashMap::new()),
@@ -358,23 +384,38 @@ async fn download_layer(State(state): State<Arc<AppState>>,
             LayerOperation::Image { .. } => {}
             LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
-                let source_path = std::path::Path::new(source_path);
-                let abs_source_path = base_folder.join(source_path);
+                return match state.s3_client.as_ref() {
+                    Some((s3_client, bucket)) => {
+                        let object = s3_client
+                            .get_object()
+                            .bucket(bucket.clone())
+                            .key(source_path)
+                            .presigned(PresigningConfig::builder().expires_in(Duration::from_secs(3600)).build().unwrap()).await
+                            .map_err(|_| AppError::LayerFileNotFound)?;
+                        debug!("Download URL: {}", object.uri());
 
-                let file = tokio::fs::File::open(&abs_source_path).await?;
-                let stream = ReaderStream::new(file);
-                let body = Body::from_stream(stream);
+                        Ok(Redirect::permanent(object.uri()).into_response())
+                    }
+                    None => {
+                        let source_path = std::path::Path::new(source_path);
+                        let abs_source_path = base_folder.join(source_path);
 
-                return Ok(
-                    Response::builder()
-                        .header("Content-Type", "application/octet-stream")
-                        .header(
-                            "Content-Disposition",
-                            format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
+                        let file = tokio::fs::File::open(&abs_source_path).await?;
+                        let stream = ReaderStream::new(file);
+                        let body = Body::from_stream(stream);
+
+                        Ok(
+                            Response::builder()
+                                .header("Content-Type", "application/octet-stream")
+                                .header(
+                                    "Content-Disposition",
+                                    format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
+                                )
+                                .body(body)
+                                .unwrap()
                         )
-                        .body(body)
-                        .unwrap()
-                );
+                    }
+                }
             }
             LayerOperation::Label { .. } => {}
         }
@@ -459,7 +500,16 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let mut pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
 
-    if !pending_upload_layer.verify_path_exists(image_manager.config().base_folder()) {
+    let exists = match state.s3_client.as_ref() {
+        Some((s3_client, bucket)) => {
+            pending_upload_layer.verify_path_exists_s3(s3_client, bucket).await
+        }
+        None => {
+            pending_upload_layer.verify_path_exists(image_manager.config().base_folder())
+        }
+    };
+
+    if !exists {
         info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload_layer_hash, upload_id);
         state_session.registry_remove_upload(
             &upload_id
@@ -468,12 +518,14 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         state.remove_pending_upload_layer_by_id(&upload_id).await;
 
         return Ok(
-            Json(json!(
-                UploadLayerResponse {
-                    status: UploadStatus::IncompleteUpload,
-                    upload_id: None
-                }
-            ))
+            Json(
+                json!(
+                    UploadLayerResponse {
+                        status: UploadStatus::IncompleteUpload,
+                        upload_id: None
+                    }
+                )
+            )
         );
     }
 
@@ -538,8 +590,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
                 let abs_source_path = base_folder.join(source_path);
 
-                let temp_file_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                let temp_file_path = std::path::Path::new(&temp_file_path).to_path_buf();
+                let temp_file_path = base_folder.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 32));
                 if let Some(parent) = temp_file_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
@@ -568,8 +619,22 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
                 }
 
-                tokio::fs::rename(&temp_file_path, abs_source_path).await?;
-                deferred_delete.skip();
+                if let Some((s3_client, bucket)) = state.s3_client.as_ref() {
+                    debug!("Uploading {} to {}", source_path, bucket);
+                    s3_client.put_object()
+                        .bucket(bucket.clone())
+                        .key(source_path.clone())
+                        .body(ByteStream::from_path(temp_file_path).await.unwrap())
+                        .send().await
+                        .map_err(|err| AppError::FailedToUploadLayerFile(err.to_string()))?;
+                } else {
+                    if let Some(parent) = abs_source_path.parent() {
+                        tokio::fs::create_dir_all(parent).await?;
+                    }
+
+                    tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+                    deferred_delete.skip();
+                }
 
                 debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
                 return Ok(Json(json!({ "status": "uploaded" })));

@@ -187,6 +187,29 @@ impl Layer {
         true
     }
 
+    pub async fn verify_path_exists_s3(&self, s3_client: &aws_sdk_s3::Client, bucket: &str) -> bool {
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
+                    let exists =s3_client.get_object()
+                        .bucket(bucket.to_owned())
+                        .key(source_path.clone())
+                        .send().await
+                        .is_ok();
+
+                    if !exists {
+                        return false;
+                    }
+                }
+                LayerOperation::Label { .. } => {}
+            }
+        }
+
+        true
+    }
+
     pub fn verify_valid_paths(&self, base_folder: &Path) -> bool {
         fn inner(base_folder: &Path, layer: &Layer) -> std::io::Result<bool> {
             let base_folder = base_folder.canonicalize()?;
