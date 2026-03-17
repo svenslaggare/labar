@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::ops::Deref;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use chrono::Local;
@@ -434,44 +434,13 @@ impl ImageManager {
     pub fn compress_layer(&self, layer: &mut Layer, always: bool) -> ImageManagerResult<()> {
         let mut compressed_operations = Vec::new();
         for (operation_index, operation) in layer.operations.iter().enumerate() {
-            match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::Directory { .. } => {}
-                LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
-                    let abs_source_path = self.config.base_folder.join(&source_path);
-                    if !always {
-                        if DataSize::from_file(&abs_source_path) < DataSize(1024) {
-                            continue;
-                        }
-                    }
-
-                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                    {
-                        let mut reader = BufReader::new(File::open(&abs_source_path)?);
-                        let mut writer = BufWriter::new(GzEncoder::new(File::create(&temp_source_path)?, Compression::default()));
-                        std::io::copy(&mut reader, &mut writer)?;
-                    }
-
-                    let compressed_content_hash = compute_content_hash(&temp_source_path)?;
-                    compressed_operations.push((
-                        operation_index,
-                        temp_source_path,
-                        abs_source_path,
-                        LayerOperation::CompressedFile {
-                            path: path.clone(),
-                            source_path: source_path.clone(),
-                            original_source_path: original_source_path.clone(),
-                            content_hash: content_hash.clone(),
-                            link_type: *link_type,
-                            writable: *writable,
-                            compressed_content_hash
-                        }
-                    ));
-                }
-                LayerOperation::CompressedFile { .. } => {}
-                LayerOperation::Label { .. } => {}
+            if let Some((temp_source_path, abs_source_path, new_operation)) = self.compress_operation(operation, None, always)? {
+                compressed_operations.push((
+                    operation_index,
+                    temp_source_path,
+                    abs_source_path,
+                    new_operation
+                ));
             }
         }
 
@@ -481,6 +450,53 @@ impl ImageManager {
         }
 
         Ok(())
+    }
+
+    pub fn compress_operation(&self,
+                              operation: &LayerOperation,
+                              data_path: Option<PathBuf>,
+                              always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+        match operation {
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
+            LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
+                let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
+
+                if !always {
+                    if DataSize::from_file(&data_path) < DataSize(1024) {
+                        return Ok(None);
+                    }
+                }
+
+                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
+                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                {
+                    let mut reader = BufReader::new(File::open(&data_path)?);
+                    let mut writer = BufWriter::new(GzEncoder::new(File::create(&temp_source_path)?, Compression::default()));
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+
+                let compressed_content_hash = compute_content_hash(&temp_source_path)?;
+                Ok(
+                    Some((
+                        temp_source_path,
+                        data_path,
+                        LayerOperation::CompressedFile {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable,
+                            compressed_content_hash
+                        }
+                    ))
+                )
+            }
+            LayerOperation::CompressedFile { .. } => Ok(None),
+            LayerOperation::Label { .. } => Ok(None)
+        }
     }
 
     pub fn decompress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
@@ -500,37 +516,13 @@ impl ImageManager {
     pub fn decompress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         let mut decompressed_operations = Vec::new();
         for (operation_index, operation) in layer.operations.iter().enumerate() {
-            match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::Directory { .. } => {}
-                LayerOperation::File { .. } => {}
-                LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
-                    let abs_source_path = self.config.base_folder.join(&source_path);
-
-                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                    {
-                        let mut reader = GzDecoder::new(BufReader::new(File::open(&abs_source_path)?));
-                        let mut writer = BufWriter::new(File::create(&temp_source_path)?);
-                        std::io::copy(&mut reader, &mut writer)?;
-                    }
-
-                    decompressed_operations.push((
-                        operation_index,
-                        temp_source_path,
-                        abs_source_path,
-                        LayerOperation::File {
-                            path: path.clone(),
-                            source_path: source_path.clone(),
-                            original_source_path: original_source_path.clone(),
-                            content_hash: content_hash.clone(),
-                            link_type: *link_type,
-                            writable: *writable
-                        }
-                    ));
-                }
-                LayerOperation::Label { .. } => {}
+            if let Some((temp_source_path, abs_source_path, new_operation)) = self.decompress_operation(operation, None)? {
+                decompressed_operations.push((
+                    operation_index,
+                    temp_source_path,
+                    abs_source_path,
+                    new_operation
+                ));
             }
         }
 
@@ -540,6 +532,44 @@ impl ImageManager {
         }
 
         Ok(())
+    }
+
+    pub fn decompress_operation(&self,
+                                operation: &LayerOperation,
+                                data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+        match operation {
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
+            LayerOperation::File { .. } => Ok(None),
+            LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
+                let data_path = data_path.unwrap_or_else(|| self.config.base_folder.join(&source_path));
+
+                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
+                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                {
+                    let mut reader = GzDecoder::new(BufReader::new(File::open(&data_path)?));
+                    let mut writer = BufWriter::new(File::create(&temp_source_path)?);
+                    std::io::copy(&mut reader, &mut writer)?;
+                }
+
+                Ok(
+                    Some((
+                        temp_source_path,
+                        data_path,
+                        LayerOperation::File {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable
+                        }
+                    ))
+                )
+            }
+            LayerOperation::Label { .. } => Ok(None)
+        }
     }
 
     fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {

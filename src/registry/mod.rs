@@ -147,7 +147,8 @@ struct AppState {
     access_provider: Box<dyn AuthProvider + Send + Sync>,
     delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
     layer_cache: Mutex<HashMap<ImageId, Arc<Layer>>>,
-    pending_upload_layer_cache: Mutex<HashMap<String, Arc<Layer>>>
+    pending_upload_layer_cache: Mutex<HashMap<String, Arc<Layer>>>,
+    changed_pending_upload_layer_operations: Mutex<HashMap<String, Vec<ChangedUploadLayerFileOperation>>>
 }
 
 impl AppState {
@@ -182,7 +183,8 @@ impl AppState {
                     access_provider: Box::new(access_provider),
                     delayed_image_inserts: Mutex::new(HashMap::new()),
                     layer_cache: Mutex::new(HashMap::new()),
-                    pending_upload_layer_cache: Mutex::new(HashMap::new())
+                    pending_upload_layer_cache: Mutex::new(HashMap::new()),
+                    changed_pending_upload_layer_operations: Mutex::new(HashMap::new())
                 }
             )
         )
@@ -231,9 +233,26 @@ impl AppState {
     }
 
     pub async fn remove_pending_upload_layer_by_id(&self, upload_id: &str) {
-        let mut cache = self.pending_upload_layer_cache.lock().await;
-        cache.remove(upload_id);
+        self.pending_upload_layer_cache.lock().await.remove(upload_id);
+        self.changed_pending_upload_layer_operations.lock().await.remove(upload_id);
     }
+
+    pub async fn changed_pending_upload_layer_operations(&self, upload_id: &str, file_index: usize, operation: LayerOperation) {
+        self.changed_pending_upload_layer_operations
+            .lock().await
+            .entry(upload_id.to_owned())
+            .or_insert_with(|| Vec::new())
+            .push(ChangedUploadLayerFileOperation { file_index, operation })
+    }
+
+    pub async fn take_changed_pending_upload_layer_operations(&self, upload_id: &str) -> Option<Vec<ChangedUploadLayerFileOperation>> {
+        self.changed_pending_upload_layer_operations.lock().await.remove(upload_id)
+    }
+}
+
+struct ChangedUploadLayerFileOperation {
+    file_index: usize,
+    operation: LayerOperation
 }
 
 async fn index() -> AppResult<impl IntoResponse> {
@@ -529,17 +548,13 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
         );
     }
 
-    match state.config.storage_mode {
-        StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
-            image_manager.compress_layer(
-                &mut pending_upload_layer,
-                state.config.storage_mode == StorageMode::AlwaysCompressed
-            )?;
+
+    if let Some(changed_operations) = state.take_changed_pending_upload_layer_operations(&upload_id).await {
+        for new_operation in changed_operations {
+            if let Some(existing_operation) = pending_upload_layer.get_file_operation_mut(new_operation.file_index) {
+                *existing_operation = new_operation.operation;
+            }
         }
-        StorageMode::AlwaysUncompressed => {
-            image_manager.decompress_layer(&mut pending_upload_layer)?;
-        }
-        StorageMode::PreferUncompressed => {}
     }
 
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
@@ -617,6 +632,32 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 let check_content_hash = compressed_content_hash.unwrap_or(content_hash);
                 if &content_hasher.finalize() != check_content_hash {
                     return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
+                }
+
+                let compress_result = match state.config.storage_mode {
+                    StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
+                        state.pooled_image_manager(&token).compress_operation(
+                            operation,
+                            Some(temp_file_path.clone()),
+                            state.config.storage_mode == StorageMode::AlwaysCompressed,
+                        )?
+                    }
+                    StorageMode::AlwaysUncompressed => {
+                        state.pooled_image_manager(&token).decompress_operation(
+                            operation,
+                            Some(temp_file_path.clone())
+                        )?
+                    }
+                    StorageMode::PreferUncompressed => None
+                };
+
+                if let Some((temp_compress_path, _, new_operation)) = compress_result {
+                    tokio::fs::rename(&temp_compress_path, &temp_file_path).await?;
+                    state.changed_pending_upload_layer_operations(
+                        &upload_id,
+                        file_index,
+                        new_operation
+                    ).await;
                 }
 
                 if let Some((s3_client, bucket)) = state.s3_client.as_ref() {

@@ -150,6 +150,30 @@ impl Layer {
         None
     }
 
+    pub fn get_file_operation_mut(&mut self, index: usize) -> Option<&mut LayerOperation> {
+        if let Some(operation_index) = self.file_operation_mapping.get(&index) {
+            return Some(&mut self.operations[*operation_index]);
+        }
+
+        let mut current_index = 0;
+        for operation in &mut self.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
+                    if current_index == index {
+                        return Some(operation);
+                    }
+
+                    current_index += 1;
+                }
+                LayerOperation::Label { .. } => {}
+            }
+        }
+
+        None
+    }
+
     pub fn storage_modes(&self) -> (usize, usize) {
         let mut uncompressed = 0;
         let mut compressed = 0;
