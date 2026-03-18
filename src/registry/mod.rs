@@ -391,8 +391,6 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
-            LayerOperation::Image { .. } => {}
-            LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                 return match state.external_storage.as_ref() {
                     Some(external_storage) => {
@@ -419,6 +417,8 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                     }
                 }
             }
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
             LayerOperation::Label { .. } => {}
         }
     }
@@ -600,8 +600,6 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
-            LayerOperation::Image { .. } => {}
-            LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
                 let abs_source_path = base_folder.join(source_path);
 
@@ -674,6 +672,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
                 return Ok(Json(json!({ "status": "uploaded" })));
             }
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
             LayerOperation::Label { .. } => {}
         }
     }
