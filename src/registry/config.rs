@@ -13,7 +13,7 @@ pub struct RegistryConfig {
     #[serde(default="default_storage_mode")]
     pub storage_mode: StorageMode,
 
-    pub s3_storage: Option<S3Storage>,
+    pub s3_storage: Option<S3StorageConfig>,
 
     pub address: SocketAddr,
 
@@ -54,7 +54,7 @@ fn default_pending_upload_expiration() -> f64 {
 }
 
 #[derive(Debug, Serialize,  Deserialize)]
-pub struct S3Storage {
+pub struct S3StorageConfig {
     pub bucket: String,
     pub region: String,
     pub endpoint_url: Option<String>,

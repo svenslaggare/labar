@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::{Arc};
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 
 use chrono::Local;
 use log::{debug, error, info};
@@ -17,7 +17,7 @@ use tokio_util::io::ReaderStream;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
@@ -25,16 +25,11 @@ use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
 
-use aws_config::Region;
-use aws_credential_types::Credentials;
-use aws_sdk_s3::config::SharedCredentialsProvider;
-use aws_sdk_s3::presigning::PresigningConfig;
-use aws_sdk_s3::primitives::ByteStream;
-
 pub mod model;
 pub mod auth;
 pub mod config;
 mod helpers;
+mod external_storage;
 
 use crate::content::ContentHash;
 use crate::helpers::{DeferredFileDelete, ResourcePool};
@@ -42,9 +37,11 @@ use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManager, ImageManagerError, ImageManagerResult, PooledStateSession, StorageMode};
 use crate::reference::{ImageId, ImageTag, Reference};
 
-use crate::registry::config::RegistryConfig;
+use crate::registry::config::{RegistryConfig};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::{RegistryUpstreamConfig};
+use crate::registry::external_storage::BoxExternalStorage;
+use crate::registry::external_storage::S3Storage;
 use crate::registry::helpers::{PooledImageManager};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
@@ -142,7 +139,7 @@ impl Display for RunRegistryError {
 
 struct AppState {
     config: RegistryConfig,
-    s3_client: Option<(aws_sdk_s3::Client, String)>,
+    external_storage: Option<BoxExternalStorage>,
     image_manager_pool: Arc<ResourcePool<ImageManager>>,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
     delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
@@ -158,27 +155,16 @@ impl AppState {
             std::mem::take(&mut config.initial_users)
         ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
 
-        let s3_client = config.s3_storage.as_ref().map(|s3_storage| {
-            let credentials = Credentials::from_keys(s3_storage.access_key_id.clone(), s3_storage.secret_access_key.clone(), None);
-
-            let mut aws_config = aws_config::SdkConfig::builder()
-                .credentials_provider(SharedCredentialsProvider::new(credentials))
-                .region(Region::new(s3_storage.region.clone()));
-
-            if let Some(endpoint_url) = s3_storage.endpoint_url.as_ref() {
-                aws_config = aws_config.endpoint_url(endpoint_url.clone());
-            }
-
-            info!("Using S3 storage mode - bucket: {}.", s3_storage.bucket);
-
-            (aws_sdk_s3::Client::new(&aws_config.build()), s3_storage.bucket.clone())
+        let external_storage = config.s3_storage.as_ref().map(|s3_storage| {
+            let storage: BoxExternalStorage = Box::new(S3Storage::new(s3_storage));
+            storage
         });
 
         Ok(
             Arc::new(
                 AppState {
                     config,
-                    s3_client,
+                    external_storage,
                     image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
                     access_provider: Box::new(access_provider),
                     delayed_image_inserts: Mutex::new(HashMap::new()),
@@ -332,27 +318,9 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 
     let mut image_manager = state.pooled_image_manager(&token);
     let removed_layers = image_manager.remove_image_with_option(&tag, false)?;
-    if let Some((s3_client, bucket)) = state.s3_client.as_ref() {
+    if let Some(external_storage) = state.external_storage.as_ref() {
         for hash in removed_layers {
-            let objects = s3_client.list_objects()
-                .bucket(bucket.clone())
-                .prefix(format!("layers/{}", hash))
-                .send().await
-                .map_err(|_| AppError::LayerFileNotFound)?;
-
-            let delete_requests = objects.contents()
-                .iter()
-                .flat_map(|object| object.key.as_ref())
-                .map(|key| s3_client
-                    .delete_object()
-                    .bucket(bucket.clone())
-                    .key(key)
-                    .send()
-                );
-
-            for result in futures::future::join_all(delete_requests).await {
-                result.map_err(|_| AppError::LayerFileNotFound)?;
-            }
+            external_storage.remove_layer(&hash).await?;
         }
     }
 
@@ -426,17 +394,9 @@ async fn download_layer(State(state): State<Arc<AppState>>,
             LayerOperation::Image { .. } => {}
             LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
-                return match state.s3_client.as_ref() {
-                    Some((s3_client, bucket)) => {
-                        let object = s3_client
-                            .get_object()
-                            .bucket(bucket.clone())
-                            .key(source_path)
-                            .presigned(PresigningConfig::builder().expires_in(Duration::from_secs(3600)).build().unwrap()).await
-                            .map_err(|_| AppError::LayerFileNotFound)?;
-                        debug!("Download URL: {}", object.uri());
-
-                        Ok(Redirect::permanent(object.uri()).into_response())
+                return match state.external_storage.as_ref() {
+                    Some(external_storage) => {
+                        external_storage.download(source_path).await
                     }
                     None => {
                         let source_path = std::path::Path::new(source_path);
@@ -542,9 +502,9 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let mut pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
 
-    let exists = match state.s3_client.as_ref() {
-        Some((s3_client, bucket)) => {
-            pending_upload_layer.verify_path_exists_s3(s3_client, bucket).await
+    let exists = match state.external_storage.as_ref() {
+        Some(external_storage) => {
+            verify_path_exists_external_storage(external_storage, &pending_upload_layer).await?
         }
         None => {
             pending_upload_layer.verify_path_exists(image_manager.config().base_folder())
@@ -599,6 +559,23 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
             )
         )
     )
+}
+
+async fn verify_path_exists_external_storage(external_storage: &BoxExternalStorage, layer: &Layer) -> AppResult<bool> {
+    for operation in &layer.operations {
+        match operation {
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
+            LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
+                if !external_storage.exists(source_path).await? {
+                    return Ok(false);
+                }
+            }
+            LayerOperation::Label { .. } => {}
+        }
+    }
+
+    Ok(true)
 }
 
 async fn upload_layer_file(State(state): State<Arc<AppState>>,
@@ -683,14 +660,8 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     ).await;
                 }
 
-                if let Some((s3_client, bucket)) = state.s3_client.as_ref() {
-                    debug!("Uploading {} to {}", source_path, bucket);
-                    s3_client.put_object()
-                        .bucket(bucket.clone())
-                        .key(source_path.clone())
-                        .body(ByteStream::from_path(temp_file_path).await.unwrap())
-                        .send().await
-                        .map_err(|err| AppError::FailedToUploadLayerFile(err.to_string()))?;
+                if let Some(external_storage) = state.external_storage.as_ref() {
+                    external_storage.upload(source_path, &temp_file_path).await?;
                 } else {
                     if let Some(parent) = abs_source_path.parent() {
                         tokio::fs::create_dir_all(parent).await?;
