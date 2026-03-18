@@ -691,6 +691,60 @@ async fn test_pull_through() {
     }
 }
 
+#[tokio::test]
+async fn test_remove() {
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
+
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
+    tokio::spawn(crate::registry::run(create_registry_config(address, &tmp_registry_folder)));
+
+    // Wait until registry starts
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
+
+        let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
+
+        // Build
+        let image = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            image_tag.clone()
+        ).unwrap().image;
+
+        // Push
+        let push_result = image_manager.push(&image.tag, None).await;
+        assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+        let push_result = push_result.unwrap();
+        assert_eq!(1, push_result);
+
+        // List remote
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(1, remote_images.len());
+        assert_eq!(&image_tag, &remote_images[0].image.tag);
+
+        // Remove image in registry
+        assert!(image_manager.remove_image_in_registry(&image.tag, None).await.is_ok());
+
+        // List remote
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(0, remote_images.len());
+    }
+}
+
 fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> RegistryConfig {
     RegistryConfig {
         data_path: tmp_registry_folder.to_path_buf(),

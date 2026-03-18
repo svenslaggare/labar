@@ -331,7 +331,30 @@ async fn remove_image(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
 
     let mut image_manager = state.pooled_image_manager(&token);
-    image_manager.remove_image(&tag)?;
+    let removed_layers = image_manager.remove_image_with_option(&tag, false)?;
+    if let Some((s3_client, bucket)) = state.s3_client.as_ref() {
+        for hash in removed_layers {
+            let objects = s3_client.list_objects()
+                .bucket(bucket.clone())
+                .prefix(format!("layers/{}", hash))
+                .send().await
+                .map_err(|_| AppError::LayerFileNotFound)?;
+
+            let delete_requests = objects.contents()
+                .iter()
+                .flat_map(|object| object.key.as_ref())
+                .map(|key| s3_client
+                    .delete_object()
+                    .bucket(bucket.clone())
+                    .key(key)
+                    .send()
+                );
+
+            for result in futures::future::join_all(delete_requests).await {
+                result.map_err(|_| AppError::LayerFileNotFound)?;
+            }
+        }
+    }
 
     state.clear_layer_cache().await;
 

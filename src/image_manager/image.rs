@@ -161,21 +161,25 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<usize> {
-        self.remove_image_internal(tag, true)
+    pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<Vec<ImageId>> {
+        self.remove_image_internal(tag, true, true)
     }
 
-    fn remove_image_internal(&mut self, tag: &ImageTag, gc: bool) -> ImageManagerResult<usize> {
+    pub fn remove_image_with_option(&mut self, tag: &ImageTag, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
+        self.remove_image_internal(tag, true, remove_files)
+    }
+
+    fn remove_image_internal(&mut self, tag: &ImageTag, gc: bool, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
         let mut session = self.state_manager.pooled_session()?;
 
         if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
 
             if gc {
-                let removed_layers = self.garbage_collect()?;
+                let removed_layers = self.garbage_collect(remove_files)?;
                 Ok(removed_layers)
             } else {
-                Ok(0)
+                Ok(Vec::new())
             }
         } else {
             Err(ImageManagerError::ReferenceNotFound { reference: Reference::ImageTag(tag.clone()) })
@@ -189,29 +193,28 @@ impl ImageManager {
         for image in self.layer_manager.images_iter(&session)? {
             let layer = self.layer_manager.get_layer(&session, &image.hash.clone().to_ref())?;
             if (now - layer.created).to_std().unwrap() > duration {
-                self.remove_image_internal(&image.tag, false)?;
+                self.remove_image_internal(&image.tag, false, true)?;
             }
         }
 
         Ok(())
     }
 
-    pub fn garbage_collect(&mut self) -> ImageManagerResult<usize> {
+    pub fn garbage_collect(&mut self, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
         let session = self.state_manager.pooled_session()?;
-
-        let mut removed_layers = 0;
 
         let mut used_layers = HashSet::new();
         for hash in self.get_hard_references(&session)? {
             self.layer_manager.find_used_layers(&session, &hash, &mut used_layers)?;
         }
 
+        let mut removed_layers = Vec::new();
         for layer in self.layer_manager.all_layers(&session)? {
             if !used_layers.contains(&layer.hash) {
-                if let Err(err) = self.remove_layer(&session, &layer) {
+                if let Err(err) = self.remove_layer(&session, &layer, remove_files) {
                     self.printer.println(&format!("Failed to remove layer: {}", err));
                 } else {
-                    removed_layers += 1;
+                    removed_layers.push(layer.hash);
                 }
             }
         }
@@ -219,33 +222,35 @@ impl ImageManager {
         Ok(removed_layers)
     }
 
-    fn remove_layer(&self, session: &StateSession, layer: &Layer) -> ImageManagerResult<()> {
+    fn remove_layer(&self, session: &StateSession, layer: &Layer, remove_files: bool) -> ImageManagerResult<()> {
         self.layer_manager.remove_layer(session, &layer.hash)?;
 
         let mut reclaimed_size = DataSize(0);
-        for operation in &layer.operations {
-            match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::Directory { .. } => {}
-                LayerOperation::File { source_path, .. } => {
-                    let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize::from_file(&source_path);
+        if remove_files {
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { .. } => {}
+                    LayerOperation::Directory { .. } => {}
+                    LayerOperation::File { source_path, .. } => {
+                        let source_path = self.config.base_folder.join(source_path);
+                        reclaimed_size += DataSize::from_file(&source_path);
+                    }
+                    LayerOperation::CompressedFile { source_path, .. } => {
+                        let source_path = self.config.base_folder.join(source_path);
+                        reclaimed_size += DataSize::from_file(&source_path);
+                    }
+                    LayerOperation::Label { .. } => {}
                 }
-                LayerOperation::CompressedFile { source_path, .. } => {
-                    let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize::from_file(&source_path);
-                }
-                LayerOperation::Label { .. } => {}
             }
-        }
 
-        let layer_path = self.config.get_layer_folder(&layer.hash);
-        std::fs::remove_dir_all(&layer_path)
-            .map_err(|err|
-                ImageManagerError::FileIOError {
-                    message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
-                }
-            )?;
+            let layer_path = self.config.get_layer_folder(&layer.hash);
+            std::fs::remove_dir_all(&layer_path)
+                .map_err(|err|
+                    ImageManagerError::FileIOError {
+                        message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
+                    }
+                )?;
+        }
 
         self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
         Ok(())
@@ -621,6 +626,18 @@ impl ImageManager {
 
         let layer = self.registry_manager.get_layer_definition(&registry_session, hash).await?;
         Ok(layer)
+    }
+
+    pub async fn remove_image_in_registry(&self, tag: &ImageTag, default_registry: Option<&str>) -> ImageManagerResult<()> {
+        let pull_tag = tag.clone().set_registry_opt_if_empty(default_registry);
+
+        let session = self.state_manager.pooled_session()?;
+
+        let registry = pull_tag.registry().ok_or_else(|| ImageManagerError::NoRegistryDefined)?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
+        self.registry_manager.remove_image(&registry_session, &pull_tag).await?;
+        Ok(())
     }
 
     pub async fn pull(&mut self, request: PullRequest<'_>) -> ImageManagerResult<Image> {

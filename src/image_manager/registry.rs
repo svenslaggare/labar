@@ -344,6 +344,13 @@ impl RegistryManager {
 
         Ok(())
     }
+
+    pub async fn remove_image(&self, registry: &RegistrySession, tag: &ImageTag) -> RegistryResult<()> {
+        let client = RegistryClient::new(&self.config, registry)?;
+        let response = client.delete_registry_response(&format!("images/{}", tag)).await?;
+        RegistryError::from_response(response, "remove".to_owned()).await?;
+        Ok(())
+    }
 }
 
 pub struct RegistrySession {
@@ -405,6 +412,12 @@ impl<'a> RegistryClient<'a> {
         Ok(response)
     }
 
+    pub async fn delete_registry_response(&self, url: &str) -> RegistryResult<Response> {
+        let request = self.build_delete_request(url);
+        let response = self.http_client.execute(request.build()?).await.map_err(|err| RegistryError::Unavailable(err))?;
+        Ok(response)
+    }
+
     pub fn build_get_request(&self, url: &str) -> reqwest::RequestBuilder {
         let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client.
@@ -416,6 +429,13 @@ impl<'a> RegistryClient<'a> {
         let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client
             .post(full_url)
+            .basic_auth(&self.session.username, Some(&self.session.password))
+    }
+
+    pub fn build_delete_request(&self, url: &str) -> reqwest::RequestBuilder {
+        let full_url = format!("https://{}/{}", self.session.registry, url);
+        self.http_client
+            .delete(full_url)
             .basic_auth(&self.session.username, Some(&self.session.password))
     }
 }
