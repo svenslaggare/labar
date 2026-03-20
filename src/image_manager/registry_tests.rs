@@ -12,7 +12,7 @@ use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageMana
 use crate::image_manager::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::auth::AccessRight;
-use crate::registry::config::{RegistryUpstreamConfig};
+use crate::registry::config::{InMemoryStorageConfig, RegistryUpstreamConfig};
 use crate::registry::config::RegistryConfig;
 
 static REGISTRY_PORT: Mutex<u16> = Mutex::new(9560);
@@ -515,6 +515,82 @@ async fn test_push_pull_compressed_decompress_on_download() {
 }
 
 #[tokio::test]
+async fn test_push_pull_external_storage() {
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_registry_folder = crate::test_helpers::TempFolder::new();
+
+    let address: SocketAddr = generate_registry_address().parse().unwrap();
+    let mut registry_config = create_registry_config(address, &tmp_registry_folder);
+    registry_config.in_memory_storage = Some(InMemoryStorageConfig {});
+    tokio::spawn(crate::registry::run(registry_config));
+
+    // Wait until registry starts
+    if !registry_is_reachable(&address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
+
+        let image_tag = ImageTag::with_registry(&address.to_string(), "test", "latest");
+
+        // Build
+        let image = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            image_tag.clone()
+        ).unwrap().image;
+
+        // Push
+        let push_result = image_manager.push(&image.tag, None).await;
+        assert!(push_result.is_ok(), "{}", push_result.unwrap_err());
+        let push_result = push_result.unwrap();
+        assert_eq!(1, push_result);
+
+        // List remote
+        let remote_images = image_manager.list_images_in_registry(&address.to_string()).await;
+        assert!(remote_images.is_ok());
+        let remote_images = remote_images.unwrap();
+        assert_eq!(1, remote_images.len());
+        assert_eq!(&image_tag, &remote_images[0].image.tag);
+
+        // Remove in order to pull
+        assert!(image_manager.remove_image(&image.tag).is_ok());
+
+        // Pull
+        let pull_result = image_manager.pull(PullRequest::from_tag(&image_tag)).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+        assert_eq!((2, 0), image_manager.get_layer(&pull_image.hash.to_ref()).unwrap().storage_modes());
+
+        // List images
+        let images = image_manager.list_images(None);
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!(&image_tag, &images[0].image.tag);
+
+        // Check content
+        let reference = Reference::ImageTag(image.tag.clone());
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference, None).unwrap().into_iter().map(|entry| entry.path().to_owned()).collect::<Vec<_>>();
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
+
+        let unpack_folder = tmp_folder.join("unpack");
+        let result = image_manager.unpack(UnpackRequest::from_tag(&image_tag, &unpack_folder));
+        assert!(result.is_ok(), "{}", result.unwrap_err());
+        assert_file_content_eq!(Path::new("testdata/rawdata/file1.txt"), unpack_folder.join("file1.txt"));
+        assert_file_content_eq!(Path::new("testdata/rawdata/file2.txt"), unpack_folder.join("file2.txt"));
+    }
+}
+
+#[tokio::test]
 async fn test_sync() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
@@ -750,6 +826,7 @@ fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> Re
         data_path: tmp_registry_folder.to_path_buf(),
         storage_mode: StorageMode::PreferUncompressed,
         s3_storage: None,
+        in_memory_storage: None,
         address,
         payload_max_size: 1 * 1024 * 1024,
         pending_upload_expiration: 30.0,

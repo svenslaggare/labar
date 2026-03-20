@@ -40,7 +40,7 @@ use crate::reference::{ImageId, ImageTag, Reference};
 use crate::registry::config::{RegistryConfig};
 use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::{RegistryUpstreamConfig};
-use crate::registry::external_storage::BoxExternalStorage;
+use crate::registry::external_storage::{BoxExternalStorage, InMemoryStorage};
 use crate::registry::external_storage::S3Storage;
 use crate::registry::helpers::{PooledImageManager};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
@@ -155,10 +155,17 @@ impl AppState {
             std::mem::take(&mut config.initial_users)
         ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
 
-        let external_storage = config.s3_storage.as_ref().map(|s3_storage| {
-            let storage: BoxExternalStorage = Box::new(S3Storage::new(s3_storage));
-            storage
-        });
+        let external_storage = match (config.s3_storage.as_ref(), config.in_memory_storage.as_ref()) {
+            (Some(s3_storage), _) => {
+                let storage: BoxExternalStorage = Box::new(S3Storage::new(s3_storage));
+                Some(storage)
+            }
+            (_, Some(in_memory_storage)) => {
+                let storage: BoxExternalStorage = Box::new(InMemoryStorage::new(in_memory_storage));
+                Some(storage)
+            }
+            _ => None
+        };
 
         Ok(
             Arc::new(
@@ -610,21 +617,25 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
                 let compressed_content_hash = operation.compressed_content_hash();
 
-                let mut file = tokio::fs::File::create(&temp_file_path).await?;
                 let mut deferred_delete = DeferredFileDelete::new(temp_file_path.clone());
-
-                let mut stream = request.into_body().into_data_stream();
                 let mut content_hasher = ContentHash::new();
-                while let Some(chunk) = stream.next().await {
-                    match chunk {
-                        Ok(chunk) => {
-                            content_hasher.add(chunk.as_ref());
-                            file.write_all(chunk.as_ref()).await?;
-                        }
-                        Err(err) => {
-                            return Err(AppError::FailedToUploadLayerFile(err.to_string()));
+
+                {
+                    let mut file = tokio::fs::File::create(&temp_file_path).await?;
+                    let mut stream = request.into_body().into_data_stream();
+                    while let Some(chunk) = stream.next().await {
+                        match chunk {
+                            Ok(chunk) => {
+                                content_hasher.add(chunk.as_ref());
+                                file.write_all(chunk.as_ref()).await?;
+                            }
+                            Err(err) => {
+                                return Err(AppError::FailedToUploadLayerFile(err.to_string()));
+                            }
                         }
                     }
+
+                    file.flush().await?;
                 }
 
                 let check_content_hash = compressed_content_hash.unwrap_or(content_hash);

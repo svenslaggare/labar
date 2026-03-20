@@ -491,7 +491,7 @@ impl Display for RegistryError {
             RegistryError::ReferenceNotFound => write!(f, "Could not find the reference"),
             RegistryError::FailedToUpload { layer, reason } => write!(f, "Failed to upload layer {} due to: {}", layer, reason),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
-            RegistryError::InvalidContentHash => write!(f, "The content has of the downloaded file is incorrect"),
+            RegistryError::InvalidContentHash => write!(f, "Incorrect downloaded content"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
             RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in enough time"),
             RegistryError::TooLargePayload => write!(f, "The payload is too large to be uploaded"),

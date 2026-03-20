@@ -14,6 +14,7 @@ pub struct RegistryConfig {
     pub storage_mode: StorageMode,
 
     pub s3_storage: Option<S3StorageConfig>,
+    pub in_memory_storage: Option<InMemoryStorageConfig>,
 
     pub address: SocketAddr,
 
@@ -61,6 +62,11 @@ pub struct S3StorageConfig {
 
     pub access_key_id: String,
     pub secret_access_key: String
+}
+
+#[derive(Debug, Serialize,  Deserialize)]
+pub struct InMemoryStorageConfig {
+
 }
 
 #[derive(Debug, Serialize,  Deserialize)]

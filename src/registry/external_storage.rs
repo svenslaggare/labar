@@ -1,19 +1,24 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
+use log::{debug, info};
+
+use tokio::sync::RwLock;
+
 use async_trait::async_trait;
+
+use axum::body::Body;
+use axum::response::{IntoResponse, Redirect, Response};
+
 use aws_config::Region;
 use aws_credential_types::Credentials;
 use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 
-use axum::response::{IntoResponse, Redirect, Response};
-
-use log::{debug, info};
-
 use crate::reference::{ImageId};
-use crate::registry::config::S3StorageConfig;
+use crate::registry::config::{InMemoryStorageConfig, S3StorageConfig};
 use crate::registry::model::{AppError, AppResult};
 
 pub type BoxExternalStorage = Box<dyn ExternalStorage + Send + Sync>;
@@ -109,6 +114,55 @@ impl ExternalStorage for S3Storage {
             result.map_err(|_| AppError::LayerFileNotFound)?;
         }
 
+        Ok(())
+    }
+}
+
+pub struct InMemoryStorage {
+    files: RwLock<HashMap<String, Vec<u8>>>
+}
+
+impl InMemoryStorage {
+    pub fn new(_config: &InMemoryStorageConfig) -> InMemoryStorage {
+        InMemoryStorage {
+            files: RwLock::new(HashMap::new())
+        }
+    }
+}
+
+#[async_trait]
+impl ExternalStorage for InMemoryStorage {
+    async fn download(&self, path: &str) -> AppResult<Response> {
+        let files = self.files.read().await;
+        let file = files.get(path).ok_or_else(|| AppError::LayerFileNotFound)?;
+
+        let body = Body::from(file.clone());
+
+        Ok(
+            Response::builder()
+                .header("Content-Type", "application/octet-stream")
+                .header(
+                    "Content-Disposition",
+                    format!("attachment; filename={}", "file")
+                )
+                .body(body)
+                .unwrap()
+        )
+    }
+
+    async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()> {
+        let buffer = std::fs::read(data_path).map_err(|err| AppError::IO(err))?;
+        self.files.write().await.insert(path.to_owned(), buffer);
+        Ok(())
+    }
+
+    async fn exists(&self, path: &str) -> AppResult<bool> {
+        Ok(self.files.read().await.contains_key(path))
+    }
+
+    async fn remove_layer(&self, hash: &ImageId) -> AppResult<()> {
+        let mut files = self.files.write().await;
+        files.retain(|key, _| !key.starts_with(&format!("layers/{}", hash)));
         Ok(())
     }
 }
