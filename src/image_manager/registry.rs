@@ -127,6 +127,7 @@ impl RegistryManager {
                 content_hasher.add(data);
                 file.write_all(data).await?;
             }
+            file.flush().await?;
 
             if &content_hasher.finalize() != &content_hash {
                 return Err(RegistryError::InvalidContentHash);
