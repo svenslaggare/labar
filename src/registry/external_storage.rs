@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use log::{debug, info};
@@ -8,7 +9,7 @@ use tokio::sync::RwLock;
 
 use async_trait::async_trait;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::response::{IntoResponse, Redirect, Response};
 
 use aws_config::Region;
@@ -119,7 +120,7 @@ impl ExternalStorage for S3Storage {
 }
 
 pub struct InMemoryStorage {
-    files: RwLock<HashMap<String, Vec<u8>>>
+    files: RwLock<HashMap<String, Arc<[u8]>>>
 }
 
 impl InMemoryStorage {
@@ -136,7 +137,7 @@ impl ExternalStorage for InMemoryStorage {
         let files = self.files.read().await;
         let file = files.get(path).ok_or_else(|| AppError::LayerFileNotFound)?;
 
-        let body = Body::from(file.clone());
+        let body = Body::from(Body::from(Bytes::from_owner(file.clone())));
 
         Ok(
             Response::builder()
@@ -152,7 +153,7 @@ impl ExternalStorage for InMemoryStorage {
 
     async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()> {
         let buffer = std::fs::read(data_path).map_err(|err| AppError::IO(err))?;
-        self.files.write().await.insert(path.to_owned(), buffer);
+        self.files.write().await.insert(path.to_owned(), Arc::from(buffer));
         Ok(())
     }
 
