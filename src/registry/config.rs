@@ -24,6 +24,9 @@ pub struct RegistryConfig {
     #[serde(default="default_pending_upload_expiration")]
     pub pending_upload_expiration: f64,
 
+    #[serde(default="default_sign_in_expiration_hours")]
+    pub sign_in_expiration_hours: i64,
+    
     pub ssl_cert_path: Option<PathBuf>,
     pub ssl_key_path: Option<PathBuf>,
 
@@ -63,6 +66,10 @@ fn default_payload_max_size() -> usize {
 
 fn default_pending_upload_expiration() -> f64 {
     30.0 * 60.0
+}
+
+fn default_sign_in_expiration_hours() -> i64 {
+    10
 }
 
 #[derive(Debug, Serialize,  Deserialize)]

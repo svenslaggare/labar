@@ -595,8 +595,8 @@ impl ImageManager {
     pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
         let mut session = self.state_manager.pooled_session()?;
 
-        self.registry_manager.verify_login(registry, username, password).await?;
-        session.add_login(registry, username, password)?;
+        let token = self.registry_manager.sign_in(registry, username, password).await?;
+        session.add_login(registry, token)?;
         Ok(())
     }
 

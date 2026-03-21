@@ -61,8 +61,7 @@ impl StateManager {
             r#"
             CREATE TABLE IF NOT EXISTS logins(
                 registry TEXT PRIMARY KEY,
-                username TEXT,
-                password TEXT
+                token TEXT
             );
             "#,
             ()
@@ -147,19 +146,19 @@ pub struct StateSession {
 }
 
 impl StateSession {
-    pub fn add_login(&mut self, registry: &str, username: &str, password: &str) -> SqlResult<()> {
+    pub fn add_login(&mut self, registry: &str, token: String) -> SqlResult<()> {
         let transaction = self.connection.transaction()?;
         transaction.execute("DELETE FROM logins WHERE registry=?1", (registry, ))?;
-        transaction.execute("INSERT INTO logins (registry, username, password) VALUES (?1, ?2, ?3)", (registry, username, password))?;
+        transaction.execute("INSERT INTO logins (registry, token) VALUES (?1, ?2)", (registry, token))?;
         transaction.commit()?;
         Ok(())
     }
 
-    pub fn get_login(&self,  registry: &str) -> SqlResult<Option<(String, String)>> {
+    pub fn get_login(&self, registry: &str) -> SqlResult<Option<String>> {
         self.connection.query_row(
-            "SELECT username, password FROM logins WHERE registry=?1",
+            "SELECT token FROM logins WHERE registry=?1",
             [registry],
-            |row| Ok((row.get(0)?, row.get(1)?))
+            |row| Ok(row.get(0)?)
         ).optional()
     }
 

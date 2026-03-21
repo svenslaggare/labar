@@ -830,7 +830,7 @@ async fn test_remove_external_storage() {
     let mut registry_config = create_registry_config(address, &tmp_registry_folder);
     registry_config.in_memory_storage = Some(InMemoryStorageConfig {});
     tokio::spawn(crate::registry::run(registry_config));
-    
+
     // Wait until registry starts
     if !registry_is_reachable(&address.to_string(), 1.0).await {
         panic!("Registry is not reachable");
@@ -886,6 +886,7 @@ fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> Re
         address,
         payload_max_size: 1 * 1024 * 1024,
         pending_upload_expiration: 30.0,
+        sign_in_expiration_hours: 2,
         ssl_cert_path: None,
         ssl_key_path: None,
         upstream: None,

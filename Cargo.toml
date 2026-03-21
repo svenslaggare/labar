@@ -44,6 +44,9 @@ tokio-util = { version = "0.7", features = ["io"] }
 axum = { version = "0.8", features = ["macros"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 
+jwt = "0.16"
+hmac = "0.12"
+
 rcgen = "0.14"
 uuid = { version = "1", features = ["v4"] }
 

@@ -46,17 +46,17 @@ impl RegistryManager {
         }
     }
 
-    pub async fn verify_login(&self, registry: &str, username: &str, password: &str) -> RegistryResult<()> {
-        let registry_session = RegistrySession {
-            registry: registry.to_owned(),
-            username: username.to_owned(),
-            password: password.to_owned()
-        };
-        let client = RegistryClient::new(&self.config, &registry_session)?;
+    pub async fn sign_in(&self, registry: &str, username: &str, password: &str) -> RegistryResult<String> {
+        let http_client = create_http_client(&self.config)?;
 
-        client.get_registry_text_response("verify_login").await?;
+        let request = http_client
+            .get(format!("https://{}/sign-in", registry))
+            .basic_auth(username, Some(password))
+            .build()?;
+        let response = http_client.execute(request).await?;
+        let token = RegistryError::from_response(response, "url: /sign-in".to_owned()).await?;
 
-        Ok(())
+        Ok(token)
     }
 
     pub async fn list_images(&self, registry: &RegistrySession) -> RegistryResult<Vec<ImageMetadata>> {
@@ -358,21 +358,19 @@ impl RegistryManager {
 
 pub struct RegistrySession {
     registry: String,
-    username: String,
-    password: String
+    auth_token: String
 }
 
 impl RegistrySession {
     pub fn new(session: &StateSession, registry: &str) -> RegistryResult<RegistrySession> {
-        let (username, password) = session.get_login(registry)
+        let auth_token = session.get_login(registry)
             .ok().flatten()
             .ok_or_else(|| RegistryError::InvalidAuthentication)?;
 
         Ok(
             RegistrySession {
                 registry: registry.to_owned(),
-                username,
-                password,
+                auth_token
             }
         )
     }
@@ -423,23 +421,23 @@ impl<'a> RegistryClient<'a> {
 
     pub fn build_get_request(&self, url: &str) -> reqwest::RequestBuilder {
         let full_url = format!("https://{}/{}", self.session.registry, url);
-        self.http_client.
-            get(full_url)
-            .basic_auth(&self.session.username, Some(&self.session.password))
+        self.http_client
+            .get(full_url)
+            .bearer_auth(&self.session.auth_token)
     }
 
     pub fn build_post_request(&self, url: &str) -> reqwest::RequestBuilder {
         let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client
             .post(full_url)
-            .basic_auth(&self.session.username, Some(&self.session.password))
+            .bearer_auth(&self.session.auth_token)
     }
 
     pub fn build_delete_request(&self, url: &str) -> reqwest::RequestBuilder {
         let full_url = format!("https://{}/{}", self.session.registry, url);
         self.http_client
             .delete(full_url)
-            .basic_auth(&self.session.username, Some(&self.session.password))
+            .bearer_auth(&self.session.auth_token)
     }
 }
 

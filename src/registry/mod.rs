@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
 use std::sync::{Arc};
 use std::time::{Instant};
 
-use chrono::Local;
+use chrono::{Local};
 use log::{debug, error, info};
 
 use rand::distr::{Alphanumeric, SampleString};
@@ -25,6 +25,9 @@ use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
 use axum_server::tls_rustls::RustlsConfig;
 
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
 pub mod model;
 pub mod auth;
 pub mod config;
@@ -38,7 +41,7 @@ use crate::image_manager::{ImageManager, ImageManagerError, ImageManagerResult, 
 use crate::reference::{ImageId, ImageTag, Reference};
 
 use crate::registry::config::{RegistryConfig};
-use crate::registry::auth::{check_access_right, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
+use crate::registry::auth::{authenticate, check_access_right, generate_jwt_token, AccessRight, AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::config::{RegistryUpstreamConfig};
 use crate::registry::external_storage::{BoxExternalStorage, InMemoryStorage};
 use crate::registry::external_storage::S3Storage;
@@ -54,13 +57,27 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
     let tls_config = RustlsConfig::from_pem_chain_file(cert_path, key_path).await
         .map_err(|err| RunRegistryError::InvalidCertificate { reason: err.to_string() })?;
 
+    let sign_in_path = config.data_path.join("sign_key");
+    let sign_key = if !sign_in_path.exists() {
+        let sign_key = Alphanumeric.sample_string(&mut rand::rng(), 32);
+        std::fs::write(
+            sign_in_path,
+            &sign_key
+        ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
+        sign_key
+    } else {
+        std::fs::read_to_string(
+            sign_in_path
+        ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?
+    };
+
     let payload_max_size = config.payload_max_size;
-    let state = AppState::new(config)?;
+    let state = AppState::new(config, &sign_key)?;
 
     let app = Router::new()
         .route("/", get(index))
 
-        .route("/verify_login", get(verify_login))
+        .route("/sign-in", get(sign_in))
 
         .route("/images", get(list_images))
         .route("/images", post(set_image))
@@ -139,9 +156,13 @@ impl Display for RunRegistryError {
 
 struct AppState {
     config: RegistryConfig,
-    external_storage: Option<BoxExternalStorage>,
-    image_manager_pool: Arc<ResourcePool<ImageManager>>,
+
+    sign_key: Hmac<Sha256>,
     access_provider: Box<dyn AuthProvider + Send + Sync>,
+
+    external_storage: Option<BoxExternalStorage>,
+
+    image_manager_pool: Arc<ResourcePool<ImageManager>>,
     delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
     layer_cache: Mutex<HashMap<ImageId, Arc<Layer>>>,
     pending_upload_layer_cache: Mutex<HashMap<String, Arc<Layer>>>,
@@ -149,7 +170,7 @@ struct AppState {
 }
 
 impl AppState {
-    pub fn new(mut config: RegistryConfig) -> Result<Arc<AppState>, RunRegistryError> {
+    pub fn new(mut config: RegistryConfig, sign_key: &str) -> Result<Arc<AppState>, RunRegistryError> {
         let access_provider = SqliteAuthProvider::new(
             config.image_manager_config().base_folder(),
             std::mem::take(&mut config.initial_users)
@@ -171,9 +192,15 @@ impl AppState {
             Arc::new(
                 AppState {
                     config,
-                    external_storage,
-                    image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
+
+                    sign_key: Hmac::new_from_slice(
+                        sign_key.as_bytes()
+                    ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?,
                     access_provider: Box::new(access_provider),
+
+                    external_storage,
+
+                    image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
                     delayed_image_inserts: Mutex::new(HashMap::new()),
                     layer_cache: Mutex::new(HashMap::new()),
                     pending_upload_layer_cache: Mutex::new(HashMap::new()),
@@ -252,15 +279,15 @@ async fn index() -> AppResult<impl IntoResponse> {
     Ok("Labar registry")
 }
 
-async fn verify_login(State(state): State<Arc<AppState>>,
-                      request: Request) -> AppResult<impl IntoResponse> {
-    let _token = check_access_right(state.access_provider.deref(), &request, AccessRight::Access)?;
-    Ok("")
+async fn sign_in(State(state): State<Arc<AppState>>,
+                 request: Request) -> AppResult<impl IntoResponse> {
+    let authenticated = authenticate(state.access_provider.deref(), &request)?;
+    generate_jwt_token(&state.config, &state.sign_key, authenticated)
 }
 
 async fn list_images(State(state): State<Arc<AppState>>,
                      request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::List)?;
 
     let image_manager = state.pooled_image_manager(&token);
     let images = image_manager.list_images(None)?;
@@ -270,7 +297,7 @@ async fn list_images(State(state): State<Arc<AppState>>,
 
 async fn set_image(State(state): State<Arc<AppState>>,
                    request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Upload)?;
 
     let spec: ImageSpec = helpers::decode_json(request).await?;
 
@@ -291,7 +318,7 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
                        Path(tag): Path<ImageTag>,
                        Query(query): Query<ResolveImageQuery>,
                        request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::List)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::List)?;
 
     let image_manager = state.pooled_image_manager(&token);
     let image = match image_manager.resolve_image(&tag) {
@@ -321,7 +348,7 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
 async fn remove_image(State(state): State<Arc<AppState>>,
                       Path(tag): Path<ImageTag>,
                       request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Delete)?;
 
     let mut image_manager = state.pooled_image_manager(&token);
     let removed_layers = image_manager.remove_image(&tag)?;
@@ -346,7 +373,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 async fn get_layer_exists(State(state): State<Arc<AppState>>,
                           Path(hash): Path<ImageId>,
                           request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Download)?;
 
     let image_manager = state.pooled_image_manager(&token);
     let exists = match state.get_layer(&image_manager, &hash).await {
@@ -368,7 +395,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
                             Path(hash): Path<ImageId>,
                             Query(query): Query<LayerManifestQuery>,
                             request: Request) -> AppResult<Response> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Download)?;
 
     let image_manager = state.pooled_image_manager(&token);
     match state.get_layer(&image_manager, &hash).await {
@@ -391,7 +418,7 @@ async fn get_layer_manifest(State(state): State<Arc<AppState>>,
 async fn download_layer(State(state): State<Arc<AppState>>,
                         Path((hash, file_index)): Path<(ImageId, usize)>,
                         request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Download)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Download)?;
 
     let (layer, base_folder) = {
         let image_manager = state.pooled_image_manager(&token);
@@ -440,7 +467,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
 
 async fn begin_layer_upload(State(state): State<Arc<AppState>>,
                             request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Upload)?;
 
     let layer: Layer = helpers::decode_json(request).await?;
 
@@ -505,7 +532,7 @@ async fn begin_layer_upload(State(state): State<Arc<AppState>>,
 
 async fn end_layer_upload(State(state): State<Arc<AppState>>,
                           request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
     let image_manager = state.pooled_image_manager(&token);
@@ -593,7 +620,7 @@ async fn verify_path_exists_external_storage(external_storage: &BoxExternalStora
 async fn upload_layer_file(State(state): State<Arc<AppState>>,
                            Path((layer_hash, file_index)): Path<(ImageId, usize)>,
                            request: Request) -> AppResult<impl IntoResponse> {
-    let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Upload)?;
+    let token = check_access_right(&request, &state.sign_key, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
     let (layer, base_folder) = {
@@ -615,7 +642,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
                 let abs_source_path = base_folder.join(source_path);
 
-                let temp_file_path = base_folder.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 32));
+                let temp_file_path = base_folder.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 64));
                 if let Some(parent) = temp_file_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }

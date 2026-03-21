@@ -1,16 +1,22 @@
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Display, Formatter};
+use std::ops::Add;
 use std::path::Path;
 use std::str::FromStr;
 
+use itertools::Itertools;
 use log::{error, info};
 
 use base64::Engine;
 use base64::prelude::BASE64_STANDARD;
 use sha2::{Digest, Sha256};
+use jwt::{SignWithKey, SigningAlgorithm, VerifyWithKey, VerifyingAlgorithm};
 
 use serde::{Deserialize, Serialize};
 
 use axum::extract::Request;
+use chrono::{TimeDelta, Utc};
+
 use rusqlite::OptionalExtension;
 use rusqlite::types::FromSqlError;
 
@@ -30,11 +36,11 @@ pub enum AccessRight {
 impl Display for AccessRight {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            AccessRight::Access => write!(f, "Access"),
-            AccessRight::List => write!(f, "List"),
-            AccessRight::Download => write!(f, "Download"),
-            AccessRight::Upload => write!(f, "Upload"),
-            AccessRight::Delete => write!(f, "Delete"),
+            AccessRight::Access => write!(f, "access"),
+            AccessRight::List => write!(f, "list"),
+            AccessRight::Download => write!(f, "download"),
+            AccessRight::Upload => write!(f, "upload"),
+            AccessRight::Delete => write!(f, "delete"),
         }
     }
 }
@@ -56,11 +62,73 @@ impl FromStr for AccessRight {
 
 pub struct AuthToken;
 
-pub fn check_access_right(access_provider: &(dyn AuthProvider + Send + Sync),
-                          request: &Request,
+pub fn authenticate(access_provider: &(dyn AuthProvider + Send + Sync),
+                    request: &Request) -> AppResult<Authenticated> {
+    let auth_header = match request.headers().get(reqwest::header::AUTHORIZATION) {
+        Some(header) => header,
+        None => return Err(AppError::Unauthorized)
+    };
+
+    let auth_header = match auth_header.to_str().ok() {
+        Some(header) => header,
+        None => return Err(AppError::Unauthorized)
+    };
+
+    let parts = auth_header.split(' ').collect::<Vec<_>>();
+    if parts.len() != 2 {
+        return Err(AppError::Unauthorized);
+    }
+
+    let auth_type = parts[0];
+    let auth_data = parts[1];
+    if auth_type != "Basic" {
+        return Err(AppError::Unauthorized);
+    }
+
+    let auth_data = match BASE64_STANDARD.decode(auth_data).ok() {
+        Some(auth_data) => auth_data,
+        None => return Err(AppError::Unauthorized)
+    };
+
+    let auth_data = match String::from_utf8(auth_data).ok() {
+        Some(auth_data) => auth_data,
+        None => return Err(AppError::Unauthorized)
+    };
+
+    let parts = auth_data.split(':').collect::<Vec<_>>();
+    if parts.len() != 2 {
+        return Err(AppError::Unauthorized);
+    }
+
+    if parts.len() != 2 {
+        return Err(AppError::Unauthorized);
+    }
+
+    let username = parts[0];
+    let password = Password::from_plain_text(parts[1]);
+
+    Ok(access_provider.authenticate(username, &password)?)
+}
+
+pub fn generate_jwt_token(config: &RegistryConfig, sign_key: &impl SigningAlgorithm, authenticated: Authenticated) -> AppResult<String> {
+    let expiration = Utc::now().add(TimeDelta::hours(config.sign_in_expiration_hours)).timestamp();
+    let expiration = expiration.to_string();
+
+    let access_rights = authenticated.access_rights.iter().map(|access_right| access_right.to_string()).join(";");
+
+    let mut claims = BTreeMap::new();
+    claims.insert("sub", authenticated.username.clone());
+    claims.insert("exp", expiration);
+    claims.insert("acl", access_rights);
+
+    claims.sign_with_key(sign_key).map_err(|_| AppError::Unauthorized)
+}
+
+pub fn check_access_right(request: &Request,
+                          sign_key: &impl VerifyingAlgorithm,
                           access_right: AccessRight) -> AppResult<AuthToken> {
-    fn internal(access_provider: &(dyn AuthProvider + Send + Sync),
-                request: &Request,
+    fn internal(request: &Request,
+                sign_key: &impl VerifyingAlgorithm,
                 access_right: AccessRight) -> AppResult<bool> {
         let auth_header = match request.headers().get(reqwest::header::AUTHORIZATION) {
             Some(header) => header,
@@ -79,36 +147,23 @@ pub fn check_access_right(access_provider: &(dyn AuthProvider + Send + Sync),
 
         let auth_type = parts[0];
         let auth_data = parts[1];
-        if auth_type != "Basic" {
+        if auth_type != "Bearer" {
             return Ok(false);
         }
 
-        let auth_data = match BASE64_STANDARD.decode(auth_data).ok() {
-            Some(auth_data) => auth_data,
-            None => return Ok(false)
-        };
+        let claims: BTreeMap<String, String> = auth_data.verify_with_key(sign_key).map_err(|_| AppError::Unauthorized)?;
 
-        let auth_data = match String::from_utf8(auth_data).ok() {
-            Some(auth_data) => auth_data,
-            None => return Ok(false)
-        };
+        let expiration = claims.get("exp").map(|x| i64::from_str(x).ok()).flatten().ok_or_else(|| AppError::Unauthorized)?;
+        let access_rights: Vec<AccessRight> = claims.get("acl").ok_or_else(|| AppError::Unauthorized)?
+            .split(";")
+            .map(|x| AccessRight::from_str(x).ok())
+            .flatten()
+            .collect();
 
-        let parts = auth_data.split(':').collect::<Vec<_>>();
-        if parts.len() != 2 {
-            return Ok(false);
-        }
-
-        if parts.len() != 2 {
-            return Ok(false);
-        }
-
-        let username = parts[0];
-        let password = Password::from_plain_text(parts[1]);
-
-        Ok(access_provider.has_access(username, &password, access_right)?)
+        Ok(access_rights.contains(&access_right) && Utc::now().timestamp() <= expiration)
     }
 
-    if internal(access_provider, request, access_right.clone())? {
+    if internal(request, sign_key, access_right.clone())? {
         Ok(AuthToken)
     } else {
         info!("Not authorized for {:?} access.", access_right);
@@ -116,8 +171,13 @@ pub fn check_access_right(access_provider: &(dyn AuthProvider + Send + Sync),
     }
 }
 
+pub struct Authenticated {
+    pub username: String,
+    pub access_rights: Vec<AccessRight>
+}
+
 pub trait AuthProvider {
-    fn has_access(&self, username: &str, password: &Password, requested_access_right: AccessRight) -> AppResult<bool>;
+    fn authenticate(&self, username: &str, password: &Password) -> AppResult<Authenticated>;
 }
 
 pub type UsersSpec = Vec<(String, Password, Vec<AccessRight>)>;
@@ -248,39 +308,35 @@ impl SqliteAuthProvider {
 }
 
 impl AuthProvider for SqliteAuthProvider {
-    fn has_access(&self, username: &str, password: &Password, requested_access_right: AccessRight) -> AppResult<bool> {
-        fn internal(provider: &SqliteAuthProvider, username: &str, password: &Password, requested_access_right: AccessRight) -> SqlResult<AppResult<bool>> {
+    fn authenticate(&self, username: &str, password: &Password) -> AppResult<Authenticated> {
+        fn internal(provider: &SqliteAuthProvider, username: &str, password: &Password) -> SqlResult<AppResult<Authenticated>> {
             let mut session = provider.state_manager.pooled_session()?;
 
             let entry = match provider.db_get_user(&mut session, username)? {
                 Some(user) => user,
                 None => {
                     info!("User '{}' does not exist.", username);
-                    return Ok(Ok(false));
+                    return Ok(Err(AppError::Unauthorized));
                 }
             };
 
             if &entry.password != password {
                 info!("Invalid password for user: {}.", username);
-                return Ok(Ok(false));
+                return Ok(Err(AppError::Unauthorized));
             }
 
-            if requested_access_right == AccessRight::Access {
-                return Ok(Ok(true));
-            }
-
-            if entry.access_rights.contains(&requested_access_right) {
-                Ok(Ok(true))
-            } else {
-                info!("User '{}' does not have {:?} access rights.", username, requested_access_right);
-                Ok(Ok(false))
-            }
+            Ok(Ok(
+                Authenticated {
+                    username: username.to_owned(),
+                    access_rights: entry.access_rights.clone()
+                }
+            ))
         }
 
-        internal(&self, username, password, requested_access_right)
+        internal(&self, username, password)
             .unwrap_or_else(|err| {
                 error!("SQL failure: {}", err);
-                Ok(false)
+                Err(AppError::Unauthorized)
             })
     }
 }
@@ -341,11 +397,11 @@ fn test_access_rights1() {
         ]
     ).unwrap();
 
-    assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::Access).ok());
-    assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::List).ok());
-    assert_eq!(Some(false), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::Delete).ok());
-    assert_eq!(Some(false), provider.has_access("guest", &Password::from_plain_text("gueste"), AccessRight::List).ok());
-    assert_eq!(Some(false), provider.has_access("gueste", &Password::from_plain_text("guest"), AccessRight::List).ok());
+    let authentication = provider.authenticate("guest", &Password::from_plain_text("guest"));
+    assert_eq!(true, authentication.is_ok());
+    let authentication = authentication.unwrap();
+    assert_eq!("guest", &authentication.username);
+    assert_eq!(vec![AccessRight::List, AccessRight::Download], authentication.access_rights);
 }
 
 #[test]
@@ -358,10 +414,11 @@ fn test_access_rights2() {
             (
                 "guest".to_owned(),
                 Password::from_plain_text("guest"),
-                vec![]
+                vec![AccessRight::List, AccessRight::Download]
             )
         ]
     ).unwrap();
 
-    assert_eq!(Some(true), provider.has_access("guest", &Password::from_plain_text("guest"), AccessRight::Access).ok());
+    let authentication = provider.authenticate("guest", &Password::from_plain_text("gueste"));
+    assert_eq!(false, authentication.is_ok());
 }
