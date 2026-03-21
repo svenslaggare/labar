@@ -492,7 +492,7 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 image_manager.clean_old_images(duration).map_err(|err| format!("{}", err))?;
             }
 
-            image_manager.garbage_collect(true).map_err(|err| format!("{}", err))?;
+            image_manager.garbage_collect().map_err(|err| format!("{}", err))?;
         },
         CommandLineInput::Login { registry, username, password } => {
             let mut image_manager = create_image_manager(&file_config, printer.clone());

@@ -162,21 +162,17 @@ impl ImageManager {
     }
 
     pub fn remove_image(&mut self, tag: &ImageTag) -> ImageManagerResult<Vec<ImageId>> {
-        self.remove_image_internal(tag, true, true)
+        self.remove_image_internal(tag, true)
     }
 
-    pub fn remove_image_with_option(&mut self, tag: &ImageTag, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
-        self.remove_image_internal(tag, true, remove_files)
-    }
-
-    fn remove_image_internal(&mut self, tag: &ImageTag, gc: bool, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
+    fn remove_image_internal(&mut self, tag: &ImageTag, gc: bool) -> ImageManagerResult<Vec<ImageId>> {
         let mut session = self.state_manager.pooled_session()?;
 
         if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
 
             if gc {
-                let removed_layers = self.garbage_collect(remove_files)?;
+                let removed_layers = self.garbage_collect()?;
                 Ok(removed_layers)
             } else {
                 Ok(Vec::new())
@@ -193,14 +189,14 @@ impl ImageManager {
         for image in self.layer_manager.images_iter(&session)? {
             let layer = self.layer_manager.get_layer(&session, &image.hash.clone().to_ref())?;
             if (now - layer.created).to_std().unwrap() > duration {
-                self.remove_image_internal(&image.tag, false, true)?;
+                self.remove_image_internal(&image.tag, false)?;
             }
         }
 
         Ok(())
     }
 
-    pub fn garbage_collect(&mut self, remove_files: bool) -> ImageManagerResult<Vec<ImageId>> {
+    pub fn garbage_collect(&mut self) -> ImageManagerResult<Vec<ImageId>> {
         let session = self.state_manager.pooled_session()?;
 
         let mut used_layers = HashSet::new();
@@ -211,7 +207,7 @@ impl ImageManager {
         let mut removed_layers = Vec::new();
         for layer in self.layer_manager.all_layers(&session)? {
             if !used_layers.contains(&layer.hash) {
-                if let Err(err) = self.remove_layer(&session, &layer, remove_files) {
+                if let Err(err) = self.remove_layer(&session, &layer) {
                     self.printer.println(&format!("Failed to remove layer: {}", err));
                 } else {
                     removed_layers.push(layer.hash);
@@ -222,11 +218,11 @@ impl ImageManager {
         Ok(removed_layers)
     }
 
-    fn remove_layer(&self, session: &StateSession, layer: &Layer, remove_files: bool) -> ImageManagerResult<()> {
+    fn remove_layer(&self, session: &StateSession, layer: &Layer) -> ImageManagerResult<()> {
         self.layer_manager.remove_layer(session, &layer.hash)?;
 
         let mut reclaimed_size = DataSize(0);
-        if remove_files {
+        if !self.config.has_external_storage {
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { .. } => {}

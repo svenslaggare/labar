@@ -324,7 +324,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
     let token = check_access_right(state.access_provider.deref(), &request, AccessRight::Delete)?;
 
     let mut image_manager = state.pooled_image_manager(&token);
-    let removed_layers = image_manager.remove_image_with_option(&tag, false)?;
+    let removed_layers = image_manager.remove_image(&tag)?;
     if let Some(external_storage) = state.external_storage.as_ref() {
         for hash in removed_layers {
             external_storage.remove_layer(&hash).await?;

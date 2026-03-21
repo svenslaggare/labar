@@ -34,6 +34,17 @@ pub struct RegistryConfig {
 }
 
 impl RegistryConfig {
+    pub fn load_from_file(path: &Path) -> Result<RegistryConfig, String> {
+        let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
+        toml::from_str(&content).map_err(|err| format!("{}", err))
+    }
+
+    pub fn image_manager_config(&self) -> ImageManagerConfig {
+        let mut config = ImageManagerConfig::with_base_folder(self.data_path.clone());
+        config.has_external_storage = self.s3_storage.is_some() || self.in_memory_storage.is_some();
+        config
+    }
+
     pub fn can_pull_through_upstream(&self) -> bool {
         match self.upstream.as_ref() {
             Some(upstream) => upstream.pull_through,
@@ -96,15 +107,4 @@ fn default_sync_at_startup() -> bool {
 
 fn default_sync_interval() -> Cron {
     Cron::from_str("* * * * *").unwrap()
-}
-
-impl RegistryConfig {
-    pub fn load_from_file(path: &Path) -> Result<RegistryConfig, String> {
-        let content = std::fs::read_to_string(path).map_err(|err| format!("{}", err))?;
-        toml::from_str(&content).map_err(|err| format!("{}", err))
-    }
-
-    pub fn image_manager_config(&self) -> ImageManagerConfig {
-        ImageManagerConfig::with_base_folder(self.data_path.clone())
-    }
 }
