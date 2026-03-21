@@ -325,17 +325,22 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 
     let mut image_manager = state.pooled_image_manager(&token);
     let removed_layers = image_manager.remove_image(&tag)?;
+    let mut num_deleted_layers = 0;
     if let Some(external_storage) = state.external_storage.as_ref() {
         for hash in removed_layers {
-            external_storage.remove_layer(&hash).await?;
+            if external_storage.remove_layer(&hash).await? > 0 {
+                num_deleted_layers += 1;
+            }
         }
+    } else {
+        num_deleted_layers = removed_layers.len();
     }
 
     state.clear_layer_cache().await;
 
-    info!("Removed image: {}", tag);
+    info!("Removed image: {} ({} layers removed)", tag, num_deleted_layers);
 
-    Ok(Json(json!({ "status": "success" })))
+    Ok(Json(json!({ "status": "success", "num_deleted_layers": num_deleted_layers })))
 }
 
 async fn get_layer_exists(State(state): State<Arc<AppState>>,

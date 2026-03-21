@@ -29,7 +29,7 @@ pub trait ExternalStorage {
     async fn download(&self, path: &str) -> AppResult<Response>;
     async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()>;
     async fn exists(&self, path: &str) -> AppResult<bool>;
-    async fn remove_layer(&self, hash: &ImageId) -> AppResult<()>;
+    async fn remove_layer(&self, hash: &ImageId) -> AppResult<usize>;
 }
 
 pub struct S3Storage {
@@ -94,7 +94,7 @@ impl ExternalStorage for S3Storage {
         Ok(exists)
     }
 
-    async fn remove_layer(&self, hash: &ImageId) -> AppResult<()> {
+    async fn remove_layer(&self, hash: &ImageId) -> AppResult<usize> {
         let objects = self.client.list_objects()
             .bucket(self.bucket.clone())
             .prefix(format!("layers/{}", hash))
@@ -111,11 +111,13 @@ impl ExternalStorage for S3Storage {
                 .send()
             );
 
+        let mut num_deleted = 0;
         for result in futures::future::join_all(delete_requests).await {
             result.map_err(|_| AppError::LayerFileNotFound)?;
+            num_deleted += 1;
         }
 
-        Ok(())
+        Ok(num_deleted)
     }
 }
 
@@ -161,9 +163,19 @@ impl ExternalStorage for InMemoryStorage {
         Ok(self.files.read().await.contains_key(path))
     }
 
-    async fn remove_layer(&self, hash: &ImageId) -> AppResult<()> {
+    async fn remove_layer(&self, hash: &ImageId) -> AppResult<usize> {
         let mut files = self.files.write().await;
-        files.retain(|key, _| !key.starts_with(&format!("layers/{}", hash)));
-        Ok(())
+        let mut num_deleted = 0;
+
+        files.retain(|key, _| {
+            if !key.starts_with(&format!("layers/{}", hash)) {
+                true
+            } else {
+                num_deleted += 1;
+                false
+            }
+        });
+
+        Ok(num_deleted)
     }
 }
