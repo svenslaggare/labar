@@ -117,17 +117,19 @@ impl RegistryManager {
             let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
 
             let response = client.get_registry_response(&format!("layers/{}/download/{}", hash, file_index)).await?;
-            let mut byte_stream = response.bytes_stream();
-
-            let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
             let mut content_hasher = ContentHash::new();
-            while let Some(item) = byte_stream.next().await {
-                let data = item?;
-                let data = data.as_ref();
-                content_hasher.add(data);
-                file.write_all(data).await?;
+
+            {
+                let mut byte_stream = response.bytes_stream();
+                let mut file = tokio::fs::File::create(&tmp_local_source_path).await?;
+                while let Some(item) = byte_stream.next().await {
+                    let data = item?;
+                    let data = data.as_ref();
+                    content_hasher.add(data);
+                    file.write_all(data).await?;
+                }
+                file.flush().await?;
             }
-            file.flush().await?;
 
             if &content_hasher.finalize() != &content_hash {
                 return Err(RegistryError::InvalidContentHash);
