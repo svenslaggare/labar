@@ -6,12 +6,13 @@ use axum::extract::{FromRequest, Request};
 use axum::Json;
 use axum::response::IntoResponse;
 
-use crate::helpers::{PooledResource};
+use crate::helpers::PooledResource;
 use crate::image::Layer;
 use crate::image_manager::{EmptyPrinter, ImageManager, ImageManagerError, StateSession};
-use crate::registry::{model, AppState, RegistryConfig, RunRegistryError};
+use crate::registry::{model, RegistryConfig, RunRegistryError};
 use crate::registry::auth::AuthToken;
 use crate::registry::model::{AppError, AppResult};
+use crate::registry::state::AppState;
 
 pub fn get_certificate(config: &RegistryConfig) -> Result<(PathBuf, PathBuf), RunRegistryError> {
     use log::info;
