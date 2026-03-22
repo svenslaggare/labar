@@ -228,7 +228,7 @@ enum RegistryCommandLineInput {
         password: Password,
         #[structopt(help="The list of access rights")]
         access_rights: Vec<AccessRight>,
-        #[structopt(long, help="If this user, update instead")]
+        #[structopt(long, help="If this user already exists, update instead")]
         update: bool
     },
     #[structopt(about="Removes a new user to the registry")]
