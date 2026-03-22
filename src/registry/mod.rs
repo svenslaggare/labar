@@ -41,7 +41,7 @@ use crate::registry::config::RegistryConfig;
 use crate::registry::auth::{authenticate, check_access_right, generate_jwt_token, AccessRight, AuthToken};
 use crate::registry::config::RegistryUpstreamConfig;
 use crate::registry::external_storage::{BoxExternalStorage};
-use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
+use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, RemovedImage, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
     if let Err(err) = setup_logging() {
@@ -246,7 +246,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
 
     info!("Removed image: {} ({} layers removed)", tag, num_deleted_layers);
 
-    Ok(Json(json!({ "status": "success", "num_deleted_layers": num_deleted_layers })))
+    Ok(Json(json!(RemovedImage { num_deleted_layers })))
 }
 
 async fn get_layer_exists(State(state): State<Arc<AppState>>,

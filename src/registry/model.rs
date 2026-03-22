@@ -123,6 +123,11 @@ pub struct AuthenticationFailureResponse {
 }
 
 #[derive(Serialize, Deserialize)]
+pub struct RemovedImage {
+    pub num_deleted_layers: usize
+}
+
+#[derive(Serialize, Deserialize)]
 pub struct LayerExists {
     pub exists: bool
 }
