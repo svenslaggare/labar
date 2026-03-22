@@ -18,6 +18,7 @@ use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 
+use crate::image::{Layer, LayerOperation};
 use crate::reference::{ImageId};
 use crate::registry::config::{InMemoryStorageConfig, S3StorageConfig};
 use crate::registry::model::{AppError, AppResult};
@@ -30,6 +31,23 @@ pub trait ExternalStorage {
     async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()>;
     async fn exists(&self, path: &str) -> AppResult<bool>;
     async fn remove_layer(&self, hash: &ImageId) -> AppResult<usize>;
+}
+
+pub async fn verify_path_exists(external_storage: &BoxExternalStorage, layer: &Layer) -> AppResult<bool> {
+    for operation in &layer.operations {
+        match operation {
+            LayerOperation::Image { .. } => {}
+            LayerOperation::Directory { .. } => {}
+            LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
+                if !external_storage.exists(source_path).await? {
+                    return Ok(false);
+                }
+            }
+            LayerOperation::Label { .. } => {}
+        }
+    }
+
+    Ok(true)
 }
 
 pub struct S3Storage {

@@ -40,7 +40,6 @@ use crate::registry::state::AppState;
 use crate::registry::config::RegistryConfig;
 use crate::registry::auth::{authenticate, check_access_right, generate_jwt_token, AccessRight, AuthToken};
 use crate::registry::config::RegistryUpstreamConfig;
-use crate::registry::external_storage::{BoxExternalStorage};
 use crate::registry::model::{AppError, AppResult, ImageSpec, LayerExists, RemovedImage, UploadLayerResponse, UploadStatus};
 
 pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
@@ -422,7 +421,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
 
     let exists = match state.external_storage.as_ref() {
         Some(external_storage) => {
-            verify_path_exists_external_storage(external_storage, &pending_upload_layer).await?
+            external_storage::verify_path_exists(external_storage, &pending_upload_layer).await?
         }
         None => {
             pending_upload_layer.verify_path_exists(image_manager.config().base_folder())
@@ -448,7 +447,6 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
             )
         );
     }
-
 
     if let Some(changed_operations) = state.take_changed_pending_upload_layer_operations(&upload_id).await {
         for new_operation in changed_operations {
@@ -477,23 +475,6 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
             )
         )
     )
-}
-
-async fn verify_path_exists_external_storage(external_storage: &BoxExternalStorage, layer: &Layer) -> AppResult<bool> {
-    for operation in &layer.operations {
-        match operation {
-            LayerOperation::Image { .. } => {}
-            LayerOperation::Directory { .. } => {}
-            LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
-                if !external_storage.exists(source_path).await? {
-                    return Ok(false);
-                }
-            }
-            LayerOperation::Label { .. } => {}
-        }
-    }
-
-    Ok(true)
 }
 
 async fn upload_layer_file(State(state): State<Arc<AppState>>,
@@ -592,7 +573,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 }
 
                 debug!("Uploaded layer file: {}:{}", layer.hash, file_index);
-                return Ok(Json(json!({ "status": "uploaded" })));
+                return Ok(Json(json!({})));
             }
             LayerOperation::Image { .. } => {}
             LayerOperation::Directory { .. } => {}
