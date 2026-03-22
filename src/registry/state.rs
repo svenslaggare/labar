@@ -7,8 +7,9 @@ use sha2::Sha256;
 use tokio::sync::Mutex;
 
 use crate::helpers::ResourcePool;
-use crate::image::{Image, Layer, LayerOperation};
+use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageId, ImageManager, ImageManagerResult, PooledStateSession};
+use crate::reference::ImageTag;
 use crate::registry::auth::{AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::{helpers, ChangedUploadLayerFileOperation, RunRegistryError};
 use crate::registry::config::RegistryConfig;
@@ -26,7 +27,7 @@ pub struct AppState {
 
     image_manager_pool: Arc<ResourcePool<ImageManager>>,
 
-    pub delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
+    delayed_image_inserts: Mutex<HashMap<ImageId, Vec<Image>>>,
     layer_cache: Mutex<HashMap<ImageId, Arc<Layer>>>,
     pending_upload_layer_cache: Mutex<HashMap<String, Arc<Layer>>>,
     changed_pending_upload_layer_operations: Mutex<HashMap<String, Vec<ChangedUploadLayerFileOperation>>>
@@ -98,6 +99,24 @@ impl AppState {
 
     pub async fn clear_layer_cache(&self) {
         self.layer_cache.lock().await.clear();
+    }
+
+    pub async fn pull_from_upstream(&self, image_manager: &ImageManager, tag: ImageTag) -> ImageManagerResult<ImageMetadata> {
+        let upstream_config = self.config.upstream.as_ref().unwrap();
+
+        let upstream_tag = tag.clone().set_registry(&upstream_config.hostname);
+        let image = image_manager.resolve_image_in_registry(&upstream_config.hostname, &upstream_tag).await?;
+
+        // Delay image insert until layer has been pulled
+        self.delayed_image_inserts.lock().await.entry(image.image.hash.clone())
+            .or_insert_with(|| Vec::new())
+            .push(image.image.clone().replace_tag(tag));
+
+        Ok(image)
+    }
+
+    pub async fn empty_delayed_image_inserts(&self, hash: &ImageId) -> ImageManagerResult<Option<Vec<Image>>> {
+        Ok(self.delayed_image_inserts.lock().await.remove(&hash))
     }
 
     pub async fn get_pending_upload_layer_by_id(&self, state_session: PooledStateSession, upload_id: &str) -> AppResult<Arc<Layer>> {

@@ -202,18 +202,8 @@ async fn resolve_image(State(state): State<Arc<AppState>>,
     let image = match image_manager.resolve_image(&tag) {
         Ok(image) => image,
         Err(ImageManagerError::ReferenceNotFound { .. }) if state.config.can_pull_through_upstream() && query.can_pull_through => {
-            let upstream_config = state.config.upstream.as_ref().unwrap();
-
             info!("Pulling image {} from upstream.", &tag);
-            let upstream_tag = tag.clone().set_registry(&upstream_config.hostname);
-            let image = image_manager.resolve_image_in_registry(&upstream_config.hostname, &upstream_tag).await?;
-
-            // Delay image insert until layer has been pulled
-            state.delayed_image_inserts.lock().await.entry(image.image.hash.clone())
-                .or_insert_with(|| Vec::new())
-                .push(image.image.clone().replace_tag(tag));
-
-            image
+            state.pull_from_upstream(&image_manager, tag).await?
         }
         err => {
             err?
@@ -644,7 +634,7 @@ async fn pull_from_upstream(state: Arc<AppState>, layer: Layer) {
         let layer_hash = layer.hash.clone();
         state_session.registry_end_layer_upload(layer).map_err(|err| ImageManagerError::Sql(err))?;
 
-        if let Some(images) = state.delayed_image_inserts.lock().await.remove(&layer_hash) {
+        if let Some(images) = state.empty_delayed_image_inserts(&layer_hash).await? {
             for image in images {
                 if let Err(err) = image_manager.insert_or_replace_image(image) {
                     error!("Failed to insert image after pulling from upstream due to: {}.", err);
