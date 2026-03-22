@@ -17,7 +17,7 @@ use crate::image_manager::build::LayerHash;
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 use crate::registry::model;
-use crate::registry::model::{AppErrorResponse, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
+use crate::registry::model::{AppErrorResponse, AuthenticationFailureResponse, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
@@ -365,7 +365,7 @@ impl RegistrySession {
     pub fn new(session: &StateSession, registry: &str) -> RegistryResult<RegistrySession> {
         let auth_token = session.get_login(registry)
             .ok().flatten()
-            .ok_or_else(|| RegistryError::InvalidAuthentication)?;
+            .ok_or_else(|| RegistryError::InvalidAuthentication(None))?;
 
         Ok(
             RegistrySession {
@@ -444,7 +444,7 @@ impl<'a> RegistryClient<'a> {
 #[derive(Debug)]
 pub enum RegistryError {
     Unavailable(reqwest::Error),
-    InvalidAuthentication,
+    InvalidAuthentication(Option<String>),
     ReferenceNotFound,
     FailedToUpload { layer: ImageId, reason: UploadStatus },
     InvalidLayer,
@@ -463,7 +463,10 @@ impl RegistryError {
         if response.status().is_success() {
             Ok(response.text().await?)
         } else if response.status() == StatusCode::UNAUTHORIZED {
-            Err(RegistryError::InvalidAuthentication)
+            let text = response.text().await?;
+            let error: AuthenticationFailureResponse = serde_json::from_str(&text)?;
+
+            Err(RegistryError::InvalidAuthentication(error.reason))
         } else if response.status() == StatusCode::NOT_FOUND {
             Err(RegistryError::ReferenceNotFound)
         } else if response.status() == StatusCode::PAYLOAD_TOO_LARGE {
@@ -488,7 +491,12 @@ impl Display for RegistryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             RegistryError::Unavailable(err) => write!(f, "Registry unavailable due to: {}", err),
-            RegistryError::InvalidAuthentication => write!(f, "Invalid authentication"),
+            RegistryError::InvalidAuthentication(reason) => {
+                match reason {
+                    Some(reason) => write!(f, "Invalid authentication due to: {}", reason),
+                    None => write!(f, "Invalid authentication"),
+                }
+            },
             RegistryError::ReferenceNotFound => write!(f, "Could not find the reference"),
             RegistryError::FailedToUpload { layer, reason } => write!(f, "Failed to upload layer {} due to: {}", layer, reason),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),

@@ -1,11 +1,11 @@
 use std::fmt::{Display, Formatter};
-use axum::body::Body;
-use axum::http::StatusCode;
-use axum::Json;
-use axum::response::{IntoResponse, Response};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use axum::http::StatusCode;
+use axum::Json;
+use axum::response::{IntoResponse, Response};
 
 use crate::image_manager::ImageManagerError;
 use crate::reference::{ImageId, ImageTag};
@@ -21,7 +21,7 @@ pub enum AppError {
     UploadIdNotSpecified,
     InvalidUploadId,
     InvalidImageReference(String),
-    Unauthorized,
+    Unauthorized(Option<String>),
     IO(std::io::Error),
     Other(Response)
 }
@@ -86,11 +86,11 @@ impl IntoResponse for AppError {
                     Json(json!(AppErrorResponse { error: format!("{}", err) }))
                 ).into_response()
             }
-            AppError::Unauthorized => {
-                Response::builder()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .header(reqwest::header::WWW_AUTHENTICATE, "Basic realm=registry")
-                    .body(Body::empty()).unwrap()
+            AppError::Unauthorized(reason) => {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!(AuthenticationFailureResponse { reason}))
+                ).into_response()
             }
             AppError::IO(err) => {
                 (
@@ -115,6 +115,11 @@ impl From<std::io::Error> for AppError {
     fn from(value: std::io::Error) -> Self {
         AppError::IO(value)
     }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AuthenticationFailureResponse {
+    pub reason: Option<String>
 }
 
 #[derive(Serialize, Deserialize)]

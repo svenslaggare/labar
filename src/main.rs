@@ -691,8 +691,11 @@ fn transform_registry_result<T>(result: ImageManagerResult<T>) -> Result<T, Stri
         Ok(value) => {
             Ok(value)
         }
-        Err(ImageManagerError::RegistryError { error: RegistryError::InvalidAuthentication }) => {
-            Err("Not signed into registry. Please run the login command.".to_owned())
+        Err(ImageManagerError::RegistryError { error: RegistryError::InvalidAuthentication(reason) }) => {
+            match reason {
+                Some(reason) => Err(format!("{}. Please run the login command.", reason)),
+                None => Err("Not signed into registry. Please run the login command.".to_owned())
+            }
         }
         Err(err) => {
             Err(err.to_string())

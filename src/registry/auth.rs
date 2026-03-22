@@ -66,42 +66,42 @@ pub fn authenticate(access_provider: &(dyn AuthProvider + Send + Sync),
                     request: &Request) -> AppResult<Authenticated> {
     let auth_header = match request.headers().get(reqwest::header::AUTHORIZATION) {
         Some(header) => header,
-        None => return Err(AppError::Unauthorized)
+        None => return Err(AppError::Unauthorized(None))
     };
 
     let auth_header = match auth_header.to_str().ok() {
         Some(header) => header,
-        None => return Err(AppError::Unauthorized)
+        None => return Err(AppError::Unauthorized(None))
     };
 
     let parts = auth_header.split(' ').collect::<Vec<_>>();
     if parts.len() != 2 {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None));
     }
 
     let auth_type = parts[0];
     let auth_data = parts[1];
     if auth_type != "Basic" {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None));
     }
 
     let auth_data = match BASE64_STANDARD.decode(auth_data).ok() {
         Some(auth_data) => auth_data,
-        None => return Err(AppError::Unauthorized)
+        None => return Err(AppError::Unauthorized(None))
     };
 
     let auth_data = match String::from_utf8(auth_data).ok() {
         Some(auth_data) => auth_data,
-        None => return Err(AppError::Unauthorized)
+        None => return Err(AppError::Unauthorized(None))
     };
 
     let parts = auth_data.split(':').collect::<Vec<_>>();
     if parts.len() != 2 {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None));
     }
 
     if parts.len() != 2 {
-        return Err(AppError::Unauthorized);
+        return Err(AppError::Unauthorized(None));
     }
 
     let username = parts[0];
@@ -121,54 +121,51 @@ pub fn generate_jwt_token(config: &RegistryConfig, sign_key: &impl SigningAlgori
     claims.insert("exp", expiration);
     claims.insert("acl", access_rights);
 
-    claims.sign_with_key(sign_key).map_err(|_| AppError::Unauthorized)
+    claims.sign_with_key(sign_key).map_err(|_| AppError::Unauthorized(None))
 }
 
 pub fn check_access_right(request: &Request,
                           sign_key: &impl VerifyingAlgorithm,
                           access_right: AccessRight) -> AppResult<AuthToken> {
-    fn internal(request: &Request,
-                sign_key: &impl VerifyingAlgorithm,
-                access_right: AccessRight) -> AppResult<bool> {
-        let auth_header = match request.headers().get(reqwest::header::AUTHORIZATION) {
-            Some(header) => header,
-            None => return Ok(false)
-        };
+    let auth_header = match request.headers().get(reqwest::header::AUTHORIZATION) {
+        Some(header) => header,
+        None => return Err(AppError::Unauthorized(None))
+    };
 
-        let auth_header = match auth_header.to_str().ok() {
-            Some(header) => header,
-            None => return Ok(false)
-        };
+    let auth_header = match auth_header.to_str().ok() {
+        Some(header) => header,
+        None => return Err(AppError::Unauthorized(None))
+    };
 
-        let parts = auth_header.split(' ').collect::<Vec<_>>();
-        if parts.len() != 2 {
-            return Ok(false);
-        }
-
-        let auth_type = parts[0];
-        let auth_data = parts[1];
-        if auth_type != "Bearer" {
-            return Ok(false);
-        }
-
-        let claims: BTreeMap<String, String> = auth_data.verify_with_key(sign_key).map_err(|_| AppError::Unauthorized)?;
-
-        let expiration = claims.get("exp").map(|x| i64::from_str(x).ok()).flatten().ok_or_else(|| AppError::Unauthorized)?;
-        let access_rights: Vec<AccessRight> = claims.get("acl").ok_or_else(|| AppError::Unauthorized)?
-            .split(";")
-            .map(|x| AccessRight::from_str(x).ok())
-            .flatten()
-            .collect();
-
-        Ok(access_rights.contains(&access_right) && Utc::now().timestamp() <= expiration)
+    let parts = auth_header.split(' ').collect::<Vec<_>>();
+    if parts.len() != 2 {
+        return Err(AppError::Unauthorized(None));
     }
 
-    if internal(request, sign_key, access_right.clone())? {
-        Ok(AuthToken)
-    } else {
-        info!("Not authorized for {:?} access.", access_right);
-        Err(AppError::Unauthorized)
+    let auth_type = parts[0];
+    let auth_data = parts[1];
+    if auth_type != "Bearer" {
+        return Err(AppError::Unauthorized(None));
     }
+
+    let claims: BTreeMap<String, String> = auth_data.verify_with_key(sign_key).map_err(|_| AppError::Unauthorized(None))?;
+
+    let access_rights: Vec<AccessRight> = claims.get("acl").ok_or_else(|| AppError::Unauthorized(None))?
+        .split(";")
+        .map(|x| AccessRight::from_str(x).ok())
+        .flatten()
+        .collect();
+
+    if !access_rights.contains(&access_right) {
+        return Err(AppError::Unauthorized(None));
+    }
+
+    let expiration = claims.get("exp").map(|x| i64::from_str(x).ok()).flatten().ok_or_else(|| AppError::Unauthorized(None))?;
+    if Utc::now().timestamp() > expiration {
+        return Err(AppError::Unauthorized(Some("Token has expired".to_owned())))
+    }
+
+    Ok(AuthToken)
 }
 
 pub struct Authenticated {
@@ -316,13 +313,13 @@ impl AuthProvider for SqliteAuthProvider {
                 Some(user) => user,
                 None => {
                     info!("User '{}' does not exist.", username);
-                    return Ok(Err(AppError::Unauthorized));
+                    return Ok(Err(AppError::Unauthorized(None)));
                 }
             };
 
             if &entry.password != password {
                 info!("Invalid password for user: {}.", username);
-                return Ok(Err(AppError::Unauthorized));
+                return Ok(Err(AppError::Unauthorized(None)));
             }
 
             Ok(Ok(
@@ -336,7 +333,7 @@ impl AuthProvider for SqliteAuthProvider {
         internal(&self, username, password)
             .unwrap_or_else(|err| {
                 error!("SQL failure: {}", err);
-                Err(AppError::Unauthorized)
+                Err(AppError::Unauthorized(None))
             })
     }
 }
