@@ -450,6 +450,74 @@ impl ImageManager {
         Ok(None)
     }
 
+    pub fn diff(&self, reference: &Reference, comparison: &Reference) -> ImageManagerResult<DiffResult> {
+        let session = self.state_manager.pooled_session()?;
+
+        let get_files = |image_reference: &Reference| -> ImageManagerResult<BTreeMap<String, String>> {
+            let mut files = BTreeMap::new();
+
+            let mut stack = Vec::new();
+            stack.push(image_reference.clone());
+
+            while let Some(current) = stack.pop() {
+                let layer = self.layer_manager.get_layer(&session, &current)?;
+                if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                    stack.push(parent_hash.clone().to_ref());
+                }
+
+                for operation in &layer.operations {
+                    match operation {
+                        LayerOperation::Image { hash } => {
+                            stack.push(hash.clone().to_ref());
+                        }
+                        LayerOperation::Directory { .. } => {
+
+                        }
+                        LayerOperation::File { path, content_hash, ..  } | LayerOperation::CompressedFile { path, content_hash, ..  }  => {
+                            files.insert(path.clone(), content_hash.clone());
+                        }
+                        LayerOperation::Label { .. } => {}
+                    }
+                }
+            }
+
+            Ok(files)
+        };
+
+        let files = get_files(reference)?;
+        let comparison_files = get_files(comparison)?;
+
+        let mut changed_files = Vec::new();
+        let mut added_files = Vec::new();
+        let mut removed_files = Vec::new();
+
+        for (file, hash) in files.iter() {
+            match comparison_files.get(file) {
+                Some(comparison_hash) if comparison_hash != hash => {
+                    changed_files.push(file.clone());
+                }
+                None => {
+                    removed_files.push(file.clone());
+                }
+                _ => {}
+            }
+        }
+
+        for file in comparison_files.keys() {
+            if !files.contains_key(file) {
+                added_files.push(file.clone());
+            }
+        }
+
+        Ok(
+            DiffResult {
+                changed_files,
+                added_files,
+                removed_files
+            }
+        )
+    }
+
     pub fn list_unpackings(&self, filter: Option<&Regex>) -> ImageManagerResult<Vec<Unpacking>> {
         let session = self.state_manager.pooled_session()?;
         let mut unpackings = self.unpack_manager.unpackings(&session)?;
@@ -1000,6 +1068,12 @@ pub struct GetFile {
     pub is_compressed: bool
 }
 
+pub struct DiffResult {
+    pub changed_files: Vec<String>,
+    pub added_files: Vec<String>,
+    pub removed_files: Vec<String>
+}
+
 pub struct PullRequest<'a> {
     pub tag: ImageTag,
     pub default_registry: Option<&'a str>,
@@ -1310,5 +1384,45 @@ fn test_decompress() {
         });
         assert!(result.is_ok(), "{}", result.unwrap_err());
         crate::assert_file_content_eq!(Path::new("testdata/rawdata/file1.txt"), unpack_folder.join("file1.txt"));
+    }
+}
+
+#[test]
+fn test_diff() {
+    use std::str::FromStr;
+
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        let result = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple3.labarfile"),
+            ImageTag::from_str("test:current").unwrap()
+        );
+        assert!(result.is_ok());
+
+        let result = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple5.labarfile"),
+            ImageTag::from_str("test:next").unwrap()
+        );
+        assert!(result.is_ok());
+
+        let diff_result = image_manager.diff(
+            &ImageTag::from_str("test:current").unwrap().to_ref(),
+            &ImageTag::from_str("test:next").unwrap().to_ref(),
+        );
+        assert!(result.is_ok());
+        let diff_result = diff_result.unwrap();
+
+        assert_eq!(Vec::<String>::new(), diff_result.changed_files);
+        assert_eq!(vec!["test/file2.txt".to_owned()], diff_result.added_files);
+        assert_eq!(Vec::<String>::new(), diff_result.removed_files);
     }
 }

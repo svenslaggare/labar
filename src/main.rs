@@ -119,6 +119,13 @@ enum CommandLineInput {
         #[structopt(name="key", help="The name of the label")]
         key: String
     },
+    #[structopt(about="Shows the differences between two images", alias="diff")]
+    DiffImage {
+        #[structopt(name="reference", help="The image to get")]
+        reference: Reference,
+        #[structopt(name="comparison", help="The image to compare with")]
+        comparison: Reference
+    },
     #[structopt(about="Lists the unpackings that has been made")]
     ListUnpackings {
         #[structopt(long, help="Only show unpackings matching the given regex (for destination)")]
@@ -445,6 +452,30 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 println!("{}", label_value);
             } else {
                 return Err(format!("Key '{}' not found im image {}.", key, reference));
+            }
+        }
+        CommandLineInput::DiffImage { reference, comparison } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+            let result = image_manager.diff(&reference, &comparison).map_err(|err| format!("{}", err))?;
+
+            println!("Comparing '{}' with '{}'", reference, comparison);
+
+            println!();
+            println!("Changed files:");
+            for file in &result.changed_files {
+                println!("\t{}", file);
+            }
+
+            println!();
+            println!("Added files:");
+            for file in &result.added_files {
+                println!("\t{}", file);
+            }
+
+            println!();
+            println!("Removed files:");
+            for file in &result.removed_files {
+                println!("\t{}", file);
             }
         }
         CommandLineInput::ListUnpackings { filter, quiet } => {
