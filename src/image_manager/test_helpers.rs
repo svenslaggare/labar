@@ -21,6 +21,7 @@ pub fn build_image(image_manager: &mut ImageManager,
         tag: image_tag,
         force: false,
         verbose_output: false,
+        print: true
     }).map_err(|err| err.to_string())
 }
 
@@ -41,6 +42,7 @@ pub fn build_image2(session: &mut StateSession,
             tag: image_tag,
             force,
             verbose_output: false,
+            print: true
         }
     ).map_err(|err| err.to_string())
 }

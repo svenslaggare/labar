@@ -30,6 +30,7 @@ impl Display for LinkType {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerOperation {
     Image { hash: ImageId },
+    ImageAlias { hash: ImageId },
     Directory { path: String },
     File {
         path: String,
@@ -68,6 +69,9 @@ impl Display for LayerOperation {
         match self {
             LayerOperation::Image { hash } => {
                 write!(f, "Image: {}", hash)
+            }
+            LayerOperation::ImageAlias { hash } => {
+                write!(f, "Image alias: {}", hash)
             }
             LayerOperation::Directory { path } => {
                 write!(f, "Create directory: {}", path)
@@ -116,6 +120,7 @@ impl Layer {
         for (operation_index, operation) in self.operations.iter().enumerate() {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
                     self.file_operation_mapping.insert(current_file_index, operation_index);
@@ -124,6 +129,23 @@ impl Layer {
                 LayerOperation::Label { .. } => {}
             }
         }
+    }
+
+    pub fn get_alias(&self) -> Option<ImageId> {
+        for operation in &self.operations {
+            match operation {
+                LayerOperation::ImageAlias { hash } => {
+                    return Some(hash.clone());
+                }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { .. } => {}
+                LayerOperation::CompressedFile { .. } => {}
+                LayerOperation::Label { .. } => {}
+            }
+        }
+
+        None
     }
 
     pub fn get_file_operation(&self, index: usize) -> Option<&LayerOperation> {
@@ -135,6 +157,7 @@ impl Layer {
         for operation in &self.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
                     if current_index == index {
@@ -159,6 +182,7 @@ impl Layer {
         for operation in &mut self.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { .. } | LayerOperation::CompressedFile { .. } => {
                     if current_index == index {
@@ -180,6 +204,7 @@ impl Layer {
         for operation in &self.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { .. } => {
                     uncompressed += 1;
@@ -198,6 +223,7 @@ impl Layer {
         for operation in &self.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                     if !base_folder.join(source_path).exists() {
@@ -218,6 +244,7 @@ impl Layer {
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { .. } => {}
+                    LayerOperation::ImageAlias { .. } => {}
                     LayerOperation::Directory { .. } => {}
                     LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                         let abs_source_path = base_folder.join(source_path);

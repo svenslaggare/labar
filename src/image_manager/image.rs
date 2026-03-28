@@ -20,7 +20,7 @@ use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
 use crate::helpers::DataSize;
-use crate::image_definition::{ImageDefinition};
+use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
@@ -103,14 +103,47 @@ impl ImageManager {
         Ok(image)
     }
 
-    pub fn build_image_from_directory(&mut self, directory: &Path, tag: ImageTag, force: bool, verbose_output: bool) -> ImageManagerResult<BuildResult> {
+    pub fn build_image_from_directory(&mut self,
+                                      directory: &Path,
+                                      tag: ImageTag,
+                                      force: bool,
+                                      verbose_output: bool) -> ImageManagerResult<BuildResult> {
         self.build_image(
             BuildRequest {
                 build_context: Default::default(),
                 image_definition: ImageDefinition::create_from_directory(directory)?,
                 tag,
                 force,
-                verbose_output
+                verbose_output,
+                print: true
+            }
+        )
+    }
+
+    pub fn merge_image(&mut self,
+                       first: &Reference,
+                       second: &Reference,
+                       tag: ImageTag) -> ImageManagerResult<BuildResult> {
+        self.build_image(
+            BuildRequest {
+                build_context: Default::default(),
+                image_definition: ImageDefinition::new(
+                    None,
+                    vec![
+                        LayerDefinition::new(
+                            String::new(),
+                            vec![LayerOperationDefinition::ImageAlias { reference: first.clone() }]
+                        ),
+                        LayerDefinition::new(
+                            String::new(),
+                            vec![LayerOperationDefinition::ImageAlias { reference: second.clone() }]
+                        )
+                    ]
+                ),
+                tag,
+                force: false,
+                verbose_output: false,
+                print: false
             }
         )
     }
@@ -226,6 +259,7 @@ impl ImageManager {
             for operation in &layer.operations {
                 match operation {
                     LayerOperation::Image { .. } => {}
+                    LayerOperation::ImageAlias { .. } => {}
                     LayerOperation::Directory { .. } => {}
                     LayerOperation::File { source_path, .. } => {
                         let source_path = self.config.base_folder.join(source_path);
@@ -305,8 +339,14 @@ impl ImageManager {
         let top_layer = self.get_layer(&reference)?;
         let mut layers = Vec::new();
         let mut labels = BTreeMap::new();
-        for layer in self.get_layers(&reference)? {
-            let size = self.layer_size(&layer.hash.clone().to_ref())?;
+        for mut layer in self.get_layers(&reference)? {
+            let size = if let Some(alias) = layer.get_alias() {
+                layer = self.get_layer(&alias.to_ref())?;
+                self.image_size(&layer.hash.clone().to_ref())?
+            } else {
+                self.layer_size(&layer.hash.clone().to_ref())?
+            };
+
             layer.visit_labels(|key, value| { labels.insert(key.to_owned(), value.to_owned()); });
             
             layers.push(InspectLayerResult {
@@ -314,6 +354,8 @@ impl ImageManager {
                 size
             });
         }
+
+        layers.reverse();
 
         Ok(
             InspectResult {
@@ -385,6 +427,7 @@ impl ImageManager {
                         add_file(path, source_path, true);
                     }
                     LayerOperation::Image { .. } => {}
+                    LayerOperation::ImageAlias { .. } => {}
                     LayerOperation::Label { .. } => {}
                 }
 
@@ -519,6 +562,7 @@ impl ImageManager {
                               always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
         match operation {
             LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
             LayerOperation::Directory { .. } => Ok(None),
             LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
                 let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
@@ -600,6 +644,7 @@ impl ImageManager {
                                 data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
         match operation {
             LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
             LayerOperation::Directory { .. } => Ok(None),
             LayerOperation::File { .. } => Ok(None),
             LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
@@ -998,6 +1043,7 @@ impl ImageManager {
                         }
                     }
                     LayerOperation::Image { .. } => {}
+                    LayerOperation::ImageAlias { .. } => {}
                     LayerOperation::Label { .. } => {}
                 }
 
@@ -1024,7 +1070,7 @@ impl ImageManager {
 
             for operation in &layer.operations {
                 match operation {
-                    LayerOperation::Image { hash } => {
+                    LayerOperation::Image { hash } | LayerOperation::ImageAlias { hash } => {
                         stack.push(hash.clone().to_ref());
                     }
                     LayerOperation::Directory { .. } => {
@@ -1230,6 +1276,45 @@ fn test_build_from_directory() {
         assert_eq!(image.hash, top_layer.hash);
 
         assert_eq!(Some(DataSize(4257)), image_manager.image_size(&Reference::from_str("test").unwrap()).ok());
+    }
+}
+#[test]
+fn test_merge() {
+    use std::str::FromStr;
+
+    use crate::image_manager::ConsolePrinter;
+
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        let result = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple3.labarfile"),
+            ImageTag::from_str("test:current").unwrap()
+        );
+        assert!(result.is_ok());
+
+        let result = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple6.labarfile"),
+            ImageTag::from_str("test:prev").unwrap()
+        );
+        assert!(result.is_ok());
+
+        let result = image_manager.merge_image(
+            &ImageTag::from_str("test:current").unwrap().to_ref(),
+            &ImageTag::from_str("test:prev").unwrap().to_ref(),
+            ImageTag::from_str("test:vnext").unwrap(),
+        );
+        assert!(result.is_ok());
+        let result = result.unwrap();
+
+        assert_eq!(ImageTag::from_str("test:vnext").unwrap(), result.image.tag);
+        assert_eq!(2, result.layers.len());
     }
 }
 

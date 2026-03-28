@@ -146,6 +146,7 @@ impl RegistryManager {
         for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, content_hash, .. } => {
                     file_operations.push((source_path.clone(), content_hash.clone(), file_index));
@@ -288,6 +289,7 @@ impl RegistryManager {
         for operation in &layer.operations {
             match operation {
                 LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
                 LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                     let mut request = client.build_post_request(

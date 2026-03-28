@@ -62,6 +62,7 @@ impl LayerDefinition {
 #[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum LayerOperationDefinition {
     Image { reference: Reference },
+    ImageAlias { reference: Reference },
     Directory { path: String },
     File { path: String, source_path: String, link_type: LinkType, writable: bool },
     Label { key_values: Vec<(String, String)> }
@@ -155,6 +156,9 @@ fn expand_operations(build_context: &Path, operations: Vec<LayerOperationDefinit
         match operation_definition {
             LayerOperationDefinition::Image { reference } => {
                 expanded_operations.push(LayerOperationDefinition::Image { reference });
+            }
+            LayerOperationDefinition::ImageAlias { reference } => {
+                expanded_operations.push(LayerOperationDefinition::ImageAlias { reference });
             }
             LayerOperationDefinition::File { path, source_path, link_type, writable } => {
                 let source_path_obj = Path::new(&source_path);

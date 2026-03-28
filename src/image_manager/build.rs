@@ -46,7 +46,9 @@ impl BuildManager {
         let mut image_layers = Vec::new();
 
         for (layer_index, layer_definition) in request.image_definition.layers.into_iter().enumerate() {
-            self.printer.println(&format!("Step {}/{}: {}", layer_index + 1, num_layers, layer_definition.input_line));
+            if request.print {
+                self.printer.println(&format!("Step {}/{}: {}", layer_index + 1, num_layers, layer_definition.input_line));
+            }
 
             let start_time = Instant::now();
             let layer_definition = layer_definition.expand(&request.build_context)?;
@@ -68,7 +70,8 @@ impl BuildManager {
                 start_time,
                 layer,
                 request.force,
-                request.verbose_output
+                request.verbose_output,
+                request.print
             )?;
             if layer_built {
                 built_layers.push(hash.clone());
@@ -102,13 +105,18 @@ impl BuildManager {
                    start_time: Instant,
                    mut layer: Layer,
                    force: bool,
-                   verbose_output: bool) -> ImageManagerResult<bool> {
+                   verbose_output: bool,
+                   print: bool) -> ImageManagerResult<bool> {
         if !force && layer_manager.layer_exist(session, &layer.hash)? {
-            self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
+            if print {
+                self.printer.println(&format!("\t* Layer already built: {}", layer.hash));
+            }
             return Ok(false);
         }
 
-        self.printer.println(&format!("\t* Building layer: {}...", layer.hash));
+        if print {
+            self.printer.println(&format!("\t* Building layer: {}...", layer.hash));
+        }
 
         let destination_base_path = self.config.get_layer_folder(&layer.hash);
         std::fs::create_dir_all(&destination_base_path)?;
@@ -122,11 +130,13 @@ impl BuildManager {
             )?;
         }
 
-        self.printer.println(&format!(
-            "\t* Layer built in {:.2} seconds ({} operations).",
-            start_time.elapsed().as_secs_f64(),
-            layer.operations.len()
-        ));
+        if print {
+            self.printer.println(&format!(
+                "\t* Layer built in {:.2} seconds ({} operations).",
+                start_time.elapsed().as_secs_f64(),
+                layer.operations.len()
+            ));
+        }
 
         if force {
             layer_manager.insert_or_replace_layer(session, &layer)?;
@@ -185,6 +195,8 @@ impl BuildManager {
 
         let mut added_content_hashes = Vec::new();
         let mut storage_size = DataSize(0);
+        let mut num_alias = 0;
+
         for operation_definition in &layer_definition.operations {
             match operation_definition {
                 LayerOperationDefinition::Image { reference } => {
@@ -195,6 +207,20 @@ impl BuildManager {
 
                     layer_hash.add_image_ref(&hash);
                     layer_operations.push(LayerOperation::Image { hash });
+                }
+                LayerOperationDefinition::ImageAlias { reference } => {
+                    let hash = layer_manager.fully_qualify_reference(session, reference)?;
+                    if !layer_manager.layer_exist(session, &hash)? {
+                        return Err(ImageManagerError::ReferenceNotFound { reference: reference.clone() });
+                    }
+
+                    if num_alias > 0 {
+                        return Err(ImageManagerError::OnlyOneAliasAllowed);
+                    }
+
+                    layer_hash.add_image_alias(&hash);
+                    layer_operations.push(LayerOperation::ImageAlias { hash });
+                    num_alias += 1;
                 }
                 LayerOperationDefinition::File { path, source_path, link_type, writable } => {
                     let source_path_entry = Path::new(&source_path);
@@ -284,6 +310,9 @@ impl LayerHash {
                 LayerOperation::Image { hash } => {
                     layer_hash.add_image_ref(&hash);
                 }
+                LayerOperation::ImageAlias { hash }  => {
+                    layer_hash.add_image_alias(&hash);
+                }
                 LayerOperation::Directory { path } => {
                     layer_hash.add_directory(path);
                 },
@@ -306,11 +335,18 @@ impl LayerHash {
 
     pub fn add_parent_hash(&mut self, parent_hash: Option<&ImageId>) {
         if let Some(parent_hash) = parent_hash.as_ref() {
-            self.add_image_ref(parent_hash);
+            self.hash_input += "parent_hash:";
+            self.hash_input += &parent_hash.to_string();
         }
     }
 
     pub fn add_image_ref(&mut self, hash: &ImageId) {
+        self.hash_input += "ref:";
+        self.hash_input += &hash.to_string();
+    }
+
+    pub fn add_image_alias(&mut self, hash: &ImageId) {
+        self.hash_input += "alias:";
         self.hash_input += &hash.to_string();
     }
 
@@ -326,6 +362,7 @@ impl LayerHash {
                 create_hash(&original_source_path)
             };
 
+            self.hash_input += "file:";
             self.hash_input += &format!(
                 "{}{}{}{}{}",
                 path,
@@ -345,6 +382,7 @@ impl LayerHash {
                 create_hash(&original_source_path)
             };
 
+            self.hash_input += "file:";
             self.hash_input += &format!(
                 "{}{}{}{}{}",
                 path,
@@ -357,6 +395,7 @@ impl LayerHash {
     }
     
     pub fn add_key_value(&mut self, key: &str, value: &str) {
+        self.hash_input += "key_value:";
         self.hash_input += key;
         self.hash_input += value;
     }
@@ -372,7 +411,8 @@ pub struct BuildRequest {
     pub image_definition: ImageDefinition,
     pub tag: ImageTag,
     pub force: bool,
-    pub verbose_output: bool
+    pub verbose_output: bool,
+    pub print: bool
 }
 
 #[derive(Debug)]
@@ -381,7 +421,7 @@ pub struct BuildResult {
     #[allow(dead_code)]
     pub built_layers: Vec<ImageId>,
     #[allow(dead_code)]
-    pub layers: Vec<ImageId>
+    pub layers: Vec<ImageId>,
 }
 
 fn create_hash(input: &str) -> String {
@@ -415,7 +455,7 @@ fn test_build() {
     let result = result.unwrap().image;
 
     assert_eq!(ImageTag::from_str("test").unwrap(), result.tag);
-    assert_eq!(ImageId::from_str("670ca8ce5558c66c12a618f74bfed7e9006621d8c926dcd7ab7b10a428f0b5d1").unwrap(), result.hash);
+    assert_eq!(ImageId::from_str("1f2bc97496b012cfe7969d0a7672818695727b3cfa341748a01616bc5f3ca15a").unwrap(), result.hash);
 
     let session = state_manager.session().unwrap();
     let image = layer_manager.get_layer(&session, &Reference::from_str("test").unwrap());
@@ -527,6 +567,7 @@ fn test_build_with_cache2() {
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
             verbose_output: false,
+            print: true
         }
     );
     assert!(first_result.is_ok(), "{}", first_result.unwrap_err());
@@ -543,6 +584,7 @@ fn test_build_with_cache2() {
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
             verbose_output: false,
+            print: true
         }
     );
     assert!(second_result.is_ok());
@@ -574,6 +616,7 @@ fn test_build_with_cache2() {
             tag: ImageTag::from_str("test").unwrap(),
             force: false,
             verbose_output: false,
+            print: true
         }
     );
     assert!(third_result.is_ok());

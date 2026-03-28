@@ -325,6 +325,7 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                 }
             }
             LayerOperation::Image { .. } => {}
+            LayerOperation::ImageAlias { .. } => {}
             LayerOperation::Directory { .. } => {}
             LayerOperation::Label { .. } => {}
         }
@@ -566,6 +567,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 return Ok(Json(json!({})));
             }
             LayerOperation::Image { .. } => {}
+            LayerOperation::ImageAlias { .. } => {}
             LayerOperation::Directory { .. } => {}
             LayerOperation::Label { .. } => {}
         }

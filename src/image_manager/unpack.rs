@@ -219,7 +219,7 @@ impl UnpackManager {
         let mut has_files = false;
         for operation in &layer.operations {
             match operation {
-                LayerOperation::Image { hash } => {
+                LayerOperation::Image { hash } | LayerOperation::ImageAlias { hash } => {
                     self.unpack_layer(
                         session,
                         unpacker,
@@ -339,7 +339,7 @@ impl UnpackManager {
                              unpack_folder: &Path, layer: &Layer) -> ImageManagerResult<()> {
         for operation in layer.operations.iter().rev() {
             match operation {
-                LayerOperation::Image { hash } => {
+                LayerOperation::Image { hash } | LayerOperation::ImageAlias { hash } => {
                     self.remove_unpacked_layer(
                         session,
                         layer_manager,
@@ -395,7 +395,7 @@ impl UnpackManager {
 
             for operation in &layer.operations {
                 match operation {
-                    LayerOperation::Image { hash } => {
+                    LayerOperation::Image { hash } | LayerOperation::ImageAlias { hash } => {
                         let layer = layer_manager.get_layer(&session, &hash.clone().to_ref())?;
                         inner(config, session, layer_manager, &layer, writer)?;
                     }

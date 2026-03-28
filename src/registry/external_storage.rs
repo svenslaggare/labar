@@ -37,6 +37,7 @@ pub async fn verify_path_exists(external_storage: &BoxExternalStorage, layer: &L
     for operation in &layer.operations {
         match operation {
             LayerOperation::Image { .. } => {}
+            LayerOperation::ImageAlias { .. } => {}
             LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                 if !external_storage.exists(source_path).await? {

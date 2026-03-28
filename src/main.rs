@@ -64,6 +64,15 @@ enum CommandLineInput {
         #[structopt(long, short, help="Prints more verbose output when building the image")]
         verbose_output: bool,
     },
+    #[structopt(about="Merges two images into a new one", alias="merge")]
+    MergeImage {
+        #[structopt(name="first", help="The reference of the first image")]
+        first: Reference,
+        #[structopt(name="second", help="The reference of the first image")]
+        second: Reference,
+        #[structopt(name="tag", help="The tag of the image")]
+        tag: ImageTag
+    },
     #[structopt(about="Removes an image")]
     RemoveImage {
         #[structopt(name="tags", help="The tag(s) of the image(s) to remove")]
@@ -303,7 +312,8 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                 image_definition,
                 tag,
                 force,
-                verbose_output
+                verbose_output,
+                print: true
             };
 
             let image = image_manager.build_image(request).map_err(|err| format!("{}", err))?.image;
@@ -325,6 +335,13 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
             ).map_err(|err| format!("{}", err))?.image;
             let image_size = image_manager.image_size(&Reference::ImageTag(image.tag.clone())).map_err(|err| format!("{}", err))?;
             println!("Built image {} ({}) of size {:.2} in {:.2} seconds.", image.tag, image.hash, image_size, start_time.elapsed().as_secs_f64());
+        }
+        CommandLineInput::MergeImage { first, second, tag } => {
+            let _write_lock = create_write_lock(&file_config);
+            let mut image_manager = create_image_manager(&file_config, printer.clone());
+
+            let image = image_manager.merge_image(&first, &second, tag).map_err(|err| format!("{}", err))?.image;
+            println!("Merged {}, {} into {} ({}).", first, second, image.tag, image.hash);
         }
         CommandLineInput::RemoveImage { tags } => {
             let _write_lock = create_write_lock(&file_config);

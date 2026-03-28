@@ -22,6 +22,7 @@ pub enum ImageManagerError {
     ImageParser { error: ImageParseError },
     InvalidImageId { error: String },
     ReferenceNotFound { reference: Reference },
+    OnlyOneAliasAllowed,
     FileIOError { message: String },
     FileNotInBuildContext { path: String },
     UnpackingExist { path: String },
@@ -86,7 +87,10 @@ impl std::fmt::Display for ImageManagerError {
                 write!(f, "Invalid image id: {}", error)
             }
             ImageManagerError::ReferenceNotFound { reference } => {
-                write!(f, "Could not find the reference: {}.", reference)
+                write!(f, "Could not find the reference: {}", reference)
+            }
+            ImageManagerError::OnlyOneAliasAllowed => {
+                write!(f, "Only one alias is allowed per layer")
             }
             ImageManagerError::FileIOError { message } => {
                 write!(f, "{}", message)

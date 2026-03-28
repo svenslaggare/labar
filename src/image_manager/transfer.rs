@@ -42,7 +42,7 @@ impl TransferManager {
 
             for operation in &layer.operations {
                 match operation {
-                    LayerOperation::Image { hash } => {
+                    LayerOperation::Image { hash } | LayerOperation::ImageAlias { hash } => {
                         stack.push(hash.clone());
                     }
                     LayerOperation::Directory { .. } => {}
@@ -112,6 +112,7 @@ impl TransferManager {
                 for operation in &layer.operations {
                     match operation {
                         LayerOperation::Image { .. } => {}
+                        LayerOperation::ImageAlias { .. } => {}
                         LayerOperation::Directory { .. } => {}
                         LayerOperation::File { source_path, .. } => {
                             let mut archive_file = archive.by_name(&source_path)?;
