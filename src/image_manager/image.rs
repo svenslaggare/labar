@@ -438,6 +438,50 @@ impl ImageManager {
         Ok(files.into_iter().collect::<Vec<_>>())
     }
 
+    pub fn check(&self, reference: &Reference) -> ImageManagerResult<Option<String>> {
+        self.visit_operations(
+            reference,
+            |operation| {
+                match operation {
+                    LayerOperation::File { path, source_path, content_hash, .. } => {
+                        return match compute_content_hash(&self.config.base_folder().join(source_path)) {
+                            Ok(computed_content_hash) => {
+                                if &computed_content_hash != content_hash {
+                                    Some(path.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => {
+                                Some(path.clone())
+                            }
+                        }
+                    }
+                    LayerOperation::CompressedFile { path, source_path, compressed_content_hash, .. } => {
+                        return match compute_content_hash(&self.config.base_folder().join(source_path)) {
+                            Ok(computed_content_hash) => {
+                                if &computed_content_hash != compressed_content_hash {
+                                    Some(path.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => {
+                                Some(path.clone())
+                            }
+                        }
+                    }
+                    LayerOperation::Image { .. } => {}
+                    LayerOperation::ImageAlias { .. } => {}
+                    LayerOperation::Directory { .. } => {}
+                    LayerOperation::Label { .. } => {}
+                }
+
+                None
+            }
+        )
+    }
+
     pub fn get_file(&self, reference: &Reference, requested_path: &str) -> ImageManagerResult<Option<GetFile>> {
         self.visit_file_operations(
             reference,

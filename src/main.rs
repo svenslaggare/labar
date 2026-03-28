@@ -100,6 +100,11 @@ enum CommandLineInput {
         #[structopt(long, short, help="The maximum depth to show")]
         max_depth: Option<usize>
     },
+    #[structopt(about="Checks the integrity of an image")]
+    CheckImage {
+        #[structopt(name="reference", help="The reference to list for")]
+        reference: Reference
+    },
     #[structopt(about="Lists the content of a file in an image")]
     PrintContent {
         #[structopt(name="reference", help="The image to get")]
@@ -392,6 +397,13 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                         println!("{}", path);
                     }
                 }
+            }
+        }
+        CommandLineInput::CheckImage { reference } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+
+            if let Some(failed) = image_manager.check(&reference).map_err(|err| format!("{}", err))? {
+                return Err(format!("The file '{}' has invalid content on disk.", failed));
             }
         }
         CommandLineInput::PrintContent { reference, file } => {
