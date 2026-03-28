@@ -1,6 +1,8 @@
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use chrono::{DateTime, Local};
+use flate2::read::GzDecoder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use structopt::clap::Shell;
@@ -89,6 +91,22 @@ enum CommandLineInput {
         #[structopt(long, short, help="The maximum depth to show")]
         max_depth: Option<usize>
     },
+    #[structopt(about="Lists the content of a file in an image")]
+    PrintContent {
+        #[structopt(name="reference", help="The image to get")]
+        reference: Reference,
+        #[structopt(name="file", help="The file to get")]
+        file: String
+    },
+    #[structopt(about="Copies a file from an image to the filesystem")]
+    CopyFile {
+        #[structopt(name="reference", help="The image to get")]
+        reference: Reference,
+        #[structopt(name="file", help="The file to copy")]
+        file: String,
+        #[structopt(name="destination", help="The destination path on the filesystem")]
+        destination: PathBuf
+    },
     #[structopt(about="Inspects an image")]
     Inspect {
         #[structopt(name="tag", help="The image to inspect")]
@@ -96,7 +114,7 @@ enum CommandLineInput {
     },
     #[structopt(about="Gets the value of the given label in the given image")]
     GetLabel {
-        #[structopt(name="tag", help="The image to get for")]
+        #[structopt(name="tag", help="The image to get")]
         reference: Reference,
         #[structopt(name="key", help="The name of the label")]
         key: String
@@ -349,6 +367,41 @@ async fn main_run(file_config: FileConfig, command_line_input: CommandLineInput)
                     ListContentEntry::Directory { path } => {
                         println!("{}", path);
                     }
+                }
+            }
+        }
+        CommandLineInput::PrintContent { reference, file } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+
+            match image_manager.get_file(&reference, &file).map_err(|err| format!("{}", err))? {
+                Some(file_result) => {
+                    if !file_result.is_compressed {
+                        let content = tokio::fs::read_to_string(file_result.path).await.map_err(|err| format!("{}", err))?;
+                        println!("{}", content);
+                    } else {
+                        return Err(format!("Not possible to print compressed file '{}'.", file));
+                    }
+                }
+                None => {
+                    return Err(format!("File '{}' not found in image.", file));
+                }
+            }
+        }
+        CommandLineInput::CopyFile { reference, file, destination } => {
+            let image_manager = create_image_manager(&file_config, printer.clone());
+
+            match image_manager.get_file(&reference, &file).map_err(|err| format!("{}", err))? {
+                Some(file_result) => {
+                    if file_result.is_compressed {
+                        let mut reader = GzDecoder::new(File::open(file_result.path).map_err(|err| format!("{}", err))?);
+                        let mut writer = File::create(destination).map_err(|err| format!("{}", err))?;
+                        std::io::copy(&mut reader, &mut writer).map_err(|err| format!("{}", err))?;
+                    } else {
+                        tokio::fs::copy(file_result.path, destination).await.map_err(|err| format!("{}", err))?;
+                    }
+                }
+                None => {
+                    return Err(format!("File '{}' not found in image.", file));
                 }
             }
         }

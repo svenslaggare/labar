@@ -404,6 +404,52 @@ impl ImageManager {
         Ok(files.into_iter().collect::<Vec<_>>())
     }
 
+    pub fn get_file(&self, reference: &Reference, requested_path: &str) -> ImageManagerResult<Option<GetFile>> {
+        let session = self.state_manager.pooled_session()?;
+
+        let mut stack = Vec::new();
+        stack.push(reference.clone());
+
+        while let Some(current) = stack.pop() {
+            let layer = self.layer_manager.get_layer(&session, &current)?;
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.clone().to_ref());
+            }
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.clone().to_ref());
+                    }
+                    LayerOperation::File { path, source_path, ..  } => {
+                        if path == requested_path {
+                            return Ok(Some(
+                                GetFile {
+                                    path: self.config.base_folder().join(source_path),
+                                    is_compressed: false
+                                }
+                            ));
+                        }
+                    }
+                    LayerOperation::CompressedFile { path, source_path, ..  } => {
+                        if path == requested_path {
+                            return Ok(Some(
+                                GetFile {
+                                    path: self.config.base_folder().join(source_path),
+                                    is_compressed: true
+                                }
+                            ));
+                        }
+                    }
+                    LayerOperation::Directory { .. } => {}
+                    LayerOperation::Label { .. } => {}
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     pub fn list_unpackings(&self, filter: Option<&Regex>) -> ImageManagerResult<Vec<Unpacking>> {
         let session = self.state_manager.pooled_session()?;
         let mut unpackings = self.unpack_manager.unpackings(&session)?;
@@ -947,6 +993,11 @@ impl ListContentEntry {
             ListContentEntry::Directory { path, .. } => path
         }
     }
+}
+
+pub struct GetFile {
+    pub path: PathBuf,
+    pub is_compressed: bool
 }
 
 pub struct PullRequest<'a> {
