@@ -346,8 +346,6 @@ impl ImageManager {
     }
 
     pub fn list_content(&self, reference: &Reference, max_depth: Option<usize>) -> ImageManagerResult<Vec<ListContentEntry>> {
-        let session = self.state_manager.pooled_session()?;
-
         let mut files = BTreeSet::new();
 
         let mut add_file = |path: &str, source_path: &str, is_file: bool| {
@@ -376,110 +374,58 @@ impl ImageManager {
             }
         };
 
-        let mut stack = Vec::new();
-        stack.push(reference.clone());
-
-        while let Some(current) = stack.pop() {
-            let layer = self.layer_manager.get_layer(&session, &current)?;
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone().to_ref());
-            }
-
-            for operation in &layer.operations {
+        self.visit_operations(
+            reference,
+            |operation| {
                 match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone().to_ref());
-                    }
                     LayerOperation::Directory { path } => {
                         add_file(path, path, false);
                     }
                     LayerOperation::File { path, source_path, ..  } | LayerOperation::CompressedFile { path, source_path, ..  }  => {
                         add_file(path, source_path, true);
                     }
+                    LayerOperation::Image { .. } => {}
                     LayerOperation::Label { .. } => {}
                 }
+
+                Option::<()>::None
             }
-        }
+        )?;
 
         Ok(files.into_iter().collect::<Vec<_>>())
     }
 
     pub fn get_file(&self, reference: &Reference, requested_path: &str) -> ImageManagerResult<Option<GetFile>> {
-        let session = self.state_manager.pooled_session()?;
-
-        let mut stack = Vec::new();
-        stack.push(reference.clone());
-
-        while let Some(current) = stack.pop() {
-            let layer = self.layer_manager.get_layer(&session, &current)?;
-            if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                stack.push(parent_hash.clone().to_ref());
-            }
-
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { hash } => {
-                        stack.push(hash.clone().to_ref());
-                    }
-                    LayerOperation::File { path, source_path, ..  } => {
-                        if path == requested_path {
-                            return Ok(Some(
-                                GetFile {
-                                    path: self.config.base_folder().join(source_path),
-                                    is_compressed: false
-                                }
-                            ));
+        self.visit_file_operations(
+            reference,
+            |_| None,
+            |path, source_path, is_compressed, _| {
+                if path == requested_path {
+                    return Some(
+                        GetFile {
+                            path: self.config.base_folder().join(source_path),
+                            is_compressed
                         }
-                    }
-                    LayerOperation::CompressedFile { path, source_path, ..  } => {
-                        if path == requested_path {
-                            return Ok(Some(
-                                GetFile {
-                                    path: self.config.base_folder().join(source_path),
-                                    is_compressed: true
-                                }
-                            ));
-                        }
-                    }
-                    LayerOperation::Directory { .. } => {}
-                    LayerOperation::Label { .. } => {}
+                    );
                 }
-            }
-        }
 
-        Ok(None)
+                None
+            },
+        )
     }
 
     pub fn diff(&self, reference: &Reference, comparison: &Reference) -> ImageManagerResult<DiffResult> {
-        let session = self.state_manager.pooled_session()?;
-
         let get_files = |image_reference: &Reference| -> ImageManagerResult<BTreeMap<String, String>> {
             let mut files = BTreeMap::new();
 
-            let mut stack = Vec::new();
-            stack.push(image_reference.clone());
-
-            while let Some(current) = stack.pop() {
-                let layer = self.layer_manager.get_layer(&session, &current)?;
-                if let Some(parent_hash) = layer.parent_hash.as_ref() {
-                    stack.push(parent_hash.clone().to_ref());
+            self.visit_file_operations(
+                image_reference,
+                |_| Option::<()>::None,
+                |path, _, _, content_hash| {
+                    files.insert(path.to_owned(), content_hash.to_owned());
+                    Option::<()>::None
                 }
-
-                for operation in &layer.operations {
-                    match operation {
-                        LayerOperation::Image { hash } => {
-                            stack.push(hash.clone().to_ref());
-                        }
-                        LayerOperation::Directory { .. } => {
-
-                        }
-                        LayerOperation::File { path, content_hash, ..  } | LayerOperation::CompressedFile { path, content_hash, ..  }  => {
-                            files.insert(path.clone(), content_hash.clone());
-                        }
-                        LayerOperation::Label { .. } => {}
-                    }
-                }
-            }
+            )?;
 
             Ok(files)
         };
@@ -1019,6 +965,89 @@ impl ImageManager {
         let mut session = self.state_manager.pooled_session()?;
         self.layer_manager.insert_or_replace_image(&mut session, image)?;
         Ok(())
+    }
+
+    fn visit_file_operations<
+        T,
+        F1: FnMut(&str) -> Option<T>,
+        F2: FnMut(&str, &str, bool, &str) -> Option<T>
+    >
+    (
+        &self,
+        reference: &Reference,
+        mut on_directory: F1,
+        mut on_file: F2
+    ) -> ImageManagerResult<Option<T>> {
+        self.visit_operations(
+            reference,
+            |operation| {
+                match operation {
+                    LayerOperation::Directory { path, .. } => {
+                        if let Some(result) = on_directory(path) {
+                            return Some(result);
+                        }
+                    }
+                    LayerOperation::File { path, source_path, content_hash, ..  } => {
+                        if let Some(result) = on_file(path, source_path, false, content_hash) {
+                            return Some(result);
+                        }
+                    }
+                    LayerOperation::CompressedFile { path, source_path, content_hash, ..  } => {
+                        if let Some(result) = on_file(path, source_path, true, content_hash) {
+                            return Some(result);
+                        }
+                    }
+                    LayerOperation::Image { .. } => {}
+                    LayerOperation::Label { .. } => {}
+                }
+
+                None
+            }
+        )
+    }
+
+    fn visit_operations<T, F: FnMut(&LayerOperation) -> Option<T>>(
+        &self,
+        reference: &Reference,
+        mut on_operation: F,
+    ) -> ImageManagerResult<Option<T>> {
+        let session = self.state_manager.pooled_session()?;
+
+        let mut stack = Vec::new();
+        stack.push(reference.clone());
+
+        while let Some(current) = stack.pop() {
+            let layer = self.layer_manager.get_layer(&session, &current)?;
+            if let Some(parent_hash) = layer.parent_hash.as_ref() {
+                stack.push(parent_hash.clone().to_ref());
+            }
+
+            for operation in &layer.operations {
+                match operation {
+                    LayerOperation::Image { hash } => {
+                        stack.push(hash.clone().to_ref());
+                    }
+                    LayerOperation::Directory { .. } => {
+                        if let Some(result) = on_operation(operation) {
+                            return Ok(Some(result));
+                        }
+                    }
+                    LayerOperation::File { .. } => {
+                        if let Some(result) = on_operation(operation) {
+                            return Ok(Some(result));
+                        }
+                    }
+                    LayerOperation::CompressedFile { .. } => {
+                        if let Some(result) = on_operation(operation) {
+                            return Ok(Some(result));
+                        }
+                    }
+                    LayerOperation::Label { .. } => {}
+                }
+            }
+        }
+
+        Ok(None)
     }
 }
 
