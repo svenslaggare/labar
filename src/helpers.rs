@@ -1,8 +1,12 @@
 use std::fmt::{Display, Formatter};
+use std::fs::File;
+use std::io::{BufReader, BufWriter};
 use std::ops::{Add, AddAssign, Deref, DerefMut};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
 
 pub fn split_parts(line: &str) -> Vec<String> {
@@ -247,4 +251,18 @@ impl<T> DerefMut for PooledResource<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.resource.as_mut().unwrap()
     }
+}
+
+pub fn compress_file(input_file: &Path, output_file: &Path) -> std::io::Result<()> {
+    let mut reader = BufReader::new(File::open(input_file)?);
+    let mut writer = BufWriter::new(GzEncoder::new(File::create(output_file)?, Compression::default()));
+    std::io::copy(&mut reader, &mut writer)?;
+    Ok(())
+}
+
+pub fn decompress_file(input_file: &Path, output_file: &Path) -> std::io::Result<()> {
+    let mut reader = GzDecoder::new(BufReader::new(File::open(input_file)?));
+    let mut writer = BufWriter::new(File::create(output_file)?);
+    std::io::copy(&mut reader, &mut writer)?;
+    Ok(())
 }

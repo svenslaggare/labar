@@ -1,7 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -9,17 +7,13 @@ use std::time::{Duration, Instant};
 use chrono::Local;
 use regex::Regex;
 
-use flate2::Compression;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
-
-use crate::content::compute_content_hash;
+use crate::content::{compute_content_hash, compute_content_hash_async};
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
-use crate::helpers::DataSize;
+use crate::helpers::{compress_file, decompress_file, DataSize};
 use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
@@ -619,14 +613,55 @@ impl ImageManager {
 
                 let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
                 let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                {
-                    let mut reader = BufReader::new(File::open(&data_path)?);
-                    let mut writer = BufWriter::new(GzEncoder::new(File::create(&temp_source_path)?, Compression::default()));
-                    std::io::copy(&mut reader, &mut writer)?;
-                }
+                compress_file(&data_path, &temp_source_path)?;
 
                 let compressed_content_hash = compute_content_hash(&temp_source_path)?;
+                Ok(
+                    Some((
+                        temp_source_path,
+                        data_path,
+                        LayerOperation::CompressedFile {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable,
+                            compressed_content_hash
+                        }
+                    ))
+                )
+            }
+            LayerOperation::CompressedFile { .. } => Ok(None),
+            LayerOperation::Label { .. } => Ok(None)
+        }
+    }
+
+    pub async fn compress_operation_async(&self,
+                                          operation: &LayerOperation,
+                                          data_path: Option<PathBuf>,
+                                          always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+        match operation {
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
+            LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
+                let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
+
+                if !always {
+                    if DataSize::from_file(&data_path) < DataSize(1024) {
+                        return Ok(None);
+                    }
+                }
+
+                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
+                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                let data_path_clone = data_path.clone();
+                let temp_source_path_clone = temp_source_path.clone();
+                tokio::task::spawn_blocking(move || compress_file(&data_path_clone, &temp_source_path_clone)).await.unwrap()?;
+
+                let compressed_content_hash = compute_content_hash_async(&temp_source_path).await?;
                 Ok(
                     Some((
                         temp_source_path,
@@ -696,12 +731,44 @@ impl ImageManager {
 
                 let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
                 let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+                decompress_file(&data_path, &temp_source_path)?;
 
-                {
-                    let mut reader = GzDecoder::new(BufReader::new(File::open(&data_path)?));
-                    let mut writer = BufWriter::new(File::create(&temp_source_path)?);
-                    std::io::copy(&mut reader, &mut writer)?;
-                }
+                Ok(
+                    Some((
+                        temp_source_path,
+                        data_path,
+                        LayerOperation::File {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable
+                        }
+                    ))
+                )
+            }
+            LayerOperation::Label { .. } => Ok(None)
+        }
+    }
+
+    pub async fn decompress_operation_async(&self,
+                                            operation: &LayerOperation,
+                                            data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+        match operation {
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
+            LayerOperation::File { .. } => Ok(None),
+            LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
+                let data_path = data_path.unwrap_or_else(|| self.config.base_folder.join(&source_path));
+
+                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
+                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+
+                let data_path_clone = data_path.clone();
+                let temp_source_path_clone = temp_source_path.clone();
+                tokio::task::spawn_blocking(move || decompress_file(&data_path_clone, &temp_source_path_clone)).await.unwrap()?;
 
                 Ok(
                     Some((

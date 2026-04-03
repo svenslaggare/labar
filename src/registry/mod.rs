@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use futures::StreamExt;
 use tokio_util::io::ReaderStream;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncWriteExt};
 
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -528,17 +528,17 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
 
                 let compress_result = match state.config.storage_mode {
                     StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
-                        state.pooled_image_manager(&token).compress_operation(
+                        state.pooled_image_manager(&token).compress_operation_async(
                             operation,
                             Some(temp_file_path.clone()),
                             state.config.storage_mode == StorageMode::AlwaysCompressed,
-                        )?
+                        ).await?
                     }
                     StorageMode::AlwaysUncompressed => {
-                        state.pooled_image_manager(&token).decompress_operation(
+                        state.pooled_image_manager(&token).decompress_operation_async(
                             operation,
                             Some(temp_file_path.clone())
-                        )?
+                        ).await?
                     }
                     StorageMode::PreferUncompressed => None
                 };
