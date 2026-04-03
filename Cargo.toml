@@ -53,6 +53,7 @@ uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", features = ["stream"] }
 
 structopt = "0.3"
+crossterm = "0.29"
 
 sysinfo = "0.38"
 tempfile = "3"

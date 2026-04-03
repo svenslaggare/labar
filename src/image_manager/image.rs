@@ -792,14 +792,14 @@ impl ImageManager {
     fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         match self.config.storage_mode {
             StorageMode::AlwaysUncompressed => {
-                self.printer.println("\t\t* Decompressing...");
+                self.printer.refresh_latest_line("\t\t* Decompressing...");
                 self.decompress_layer(layer)?;
-                self.printer.println("\t\t* Decompressed.");
+                self.printer.refresh_latest_line("\t\t* Decompressed.");
             }
             StorageMode::AlwaysCompressed => {
-                self.printer.println("\t\t* Compressing...");
+                self.printer.refresh_latest_line("\t\t* Compressing...");
                 self.compress_layer(layer, true)?;
-                self.printer.println("\t\t* Compressed.");
+                self.printer.refresh_latest_line("\t\t* Compressed.");
             }
             StorageMode::PreferCompressed => {}
             StorageMode::PreferUncompressed => {}
@@ -890,11 +890,12 @@ impl ImageManager {
                         .await
                         .map_err(|error| ImageManagerError::PullFailed { error });
 
-                    self.printer.println("\t\t* Downloaded.");
+                    self.printer.refresh_latest_line("\t\t* Downloaded.");
 
                     match layer {
                         Ok(mut layer) => {
                             self.handle_compression(&mut layer)?;
+                            self.printer.refresh_latest_line("\t\t* Layer pulled.");
                             break layer;
                         },
                         Err(err) => {
@@ -905,7 +906,7 @@ impl ImageManager {
 
                                 let retry_time = 2.0;
                                 tokio::time::sleep(Duration::from_secs_f64(retry_time)).await;
-                                self.printer.println(&format!(
+                                self.printer.refresh_latest_line(&format!(
                                     "{} - will retry in {} seconds...",
                                     err.to_string(),
                                     retry_time
