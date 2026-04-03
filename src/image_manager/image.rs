@@ -576,13 +576,41 @@ impl ImageManager {
     pub fn compress_layer(&self, layer: &mut Layer, always: bool) -> ImageManagerResult<()> {
         let mut compressed_operations = Vec::new();
         for (operation_index, operation) in layer.operations.iter().enumerate() {
-            if let Some((temp_source_path, abs_source_path, new_operation)) = self.compress_operation(operation, None, always)? {
-                compressed_operations.push((
-                    operation_index,
-                    temp_source_path,
-                    abs_source_path,
-                    new_operation
-                ));
+            match operation {
+                LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
+                    let abs_source_path = self.config.base_folder().join(source_path);
+
+                    if !always {
+                        if DataSize::from_file(&abs_source_path) < DataSize(1024) {
+                            return Ok(());
+                        }
+                    }
+
+                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
+                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+                    compress_file(&abs_source_path, &temp_source_path)?;
+
+                    let compressed_content_hash = compute_content_hash(&temp_source_path)?;
+                    compressed_operations.push((
+                        operation_index,
+                        temp_source_path,
+                        abs_source_path,
+                        LayerOperation::CompressedFile {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable,
+                            compressed_content_hash
+                        }
+                    ));
+                }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::CompressedFile { .. } => {}
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -594,57 +622,11 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn compress_operation(&self,
-                              operation: &LayerOperation,
-                              data_path: Option<PathBuf>,
-                              always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+    pub async fn compress_operation(&self,
+                                    operation: &LayerOperation,
+                                    data_path: Option<PathBuf>,
+                                    always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
         match operation {
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
-            LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
-                let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
-
-                if !always {
-                    if DataSize::from_file(&data_path) < DataSize(1024) {
-                        return Ok(None);
-                    }
-                }
-
-                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
-                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-                compress_file(&data_path, &temp_source_path)?;
-
-                let compressed_content_hash = compute_content_hash(&temp_source_path)?;
-                Ok(
-                    Some((
-                        temp_source_path,
-                        data_path,
-                        LayerOperation::CompressedFile {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable,
-                            compressed_content_hash
-                        }
-                    ))
-                )
-            }
-            LayerOperation::CompressedFile { .. } => Ok(None),
-            LayerOperation::Label { .. } => Ok(None)
-        }
-    }
-
-    pub async fn compress_operation_async(&self,
-                                          operation: &LayerOperation,
-                                          data_path: Option<PathBuf>,
-                                          always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
-        match operation {
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
             LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
                 let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
 
@@ -678,6 +660,9 @@ impl ImageManager {
                     ))
                 )
             }
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
             LayerOperation::CompressedFile { .. } => Ok(None),
             LayerOperation::Label { .. } => Ok(None)
         }
@@ -700,13 +685,33 @@ impl ImageManager {
     pub fn decompress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         let mut decompressed_operations = Vec::new();
         for (operation_index, operation) in layer.operations.iter().enumerate() {
-            if let Some((temp_source_path, abs_source_path, new_operation)) = self.decompress_operation(operation, None)? {
-                decompressed_operations.push((
-                    operation_index,
-                    temp_source_path,
-                    abs_source_path,
-                    new_operation
-                ));
+            match operation {
+                LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
+                    let abs_source_path = self.config.base_folder.join(&source_path);
+
+                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
+                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
+                    decompress_file(&abs_source_path, &temp_source_path)?;
+
+                    decompressed_operations.push((
+                        operation_index,
+                        temp_source_path,
+                        abs_source_path,
+                        LayerOperation::File {
+                            path: path.to_owned(),
+                            source_path: source_path.to_owned(),
+                            original_source_path: original_source_path.to_owned(),
+                            content_hash: content_hash.to_owned(),
+                            link_type: *link_type,
+                            writable: *writable
+                        }
+                    ));
+                }
+                LayerOperation::Image { .. } => {},
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {},
+                LayerOperation::File { .. } => {},
+                LayerOperation::Label { .. } => {}
             }
         }
 
@@ -718,48 +723,10 @@ impl ImageManager {
         Ok(())
     }
 
-    pub fn decompress_operation(&self,
-                                operation: &LayerOperation,
-                                data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+    pub async fn decompress_operation(&self,
+                                      operation: &LayerOperation,
+                                      data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
         match operation {
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
-            LayerOperation::File { .. } => Ok(None),
-            LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
-                let data_path = data_path.unwrap_or_else(|| self.config.base_folder.join(&source_path));
-
-                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
-                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-                decompress_file(&data_path, &temp_source_path)?;
-
-                Ok(
-                    Some((
-                        temp_source_path,
-                        data_path,
-                        LayerOperation::File {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable
-                        }
-                    ))
-                )
-            }
-            LayerOperation::Label { .. } => Ok(None)
-        }
-    }
-
-    pub async fn decompress_operation_async(&self,
-                                            operation: &LayerOperation,
-                                            data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
-        match operation {
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
-            LayerOperation::File { .. } => Ok(None),
             LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
                 let data_path = data_path.unwrap_or_else(|| self.config.base_folder.join(&source_path));
 
@@ -785,6 +752,10 @@ impl ImageManager {
                     ))
                 )
             }
+            LayerOperation::Image { .. } => Ok(None),
+            LayerOperation::ImageAlias { .. } => Ok(None),
+            LayerOperation::Directory { .. } => Ok(None),
+            LayerOperation::File { .. } => Ok(None),
             LayerOperation::Label { .. } => Ok(None)
         }
     }
