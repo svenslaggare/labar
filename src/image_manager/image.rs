@@ -7,14 +7,15 @@ use std::time::{Duration, Instant};
 use chrono::Local;
 use regex::Regex;
 
-use crate::content::{compute_content_hash, compute_content_hash_async};
+use crate::content::{compute_content_hash};
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
-use crate::helpers::{compress_file, decompress_file, DataSize};
+use crate::helpers::{DataSize};
 use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
+use crate::image_manager::compression::CompressionManager;
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
@@ -30,6 +31,7 @@ pub struct ImageManager {
     build_manager: BuildManager,
     unpack_manager: UnpackManager,
     transfer_manager: TransferManager,
+    compression_manager: CompressionManager,
     registry_manager: RegistryManager
 }
 
@@ -47,6 +49,7 @@ impl ImageManager {
                 build_manager: BuildManager::new(config.clone(), printer.clone()),
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
                 transfer_manager: TransferManager::new(config.clone(), printer.clone()),
+                compression_manager: CompressionManager::new(config.clone(), printer.clone()),
                 registry_manager: RegistryManager::new(config.clone(), printer.clone()),
             }
         )
@@ -561,215 +564,31 @@ impl ImageManager {
 
     pub fn compress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
         let mut session = self.state_manager.pooled_session()?;
-
-        let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
-        while let Some(layer_id) = stack.pop() {
-            let mut layer = self.get_layer(&layer_id.to_ref())?;
-            self.compress_layer(&mut layer, true)?;
-            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
-            layer.visit_image_ids(|id| stack.push(id.clone()));
-        }
-
-        Ok(())
-    }
-
-    pub fn compress_layer(&self, layer: &mut Layer, always: bool) -> ImageManagerResult<()> {
-        let mut compressed_operations = Vec::new();
-        for (operation_index, operation) in layer.operations.iter().enumerate() {
-            match operation {
-                LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
-                    let abs_source_path = self.config.base_folder().join(source_path);
-
-                    if !always {
-                        if DataSize::from_file(&abs_source_path) < DataSize(1024) {
-                            return Ok(());
-                        }
-                    }
-
-                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-                    compress_file(&abs_source_path, &temp_source_path)?;
-
-                    let compressed_content_hash = compute_content_hash(&temp_source_path)?;
-                    compressed_operations.push((
-                        operation_index,
-                        temp_source_path,
-                        abs_source_path,
-                        LayerOperation::CompressedFile {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable,
-                            compressed_content_hash
-                        }
-                    ));
-                }
-                LayerOperation::Image { .. } => {}
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {}
-                LayerOperation::CompressedFile { .. } => {}
-                LayerOperation::Label { .. } => {}
-            }
-        }
-
-        for (operation_index, temp_source_path, abs_source_path, new_operation) in compressed_operations {
-            std::fs::rename(temp_source_path, abs_source_path)?;
-            layer.operations[operation_index] = new_operation;
-        }
-
-        Ok(())
-    }
-
-    pub async fn compress_operation(&self,
-                                    operation: &LayerOperation,
-                                    data_path: Option<PathBuf>,
-                                    always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
-        match operation {
-            LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
-                let data_path = data_path.unwrap_or_else(|| self.config.base_folder().join(source_path));
-
-                if !always {
-                    if DataSize::from_file(&data_path) < DataSize(1024) {
-                        return Ok(None);
-                    }
-                }
-
-                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
-                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                let data_path_clone = data_path.clone();
-                let temp_source_path_clone = temp_source_path.clone();
-                tokio::task::spawn_blocking(move || compress_file(&data_path_clone, &temp_source_path_clone)).await.unwrap()?;
-
-                let compressed_content_hash = compute_content_hash_async(&temp_source_path).await?;
-                Ok(
-                    Some((
-                        temp_source_path,
-                        data_path,
-                        LayerOperation::CompressedFile {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable,
-                            compressed_content_hash
-                        }
-                    ))
-                )
-            }
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
-            LayerOperation::CompressedFile { .. } => Ok(None),
-            LayerOperation::Label { .. } => Ok(None)
-        }
+        self.compression_manager.compress(&mut session, &self.layer_manager, tag)
     }
 
     pub fn decompress(&mut self, tag: &ImageTag) -> ImageManagerResult<()> {
         let mut session = self.state_manager.pooled_session()?;
-
-        let mut stack = vec![self.layer_manager.fully_qualify_reference(&session, &tag.clone().to_ref())?];
-        while let Some(layer_id) = stack.pop() {
-            let mut layer = self.get_layer(&layer_id.clone().to_ref())?;
-            self.decompress_layer(&mut layer)?;
-            self.layer_manager.insert_or_replace_layer(&mut session, &layer)?;
-            layer.visit_image_ids(|id| stack.push(id.clone()));
-        }
-
-        Ok(())
+        self.compression_manager.decompress(&mut session, &self.layer_manager, tag)
     }
 
-    pub fn decompress_layer(&self, layer: &mut Layer) -> ImageManagerResult<()> {
-        let mut decompressed_operations = Vec::new();
-        for (operation_index, operation) in layer.operations.iter().enumerate() {
-            match operation {
-                LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
-                    let abs_source_path = self.config.base_folder.join(&source_path);
-
-                    let temp_source_path = abs_source_path.to_str().unwrap().to_owned() + ".tmp";
-                    let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-                    decompress_file(&abs_source_path, &temp_source_path)?;
-
-                    decompressed_operations.push((
-                        operation_index,
-                        temp_source_path,
-                        abs_source_path,
-                        LayerOperation::File {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable
-                        }
-                    ));
-                }
-                LayerOperation::Image { .. } => {},
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {},
-                LayerOperation::File { .. } => {},
-                LayerOperation::Label { .. } => {}
-            }
-        }
-
-        for (operation_index, temp_source_path, abs_source_path, new_operation) in decompressed_operations {
-            std::fs::rename(temp_source_path, abs_source_path)?;
-            layer.operations[operation_index] = new_operation;
-        }
-
-        Ok(())
-    }
-
-    pub async fn decompress_operation(&self,
-                                      operation: &LayerOperation,
-                                      data_path: Option<PathBuf>) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
-        match operation {
-            LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
-                let data_path = data_path.unwrap_or_else(|| self.config.base_folder.join(&source_path));
-
-                let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
-                let temp_source_path = Path::new(&temp_source_path).to_path_buf();
-
-                let data_path_clone = data_path.clone();
-                let temp_source_path_clone = temp_source_path.clone();
-                tokio::task::spawn_blocking(move || decompress_file(&data_path_clone, &temp_source_path_clone)).await.unwrap()?;
-
-                Ok(
-                    Some((
-                        temp_source_path,
-                        data_path,
-                        LayerOperation::File {
-                            path: path.to_owned(),
-                            source_path: source_path.to_owned(),
-                            original_source_path: original_source_path.to_owned(),
-                            content_hash: content_hash.to_owned(),
-                            link_type: *link_type,
-                            writable: *writable
-                        }
-                    ))
-                )
-            }
-            LayerOperation::Image { .. } => Ok(None),
-            LayerOperation::ImageAlias { .. } => Ok(None),
-            LayerOperation::Directory { .. } => Ok(None),
-            LayerOperation::File { .. } => Ok(None),
-            LayerOperation::Label { .. } => Ok(None)
-        }
+    pub async fn handle_registry_compression(&self,
+                                             storage_mode: &StorageMode,
+                                             operation: &LayerOperation,
+                                             data_path: &Path) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+        self.compression_manager.handle_registry_compression(storage_mode, operation, data_path).await
     }
 
     fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {
         match self.config.storage_mode {
             StorageMode::AlwaysUncompressed => {
                 self.printer.refresh_latest_line("\t\t* Decompressing...");
-                self.decompress_layer(layer)?;
+                self.compression_manager.decompress_layer(layer)?;
                 self.printer.refresh_latest_line("\t\t* Decompressed.");
             }
             StorageMode::AlwaysCompressed => {
                 self.printer.refresh_latest_line("\t\t* Compressing...");
-                self.compress_layer(layer, true)?;
+                self.compression_manager.compress_layer(layer, true)?;
                 self.printer.refresh_latest_line("\t\t* Compressed.");
             }
             StorageMode::PreferCompressed => {}

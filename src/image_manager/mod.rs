@@ -10,6 +10,7 @@ mod registry;
 mod state;
 mod image;
 mod transfer;
+mod compression;
 
 #[cfg(test)]
 mod test_helpers;

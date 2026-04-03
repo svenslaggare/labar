@@ -33,7 +33,7 @@ mod state;
 use crate::content::ContentHash;
 use crate::helpers::{DeferredFileDelete};
 use crate::image::{Layer, LayerOperation};
-use crate::image_manager::{ImageManagerError, StorageMode};
+use crate::image_manager::{ImageManagerError,};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 use crate::registry::state::AppState;
@@ -526,22 +526,11 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     return Err(AppError::FailedToUploadLayerFile("Invalid content hash".to_string()));
                 }
 
-                let compress_result = match state.config.storage_mode {
-                    StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
-                        state.pooled_image_manager(&token).compress_operation(
-                            operation,
-                            Some(temp_file_path.clone()),
-                            state.config.storage_mode == StorageMode::AlwaysCompressed,
-                        ).await?
-                    }
-                    StorageMode::AlwaysUncompressed => {
-                        state.pooled_image_manager(&token).decompress_operation(
-                            operation,
-                            Some(temp_file_path.clone())
-                        ).await?
-                    }
-                    StorageMode::PreferUncompressed => None
-                };
+                let compress_result = state.pooled_image_manager(&token).handle_registry_compression(
+                    &state.config.storage_mode,
+                    operation,
+                    &temp_file_path
+                ).await?;
 
                 if let Some((temp_compress_path, _, new_operation)) = compress_result {
                     tokio::fs::rename(&temp_compress_path, &temp_file_path).await?;
