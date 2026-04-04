@@ -33,7 +33,7 @@ mod state;
 use crate::content::ContentHash;
 use crate::helpers::{DeferredFileDelete};
 use crate::image::{Image, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerError,};
+use crate::image_manager::{ImageManager, ImageManagerError};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 use crate::registry::state::AppState;
@@ -581,28 +581,27 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         'next_image:
         for image in images {
             for layer_to_download in image_manager.get_layers_to_download(&remote_registry, &image.image.hash).await? {
-                let started = image_manager.pooled_state_session()?.registry_try_start_layer_upload(
-                    Local::now(),
-                    &layer_to_download,
-                    &uuid::Uuid::new_v4().to_string(),
-                    state.config.pending_upload_expiration
-                ).unwrap_or(false);
+                let result = pull_layer_from_registry(
+                    &state.config,
+                    upstream_config,
+                    &mut image_manager,
+                    &layer_to_download
+                ).await;
 
-                if !started {
-                    // Somebody else is pulling this layer
-                    continue;
-                }
-
-                let layer = image_manager.pull_layer(&remote_registry, &layer_to_download.hash).await?;
-                let layer_hash = layer.hash.clone();
-                if !image_manager.pooled_state_session()?.registry_end_layer_upload(layer).unwrap_or(false) {
-                    // We failed to commit, skip this image
-                    continue 'next_image;
-                }
-
-                downloaded_layers += 1;
-                if &layer_hash == &image.image.hash {
-                    downloaded_images += 1;
+                match result {
+                    Ok(pulled) => {
+                        if pulled {
+                            downloaded_layers += 1;
+                            if &layer_to_download.hash == &image.image.hash {
+                                downloaded_images += 1;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        // We failed to download a layer, skip this image
+                        error!("Failed to sync '{}' with upstream due to: {:?}", image.image.tag, err);
+                        continue 'next_image;
+                    }
                 }
             }
 
@@ -633,23 +632,18 @@ async fn pull_from_upstream(state: Arc<AppState>, layer: Layer) {
                       layer: Layer) -> Result<(), AppError> {
         let mut image_manager = helpers::create_image_manager(&state, &AuthToken);
 
-        let mut state_session = image_manager.pooled_state_session()?;
-        let started = state_session.registry_try_start_layer_upload(
-            Local::now(),
-            &layer,
-            &uuid::Uuid::new_v4().to_string(),
-            state.config.pending_upload_expiration
-        ).map_err(|err| ImageManagerError::Sql(err))?;
+        let pulled = pull_layer_from_registry(
+            &state.config,
+            upstream_config,
+            &mut image_manager,
+            &layer
+        ).await?;
 
-        if !started {
+        if !pulled {
             info!("Layer {} already being pulled from upstream.", &layer.hash);
         }
 
-        let layer = image_manager.pull_layer(&upstream_config.hostname, &layer.hash).await?;
-        let layer_hash = layer.hash.clone();
-        state_session.registry_end_layer_upload(layer).map_err(|err| ImageManagerError::Sql(err))?;
-
-        if let Some(images) = state.empty_delayed_image_inserts(&layer_hash).await? {
+        if let Some(images) = state.empty_delayed_image_inserts(&layer.hash).await? {
             for image in images {
                 if let Err(err) = image_manager.insert_or_replace_image(image) {
                     error!("Failed to insert image after pulling from upstream due to: {}.", err);
@@ -667,6 +661,27 @@ async fn pull_from_upstream(state: Arc<AppState>, layer: Layer) {
             error!("Pulling from upstream failed due to: {:?}.", err);
         }
     }
+}
+
+async fn pull_layer_from_registry(registry_config: &RegistryConfig,
+                                  upstream_config: &RegistryUpstreamConfig,
+                                  image_manager: &mut ImageManager,
+                                  layer: &Layer) -> AppResult<bool> {
+    let mut state_session = image_manager.pooled_state_session()?;
+    let started = state_session.registry_try_start_layer_upload(
+        Local::now(),
+        layer,
+        &uuid::Uuid::new_v4().to_string(),
+        registry_config.pending_upload_expiration
+    ).map_err(|err| ImageManagerError::Sql(err))?;
+
+    if !started {
+        return Ok(false);
+    }
+
+    let layer = image_manager.pull_layer(&upstream_config.hostname, &layer.hash).await?;
+    state_session.registry_end_layer_upload(layer).map_err(|err| ImageManagerError::Sql(err))?;
+    Ok(true)
 }
 
 fn setup_logging() -> Result<(), fern::InitError> {
