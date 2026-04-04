@@ -145,9 +145,6 @@ impl RegistryManager {
         let mut file_operations = Vec::new();
         for operation in &layer.operations {
             match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, content_hash, .. } => {
                     file_operations.push((source_path.clone(), content_hash.clone(), file_index));
                     file_index += 1;
@@ -156,6 +153,9 @@ impl RegistryManager {
                     file_operations.push((source_path.clone(), compressed_content_hash.clone(), file_index));
                     file_index += 1;
                 }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
                 LayerOperation::Label { .. } => {}
             }
         }
@@ -288,9 +288,6 @@ impl RegistryManager {
         let mut file_index = 0;
         for operation in &layer.operations {
             match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                     let mut request = client.build_post_request(
                         &format!("layers/{}/upload/{}", layer.hash, file_index)
@@ -307,6 +304,9 @@ impl RegistryManager {
 
                     file_index += 1;
                 }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
                 LayerOperation::Label { .. } => {}
             }
         }
