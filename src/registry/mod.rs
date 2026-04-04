@@ -32,7 +32,7 @@ mod state;
 
 use crate::content::ContentHash;
 use crate::helpers::{DeferredFileDelete};
-use crate::image::{Layer, LayerOperation};
+use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerError,};
 use crate::reference::{ImageId, ImageTag, Reference};
 
@@ -570,26 +570,50 @@ async fn sync_with_upstream(state: Arc<AppState>, upstream_config: &RegistryUpst
         let t0 = Instant::now();
         let mut image_manager = helpers::create_image_manager(&state, &AuthToken);
 
-        let result = image_manager.sync(
-            &upstream_config.hostname,
-            Some(&state.config.address.to_string()),
-            |state_session, layer| {
-                state_session.registry_try_start_layer_upload(
+        let mut downloaded_images = 0;
+        let mut downloaded_layers = 0;
+
+        let local_registry = state.config.address.to_string();
+        let remote_registry = upstream_config.hostname.clone();
+
+        let images = image_manager.list_images_in_registry(&remote_registry).await?;
+
+        'next_image:
+        for image in images {
+            for layer_to_download in image_manager.get_layers_to_download(&remote_registry, &image.image.hash).await? {
+                let started = image_manager.pooled_state_session()?.registry_try_start_layer_upload(
                     Local::now(),
-                    layer,
+                    &layer_to_download,
                     &uuid::Uuid::new_v4().to_string(),
                     state.config.pending_upload_expiration
-                ).unwrap_or(false)
-            },
-            |state_session, layer| {
-                state_session.registry_end_layer_upload(layer).unwrap_or(false)
+                ).unwrap_or(false);
+
+                if !started {
+                    // Somebody else is pulling this layer
+                    continue;
+                }
+
+                let layer = image_manager.pull_layer(&remote_registry, &layer_to_download.hash).await?;
+                let layer_hash = layer.hash.clone();
+                if !image_manager.pooled_state_session()?.registry_end_layer_upload(layer).unwrap_or(false) {
+                    // We failed to commit, skip this image
+                    continue 'next_image;
+                }
+
+                downloaded_layers += 1;
+                if &layer_hash == &image.image.hash {
+                    downloaded_images += 1;
+                }
             }
-        ).await?;
+
+            let new_tag = image.image.tag.clone().set_registry(&local_registry);
+            image_manager.insert_or_replace_image(Image::new(image.image.hash, new_tag))?;
+        }
 
         info!(
             "Downloaded {} images, {} layers from upstream in {:.1} seconds.",
-            result.downloaded_images,
-            result.downloaded_layers,
+            downloaded_images,
+            downloaded_layers,
             t0.elapsed().as_secs_f64()
         );
 

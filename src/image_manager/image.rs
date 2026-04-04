@@ -766,57 +766,6 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        let layer = self.download_layer(&registry_session, hash).await?;
-        Ok(layer)
-    }
-
-    pub async fn sync<
-        BeforeLayerPull: Fn(&mut StateSession, &Layer) -> bool,
-        CommitLayer: Fn(&mut StateSession, Layer) -> bool
-    >(
-        &mut self,
-        registry: &str,
-        local_registry: Option<&str>,
-        before_layer_pull: BeforeLayerPull,
-        commit_layer: CommitLayer
-    ) -> ImageManagerResult<DownloadResult> {
-        let mut session = self.state_manager.pooled_session()?;
-        let registry_session = RegistrySession::new(&session, registry)?;
-
-        let mut download_result = DownloadResult::new();
-
-        let images = self.registry_manager.list_images(&registry_session).await?;
-        'next_image:
-        for image in images {
-            for layer_to_download in self.get_non_downloaded_layers(&registry_session, &image.image.hash).await? {
-                if !before_layer_pull(&mut session, &layer_to_download) {
-                    // Somebody else is pulling this layer
-                    continue;
-                }
-
-                let layer = self.download_layer(&registry_session, &layer_to_download.hash).await?;
-                let layer_hash = layer.hash.clone();
-                if !commit_layer(&mut session, layer) {
-                    // We failed to commit, skip this image
-                    continue 'next_image;
-                }
-
-                download_result.downloaded_layers += 1;
-                if &layer_hash == &image.image.hash {
-                    download_result.downloaded_images += 1;
-                }
-            }
-
-            if self.layer_manager.layer_exist(&session, &image.image.hash)? {
-                let new_tag = image.image.tag.clone().set_registry_opt(local_registry);
-                self.insert_or_replace_image(Image::new(image.image.hash, new_tag))?;
-            }
-        }
-
-        Ok(download_result)
-    }
-
-    async fn download_layer(&self, registry_session: &RegistrySession, hash: &ImageId) -> ImageManagerResult<Layer> {
         let mut layer = self.registry_manager.download_layer(&registry_session, &hash, false).await?;
         self.handle_compression(&mut layer)?;
         Ok(layer)
@@ -835,9 +784,10 @@ impl ImageManager {
         }
     }
 
-    async fn get_non_downloaded_layers(&mut self,
-                                       registry: &RegistrySession,
-                                       hash: &ImageId) -> ImageManagerResult<Vec<Layer>> {
+    pub async fn get_layers_to_download(&mut self, registry: &str, hash: &ImageId) -> ImageManagerResult<Vec<Layer>> {
+        let session = self.state_manager.pooled_session()?;
+        let registry_session = RegistrySession::new(&session, registry)?;
+
         let mut stack = Vec::new();
         stack.push(hash.clone());
 
@@ -850,7 +800,7 @@ impl ImageManager {
             if let Ok(layer) = self.get_layer(&current.clone().to_ref()) {
                 visit_layer(&mut stack, &layer);
             } else {
-                let layer = self.registry_manager.get_layer_definition(&registry, &current).await?;
+                let layer = self.registry_manager.get_layer_definition(&registry_session, &current).await?;
                 layers.push(layer.clone());
                 visit_layer(&mut stack, &layer);
             }
@@ -1067,20 +1017,6 @@ impl<'a> PullRequest<'a> {
             new_tag: None,
             retry: None,
             verbose_output: false,
-        }
-    }
-}
-
-pub struct DownloadResult {
-    pub downloaded_images: usize,
-    pub downloaded_layers: usize
-}
-
-impl DownloadResult {
-    pub fn new() -> DownloadResult {
-        DownloadResult {
-            downloaded_images: 0,
-            downloaded_layers: 0,
         }
     }
 }
