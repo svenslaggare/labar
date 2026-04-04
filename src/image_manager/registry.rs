@@ -12,8 +12,9 @@ use tokio::io::AsyncWriteExt;
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{PrinterRef, ImageManagerConfig};
+use crate::image_manager::{PrinterRef, ImageManagerConfig, StorageMode};
 use crate::image_manager::build::LayerHash;
+use crate::image_manager::compression::CompressionManager;
 use crate::image_manager::state::{StateSession};
 use crate::reference::{ImageId, ImageTag};
 use crate::registry::model;
@@ -88,6 +89,7 @@ impl RegistryManager {
     }
 
     pub async fn download_layer(&self,
+                                compression_manager: &CompressionManager,
                                 registry: &RegistrySession,
                                 hash: &ImageId,
                                 verbose_output: bool) -> RegistryResult<Layer> {
@@ -107,11 +109,14 @@ impl RegistryManager {
 
         tokio::fs::create_dir_all(&layer_folder).await?;
 
-        async fn download_file(client: &RegistryClient<'_>,
+        async fn download_file(storage_mode: &StorageMode,
+                               compression_manager: &CompressionManager,
+                               client: &RegistryClient<'_>,
                                hash: &ImageId,
+                               operation: &LayerOperation,
                                local_source_path: PathBuf,
                                file_index: usize,
-                               content_hash: &str) -> RegistryResult<()> {
+                               content_hash: &str) -> RegistryResult<Option<(usize, LayerOperation)>> {
             let tmp_local_source_path = Path::new(&(local_source_path.to_str().unwrap().to_owned() + ".tmp")).to_owned();
 
             let mut deferred_delete = DeferredFileDelete::new(tmp_local_source_path.clone());
@@ -135,10 +140,20 @@ impl RegistryManager {
                 return Err(RegistryError::InvalidContentHash);
             }
 
-            tokio::fs::rename(&tmp_local_source_path, &local_source_path).await?;
-            deferred_delete.skip();
+            let result = compression_manager.handle_compression(
+                storage_mode,
+                operation,
+                &tmp_local_source_path
+            ).await.map_err(|_| RegistryError::FailedToUnpack)?;
 
-            Ok(())
+            if let Some((compressed_tmp_local_source_path, _)) = result.as_ref() {
+                tokio::fs::rename(&compressed_tmp_local_source_path, &local_source_path).await?;
+            } else {
+                tokio::fs::rename(&tmp_local_source_path, &local_source_path).await?;
+                deferred_delete.skip();
+            }
+
+            Ok(result.map(|(_, operation)| (file_index, operation)))
         }
 
         let mut file_index = 0;
@@ -146,11 +161,11 @@ impl RegistryManager {
         for operation in &layer.operations {
             match operation {
                 LayerOperation::File { source_path, content_hash, .. } => {
-                    file_operations.push((source_path.clone(), content_hash.clone(), file_index));
+                    file_operations.push((operation, source_path.clone(), content_hash.clone(), file_index));
                     file_index += 1;
                 }
                 LayerOperation::CompressedFile { source_path, compressed_content_hash, .. } => {
-                    file_operations.push((source_path.clone(), compressed_content_hash.clone(), file_index));
+                    file_operations.push((operation, source_path.clone(), compressed_content_hash.clone(), file_index));
                     file_index += 1;
                 }
                 LayerOperation::Image { .. } => {}
@@ -170,9 +185,10 @@ impl RegistryManager {
             }
         };
 
+        let mut done_operations = Vec::new();
         for chunk in file_operations.chunks(num_parallel) {
             let mut download_operations = Vec::new();
-            for (source_path, content_hash, file_index) in chunk {
+            for (operation, source_path, content_hash, file_index) in chunk {
                 let local_source_path = self.config.base_folder.canonicalize()?.join(Path::new(source_path));
                 if local_source_path != clean_path(&local_source_path) {
                     return Err(RegistryError::InvalidLayer);
@@ -184,8 +200,11 @@ impl RegistryManager {
                     }
 
                     download_operations.push(download_file(
+                        &self.config.storage_mode,
+                        compression_manager,
                         &client,
                         hash,
+                        operation,
                         local_source_path,
                         *file_index,
                         content_hash
@@ -198,7 +217,16 @@ impl RegistryManager {
             }
 
             for result in future::join_all(download_operations).await {
-                result?;
+                done_operations.push(result?);
+            }
+        }
+
+        let mut layer = layer;
+        for result in done_operations {
+            if let Some((file_index, new_operation)) = result {
+                if let Some(operation) = layer.get_file_operation_mut(file_index) {
+                    *operation = new_operation;
+                }
             }
         }
 
@@ -451,6 +479,7 @@ pub enum RegistryError {
     FailedToUpload { layer: ImageId, reason: UploadStatus },
     InvalidLayer,
     InvalidContentHash,
+    FailedToUnpack,
     IncorrectLayer { expected: ImageId, actual: ImageId },
     FailToPullThrough,
     TooLargePayload,
@@ -503,6 +532,7 @@ impl Display for RegistryError {
             RegistryError::FailedToUpload { layer, reason } => write!(f, "Failed to upload layer {} due to: {}", layer, reason),
             RegistryError::InvalidLayer => write!(f, "Invalid layer"),
             RegistryError::InvalidContentHash => write!(f, "Incorrect downloaded content"),
+            RegistryError::FailedToUnpack => write!(f, "Failed to unpack downloaded content"),
             RegistryError::IncorrectLayer { expected, actual } => write!(f, "Expected layer {} but got layer {}", expected, actual),
             RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in enough time"),
             RegistryError::TooLargePayload => write!(f, "The payload is too large to be uploaded"),

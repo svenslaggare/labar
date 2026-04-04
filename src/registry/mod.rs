@@ -532,7 +532,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     &temp_file_path
                 ).await?;
 
-                if let Some((temp_compress_path, _, new_operation)) = compress_result {
+                if let Some((temp_compress_path, new_operation)) = compress_result {
                     tokio::fs::rename(&temp_compress_path, &temp_file_path).await?;
                     state.changed_pending_upload_layer_operations(
                         &upload_id,

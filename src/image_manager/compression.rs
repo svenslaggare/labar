@@ -140,10 +140,10 @@ impl CompressionManager {
         Ok(())
     }
 
-    pub async fn handle_registry_compression(&self,
-                                             storage_mode: &StorageMode,
-                                             operation: &LayerOperation,
-                                             data_path: &Path) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+    pub async fn handle_compression(&self,
+                                    storage_mode: &StorageMode,
+                                    operation: &LayerOperation,
+                                    data_path: &Path) -> ImageManagerResult<Option<(PathBuf, LayerOperation)>> {
         Ok(
             match storage_mode {
                 StorageMode::AlwaysCompressed | StorageMode::PreferCompressed => {
@@ -167,7 +167,7 @@ impl CompressionManager {
     async fn compress_operation(&self,
                                 operation: &LayerOperation,
                                 data_path: &Path,
-                                always: bool) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+                                always: bool) -> ImageManagerResult<Option<(PathBuf, LayerOperation)>> {
         match operation {
             LayerOperation::File { path, source_path, original_source_path, content_hash, link_type, writable } => {
                 if !always {
@@ -187,7 +187,6 @@ impl CompressionManager {
                 Ok(
                     Some((
                         temp_source_path,
-                        data_path.to_path_buf(),
                         LayerOperation::CompressedFile {
                             path: path.to_owned(),
                             source_path: source_path.to_owned(),
@@ -210,7 +209,7 @@ impl CompressionManager {
 
     async fn decompress_operation(&self,
                                   operation: &LayerOperation,
-                                  data_path: &Path) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
+                                  data_path: &Path) -> ImageManagerResult<Option<(PathBuf, LayerOperation)>> {
         match operation {
             LayerOperation::CompressedFile { path, source_path, original_source_path, content_hash, link_type, writable, .. } => {
                 let temp_source_path = data_path.to_str().unwrap().to_owned() + ".tmp";
@@ -223,7 +222,6 @@ impl CompressionManager {
                 Ok(
                     Some((
                         temp_source_path,
-                        data_path.to_path_buf(),
                         LayerOperation::File {
                             path: path.to_owned(),
                             source_path: source_path.to_owned(),

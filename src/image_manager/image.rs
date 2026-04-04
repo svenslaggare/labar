@@ -575,27 +575,8 @@ impl ImageManager {
     pub async fn handle_registry_compression(&self,
                                              storage_mode: &StorageMode,
                                              operation: &LayerOperation,
-                                             data_path: &Path) -> ImageManagerResult<Option<(PathBuf, PathBuf, LayerOperation)>> {
-        self.compression_manager.handle_registry_compression(storage_mode, operation, data_path).await
-    }
-
-    fn handle_compression(&self, layer: &mut Layer) -> ImageManagerResult<()> {
-        match self.config.storage_mode {
-            StorageMode::AlwaysUncompressed => {
-                self.printer.refresh_latest_line("\t\t* Decompressing...");
-                self.compression_manager.decompress_layer(layer)?;
-                self.printer.refresh_latest_line("\t\t* Decompressed.");
-            }
-            StorageMode::AlwaysCompressed => {
-                self.printer.refresh_latest_line("\t\t* Compressing...");
-                self.compression_manager.compress_layer(layer, true)?;
-                self.printer.refresh_latest_line("\t\t* Compressed.");
-            }
-            StorageMode::PreferCompressed => {}
-            StorageMode::PreferUncompressed => {}
-        }
-
-        Ok(())
+                                             data_path: &Path) -> ImageManagerResult<Option<(PathBuf, LayerOperation)>> {
+        self.compression_manager.handle_compression(storage_mode, operation, data_path).await
     }
 
     pub async fn login(&mut self, registry: &str, username: &str, password: &str) -> ImageManagerResult<()> {
@@ -676,15 +657,19 @@ impl ImageManager {
                 let mut retries = request.retry.unwrap_or(0);
                 let layer = loop {
                     self.printer.println("\t\t* Downloading...");
-                    let layer = self.registry_manager.download_layer(&registry_session, &current, request.verbose_output)
+                    let layer = self.registry_manager.download_layer(
+                        &self.compression_manager,
+                        &registry_session,
+                        &current,
+                        request.verbose_output
+                    )
                         .await
                         .map_err(|error| ImageManagerError::PullFailed { error });
 
                     self.printer.refresh_latest_line("\t\t* Downloaded.");
 
                     match layer {
-                        Ok(mut layer) => {
-                            self.handle_compression(&mut layer)?;
+                        Ok(layer) => {
                             self.printer.refresh_latest_line("\t\t* Layer pulled.");
                             break layer;
                         },
@@ -766,8 +751,12 @@ impl ImageManager {
         let session = self.state_manager.pooled_session()?;
         let registry_session = RegistrySession::new(&session, registry)?;
 
-        let mut layer = self.registry_manager.download_layer(&registry_session, &hash, false).await?;
-        self.handle_compression(&mut layer)?;
+        let layer = self.registry_manager.download_layer(
+            &self.compression_manager,
+            &registry_session,
+            &hash,
+            false
+        ).await?;
         Ok(layer)
     }
 
