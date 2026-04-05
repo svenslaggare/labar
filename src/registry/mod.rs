@@ -12,12 +12,10 @@ use serde_json::json;
 use serde::Deserialize;
 
 use futures::StreamExt;
-use tokio_util::io::ReaderStream;
 use tokio::io::{AsyncWriteExt};
 
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
-use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
 use axum::http::HeaderValue;
 use axum::routing::{delete, get, post};
@@ -29,6 +27,7 @@ pub mod config;
 mod helpers;
 mod external_storage;
 mod state;
+mod storage;
 
 use crate::content::ContentHash;
 use crate::helpers::{DeferredFileDelete};
@@ -280,42 +279,14 @@ async fn download_layer(State(state): State<Arc<AppState>>,
                         request: Request) -> AppResult<impl IntoResponse> {
     let token = check_access_right(&request, &state.sign_key, AccessRight::Download)?;
 
-    let (layer, base_folder) = {
-        let image_manager = state.pooled_image_manager(&token);
-        let layer = state.get_layer(&image_manager, &hash).await?;
-        let base_folder = image_manager.config().base_folder().to_path_buf();
-
-        (layer, base_folder)
-    };
+    let image_manager = state.pooled_image_manager(&token);
+    let layer = state.get_layer(&image_manager, &hash).await?;
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
-                return match state.external_storage.as_ref() {
-                    Some(external_storage) => {
-                        let response = external_storage.download(source_path).await?;
-                        Ok(response)
-                    }
-                    None => {
-                        let source_path = std::path::Path::new(source_path);
-                        let abs_source_path = base_folder.join(source_path);
-
-                        let file = tokio::fs::File::open(&abs_source_path).await?;
-                        let stream = ReaderStream::new(file);
-                        let body = Body::from_stream(stream);
-
-                        Ok(
-                            Response::builder()
-                                .header("Content-Type", "application/octet-stream")
-                                .header(
-                                    "Content-Disposition",
-                                    format!("attachment; filename={}", abs_source_path.components().last().unwrap().as_os_str().display())
-                                )
-                                .body(body)
-                                .unwrap()
-                        )
-                    }
-                }
+                let response = state.registry_storage.download(source_path).await?;
+                return Ok(response);
             }
             LayerOperation::Image { .. } => {}
             LayerOperation::ImageAlias { .. } => {}
@@ -403,16 +374,7 @@ async fn end_layer_upload(State(state): State<Arc<AppState>>,
     let mut pending_upload_layer = helpers::get_pending_upload_layer_by_id(&state_session, &upload_id)?;
     let pending_upload_layer_hash = pending_upload_layer.hash.clone();
 
-    let exists = match state.external_storage.as_ref() {
-        Some(external_storage) => {
-            external_storage::verify_path_exists(external_storage, &pending_upload_layer).await?
-        }
-        None => {
-            pending_upload_layer.verify_path_exists(image_manager.config().base_folder())
-        }
-    };
-
-    if !exists {
+    if !storage::verify_path_exists(&state.registry_storage, &pending_upload_layer).await? {
         info!("Incomplete upload of layer {} (id: {}) - clearing pending.", pending_upload_layer_hash, upload_id);
         state_session.registry_remove_upload(
             &upload_id
@@ -484,8 +446,6 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
             LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
-                let abs_source_path = base_folder.join(source_path);
-
                 let temp_file_path = base_folder.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 64));
                 if let Some(parent) = temp_file_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
@@ -534,14 +494,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                     ).await;
                 }
 
-                if let Some(external_storage) = state.external_storage.as_ref() {
-                    external_storage.upload(&temp_file_path, source_path).await?;
-                } else {
-                    if let Some(parent) = abs_source_path.parent() {
-                        tokio::fs::create_dir_all(parent).await?;
-                    }
-
-                    tokio::fs::rename(&temp_file_path, abs_source_path).await?;
+                if state.registry_storage.upload(&temp_file_path, source_path).await? {
                     deferred_delete.skip();
                 }
 

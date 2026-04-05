@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 
 use crate::image_manager::ImageManagerError;
 use crate::reference::{ImageId, ImageTag};
-use crate::registry::external_storage::ExternalStorageError;
+use crate::registry::storage::RegistryStorageError;
 
 pub type AppResult<T> = Result<T, AppError>;
 
@@ -118,12 +118,12 @@ impl From<std::io::Error> for AppError {
     }
 }
 
-impl From<ExternalStorageError> for AppError {
-    fn from(value: ExternalStorageError) -> Self {
+impl From<RegistryStorageError> for AppError {
+    fn from(value: RegistryStorageError) -> Self {
         match value {
-            ExternalStorageError::LayerFileNotFound => AppError::LayerFileNotFound,
-            ExternalStorageError::FailedToUploadLayerFile(err) => AppError::FailedToUploadLayerFile(err),
-            ExternalStorageError::IO(err) => AppError::IO(err)
+            RegistryStorageError::LayerFileNotFound => AppError::LayerFileNotFound,
+            RegistryStorageError::FailedToUploadLayerFile(err) => AppError::FailedToUploadLayerFile(err),
+            RegistryStorageError::IO(err) => AppError::IO(err)
         }
     }
 }

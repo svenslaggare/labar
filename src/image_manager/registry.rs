@@ -1,10 +1,8 @@
-use std::fmt::{ Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration};
+use std::time::Duration;
 
-use async_trait::async_trait;
 use futures::{future, StreamExt};
 use tokio::io::AsyncWriteExt;
 
@@ -13,13 +11,14 @@ use reqwest::header::{HeaderMap, HeaderValue};
 
 use rand::distr::{Alphanumeric, SampleString};
 
-use crate::content::{ContentHash};
+use crate::content::ContentHash;
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{PrinterRef, ImageManagerConfig};
+use crate::image_manager::{ImageManagerConfig, PrinterRef};
 use crate::image_manager::build::LayerHash;
 use crate::image_manager::compression::CompressionManager;
-use crate::image_manager::state::{StateSession};
+use crate::image_manager::state::StateSession;
+use crate::image_manager::storage::{ArcImageStorage, ImageStorageError};
 use crate::reference::{ImageId, ImageTag};
 use crate::registry::model;
 use crate::registry::model::{AppErrorResponse, AuthenticationFailureResponse, ImageSpec, LayerExists, UploadLayerResponse, UploadStatus};
@@ -29,11 +28,11 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 pub struct RegistryManager {
     config: ImageManagerConfig,
     printer: PrinterRef,
-    registry_storage: Option<ArcRegistryStorage>
+    registry_storage: Option<ArcImageStorage>
 }
 
 impl RegistryManager {
-    pub fn new(config: ImageManagerConfig, printer: PrinterRef, registry_storage: Option<ArcRegistryStorage>) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef, registry_storage: Option<ArcImageStorage>) -> RegistryManager {
         RegistryManager {
             config: config.clone(),
             printer,
@@ -515,7 +514,7 @@ pub enum RegistryError {
     FailToPullThrough,
     TooLargePayload,
     Operation { status_code: StatusCode, message: String, operation: String },
-    Storage(RegistryStorageError),
+    Storage(ImageStorageError),
     Http(reqwest::Error),
     Serialization(serde_json::Error),
     IO(std::io::Error)
@@ -595,32 +594,9 @@ impl From<std::io::Error> for RegistryError {
     }
 }
 
-impl From<RegistryStorageError> for RegistryError {
-    fn from(value: RegistryStorageError) -> Self {
+impl From<ImageStorageError> for RegistryError {
+    fn from(value: ImageStorageError) -> Self {
         RegistryError::Storage(value)
-    }
-}
-
-pub type ArcRegistryStorage = Arc<dyn RegistryStorage + Send + Sync>;
-
-#[async_trait]
-pub trait RegistryStorage {
-    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> RegistryStorageResult<()>;
-    async fn remove_layer(&self, hash: &ImageId) -> RegistryStorageResult<usize>;
-}
-
-pub type RegistryStorageResult<T> = Result<T, RegistryStorageError>;
-
-#[derive(Debug)]
-pub enum RegistryStorageError {
-    IO(String)
-}
-
-impl Display for RegistryStorageError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RegistryStorageError::IO(err) => write!(f, "I/O: {}", err)
-        }
     }
 }
 

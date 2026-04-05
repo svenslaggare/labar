@@ -7,18 +7,19 @@ use std::time::{Duration, Instant};
 use chrono::Local;
 use regex::Regex;
 use tokio::runtime::Handle;
-use crate::content::{compute_content_hash};
+use crate::content::compute_content_hash;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{ArcRegistryStorage, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
-use crate::image_manager::layer::{LayerManager};
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
+use crate::image_manager::layer::LayerManager;
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
-use crate::helpers::{DataSize};
+use crate::helpers::DataSize;
 use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
 use crate::image_manager::compression::CompressionManager;
 use crate::image_manager::printing::PrinterRef;
 use crate::image_manager::registry::{RegistryManager, RegistrySession};
 use crate::image_manager::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
+use crate::image_manager::storage::ArcImageStorage;
 use crate::image_manager::transfer::TransferManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
@@ -26,7 +27,7 @@ pub struct ImageManager {
     config: ImageManagerConfig,
     printer: PrinterRef,
 
-    registry_storage: Option<ArcRegistryStorage>,
+    image_storage: Option<ArcImageStorage>,
 
     state_manager: StateManager,
     layer_manager: LayerManager,
@@ -39,12 +40,12 @@ pub struct ImageManager {
 
 impl ImageManager {
     pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> ImageManagerResult<ImageManager> {
-        ImageManager::with_registry_storage(config, printer, None)
+        ImageManager::with_image_storage(config, printer, None)
     }
 
-    pub fn with_registry_storage(config: ImageManagerConfig,
-                                 printer: PrinterRef,
-                                 registry_storage: Option<ArcRegistryStorage>) -> ImageManagerResult<ImageManager> {
+    pub fn with_image_storage(config: ImageManagerConfig,
+                              printer: PrinterRef,
+                              image_storage: Option<ArcImageStorage>) -> ImageManagerResult<ImageManager> {
         let state_manager = StateManager::new(&config.base_folder)?;
 
         Ok(
@@ -52,7 +53,7 @@ impl ImageManager {
                 config: config.clone(),
                 printer: printer.clone(),
 
-                registry_storage: registry_storage.clone(),
+                image_storage: image_storage.clone(),
 
                 state_manager,
                 layer_manager: LayerManager::new(config.clone()),
@@ -60,7 +61,7 @@ impl ImageManager {
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
                 transfer_manager: TransferManager::new(config.clone(), printer.clone()),
                 compression_manager: CompressionManager::new(config.clone(), printer.clone()),
-                registry_manager: RegistryManager::new(config.clone(), printer.clone(), registry_storage),
+                registry_manager: RegistryManager::new(config.clone(), printer.clone(), image_storage),
             }
         )
     }
@@ -280,7 +281,7 @@ impl ImageManager {
         self.layer_manager.remove_layer(session, &layer.hash)?;
 
         let reclaimed_size = DataSize::from_operations(self.config.base_folder(), &layer.operations);
-        match self.registry_storage.as_ref() {
+        match self.image_storage.as_ref() {
             Some(registry_storage) => {
                 Handle::current().block_on(
                     registry_storage.remove_layer(&layer.hash)
@@ -307,7 +308,7 @@ impl ImageManager {
         self.layer_manager.remove_layer(&session, &layer.hash)?;
 
         let reclaimed_size = DataSize::from_operations_async(self.config.base_folder(), &layer.operations).await;
-        match self.registry_storage.as_ref() {
+        match self.image_storage.as_ref() {
             Some(registry_storage) => {
                 registry_storage.remove_layer(
                     &layer.hash

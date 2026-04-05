@@ -13,9 +13,10 @@ use crate::reference::ImageTag;
 use crate::registry::auth::{AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::{helpers, ChangedUploadLayerFileOperation, RunRegistryError};
 use crate::registry::config::RegistryConfig;
-use crate::registry::external_storage::{ArcExternalStorage, InMemoryStorage, S3Storage};
+use crate::registry::external_storage::{ArcExternalRegistryStorage, InMemoryStorage, S3Storage};
 use crate::registry::helpers::PooledImageManager;
 use crate::registry::model::AppResult;
+use crate::registry::storage::{ArcRegistryStorage, InternalRegistryStorage};
 
 pub struct AppState {
     pub config: RegistryConfig,
@@ -23,7 +24,8 @@ pub struct AppState {
     pub sign_key: Hmac<Sha256>,
     pub access_provider: Box<dyn AuthProvider + Send + Sync>,
 
-    pub external_storage: Option<ArcExternalStorage>,
+    pub registry_storage: ArcRegistryStorage,
+    pub external_registry_storage: Option<ArcExternalRegistryStorage>,
 
     image_manager_pool: Arc<ResourcePool<ImageManager>>,
 
@@ -40,16 +42,21 @@ impl AppState {
             std::mem::take(&mut config.initial_users)
         ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
 
-        let external_storage = match (config.s3_storage.as_ref(), config.in_memory_storage.as_ref()) {
+        let (registry_storage, external_storage) = match (config.s3_storage.as_ref(), config.in_memory_storage.as_ref()) {
             (Some(s3_storage), _) => {
-                let storage: ArcExternalStorage = Arc::new(S3Storage::new(s3_storage));
-                Some(storage)
+                let external_storage: ArcExternalRegistryStorage = Arc::new(S3Storage::new(s3_storage));
+                let storage: ArcRegistryStorage = external_storage.clone();
+                (storage.clone(), Some(external_storage))
             }
             (_, Some(in_memory_storage)) => {
-                let storage: ArcExternalStorage = Arc::new(InMemoryStorage::new(in_memory_storage));
-                Some(storage)
+                let external_storage: ArcExternalRegistryStorage = Arc::new(InMemoryStorage::new(in_memory_storage));
+                let storage: ArcRegistryStorage = external_storage.clone();
+                (storage.clone(), Some(external_storage))
             }
-            _ => None
+            _ => {
+                let storage: ArcRegistryStorage = Arc::new(InternalRegistryStorage::new(&config.data_path));
+                (storage, None)
+            }
         };
 
         Ok(
@@ -62,7 +69,8 @@ impl AppState {
                     ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?,
                     access_provider: Box::new(access_provider),
 
-                    external_storage,
+                    registry_storage,
+                    external_registry_storage: external_storage,
 
                     image_manager_pool: Arc::new(ResourcePool::new(Vec::new())),
                     delayed_image_inserts: Mutex::new(HashMap::new()),

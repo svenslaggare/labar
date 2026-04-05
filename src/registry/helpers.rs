@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 
 use crate::helpers::PooledResource;
 use crate::image::Layer;
-use crate::image_manager::{ArcRegistryStorage, EmptyPrinter, ImageManager, ImageManagerError, StateSession};
+use crate::image_manager::{ArcImageStorage, EmptyPrinter, ImageManager, ImageManagerError, StateSession};
 use crate::registry::{model, RegistryConfig, RunRegistryError};
 use crate::registry::auth::AuthToken;
 use crate::registry::model::{AppError, AppResult};
@@ -61,14 +61,14 @@ pub fn get_pending_upload_layer_by_id(state_session: &StateSession, upload_id: &
 }
 
 pub fn create_image_manager(state: &AppState, _token: &AuthToken) -> ImageManager {
-    let registry_storage: Option<ArcRegistryStorage> = match state.external_storage.as_ref() {
+    let registry_storage: Option<ArcImageStorage> = match state.external_registry_storage.as_ref() {
         Some(external_storage) => {
             Some(external_storage.clone())
         }
         None => None
     };
 
-    ImageManager::with_registry_storage(
+    ImageManager::with_image_storage(
         state.config.image_manager_config(),
         EmptyPrinter::new(),
         registry_storage
