@@ -4,15 +4,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration};
 
 use futures::{future, StreamExt};
-use rand::distr::{Alphanumeric, SampleString};
+use tokio::io::AsyncWriteExt;
+
 use reqwest::{Body, Client, Request, Response, StatusCode};
 use reqwest::header::{HeaderMap, HeaderValue};
-use tokio::io::AsyncWriteExt;
+
+use rand::distr::{Alphanumeric, SampleString};
 
 use crate::content::{ContentHash};
 use crate::helpers::{clean_path, DeferredFileDelete};
 use crate::image::{ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{PrinterRef, ImageManagerConfig, StorageMode};
+use crate::image_manager::{PrinterRef, ImageManagerConfig};
 use crate::image_manager::build::LayerHash;
 use crate::image_manager::compression::CompressionManager;
 use crate::image_manager::state::{StateSession};
@@ -109,58 +111,6 @@ impl RegistryManager {
         let download_folder = self.config.base_folder.join("tmp-download");
         tokio::fs::create_dir_all(&download_folder).await?;
 
-        async fn download_file(storage_mode: &StorageMode,
-                               compression_manager: &CompressionManager,
-                               download_folder: &Path,
-                               client: &RegistryClient<'_>,
-                               hash: &ImageId,
-                               operation: &LayerOperation,
-                               local_source_path: PathBuf,
-                               file_index: usize,
-                               content_hash: &str) -> RegistryResult<Option<(usize, LayerOperation)>> {
-            let download_path = download_folder.join(Alphanumeric.sample_string(&mut rand::rng(), 64));
-
-            let mut deferred_delete = DeferredFileDelete::new(download_path.clone());
-
-            let response = client.get_registry_response(&format!("layers/{}/download/{}", hash, file_index)).await?;
-            let mut content_hasher = ContentHash::new();
-
-            {
-                let mut byte_stream = response.bytes_stream();
-                let mut file = tokio::fs::File::create(&download_path).await?;
-                while let Some(item) = byte_stream.next().await {
-                    let data = item?;
-                    let data = data.as_ref();
-                    content_hasher.add(data);
-                    file.write_all(data).await?;
-                }
-                file.flush().await?;
-            }
-
-            if &content_hasher.finalize() != &content_hash {
-                return Err(RegistryError::InvalidContentHash);
-            }
-
-            let result = compression_manager.handle_compression(
-                storage_mode,
-                operation,
-                &download_path
-            ).await.map_err(|_| RegistryError::FailedToUnpack)?;
-
-            if let Some(layer_folder) = local_source_path.parent() {
-                tokio::fs::create_dir_all(&layer_folder).await?;
-            }
-
-            if let Some((compressed_path, _)) = result.as_ref() {
-                tokio::fs::rename(&compressed_path, &local_source_path).await?;
-            } else {
-                tokio::fs::rename(&download_path, &local_source_path).await?;
-                deferred_delete.skip();
-            }
-
-            Ok(result.map(|(_, operation)| (file_index, operation)))
-        }
-
         let mut file_index = 0;
         let mut file_operations = Vec::new();
         for operation in &layer.operations {
@@ -204,8 +154,7 @@ impl RegistryManager {
                         self.printer.refresh_latest_line(&format!("\t\t* Downloading file '{}'...", source_path));
                     }
 
-                    download_operations.push(download_file(
-                        &self.config.storage_mode,
+                    download_operations.push(self.download_file(
                         compression_manager,
                         &download_folder,
                         &client,
@@ -237,6 +186,73 @@ impl RegistryManager {
         }
 
         Ok(layer)
+    }
+
+    async fn download_file(&self,
+                           compression_manager: &CompressionManager,
+                           download_folder: &Path,
+                           client: &RegistryClient<'_>,
+                           hash: &ImageId,
+                           operation: &LayerOperation,
+                           local_source_path: PathBuf,
+                           file_index: usize,
+                           content_hash: &str) -> RegistryResult<Option<(usize, LayerOperation)>> {
+        let download_path = download_folder.join(Alphanumeric.sample_string(&mut rand::rng(), 64));
+
+        let mut download_delete = DeferredFileDelete::new(download_path.clone());
+
+        let response = client.get_registry_response(&format!("layers/{}/download/{}", hash, file_index)).await?;
+        let mut content_hasher = ContentHash::new();
+
+        {
+            let mut byte_stream = response.bytes_stream();
+            let mut file = tokio::fs::File::create(&download_path).await?;
+            while let Some(item) = byte_stream.next().await {
+                let data = item?;
+                let data = data.as_ref();
+                content_hasher.add(data);
+                file.write_all(data).await?;
+            }
+            file.flush().await?;
+        }
+
+        if &content_hasher.finalize() != &content_hash {
+            return Err(RegistryError::InvalidContentHash);
+        }
+
+        let result = compression_manager.handle_compression(
+            &self.config.storage_mode,
+            operation,
+            &download_path
+        ).await.map_err(|_| RegistryError::FailedToUnpack)?;
+
+        self.commit_downloaded_file(
+            &download_path,
+            result.as_ref().map(|(compressed_path, _)| compressed_path.as_path()),
+            &local_source_path,
+            &mut download_delete
+        ).await?;
+
+        Ok(result.map(|(_, operation)| (file_index, operation)))
+    }
+
+    async fn commit_downloaded_file(&self,
+                                    download_path: &Path,
+                                    compressed_path: Option<&Path>,
+                                    local_source_path: &Path,
+                                    download_delete: &mut DeferredFileDelete) -> RegistryResult<()> {
+        if let Some(layer_folder) = local_source_path.parent() {
+            tokio::fs::create_dir_all(&layer_folder).await?;
+        }
+
+        if let Some(compressed_path) = compressed_path {
+            tokio::fs::rename(&compressed_path, &local_source_path).await?;
+        } else {
+            tokio::fs::rename(&download_path, &local_source_path).await?;
+            download_delete.skip();
+        }
+
+        Ok(())
     }
 
     async fn get_layer_definition_internal(client: &RegistryClient<'_>,
