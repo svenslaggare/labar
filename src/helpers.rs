@@ -8,6 +8,7 @@ use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use serde::{Deserialize, Serialize};
+use crate::image::LayerOperation;
 
 pub fn split_parts(line: &str) -> Vec<String> {
     let mut parts = Vec::new();
@@ -94,6 +95,28 @@ pub struct DataSize(pub usize);
 impl DataSize {
     pub fn from_file(path: &Path) -> DataSize {
         DataSize(std::fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0) as usize)
+    }
+
+    pub fn from_operations(base_folder: &Path, operations: &Vec<LayerOperation>) -> DataSize {
+        let mut reclaimed_size = DataSize(0);
+        for operation in operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, .. } => {
+                    let source_path = base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file(&source_path);
+                }
+                LayerOperation::CompressedFile { source_path, .. } => {
+                    let source_path = base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file(&source_path);
+                }
+                LayerOperation::Label { .. } => {}
+            }
+        }
+
+        reclaimed_size
     }
 }
 

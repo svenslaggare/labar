@@ -212,8 +212,7 @@ impl ImageManager {
             self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
 
             if gc {
-                let removed_layers = self.garbage_collect()?;
-                Ok(removed_layers)
+                Ok(self.garbage_collect()?)
             } else {
                 Ok(Vec::new())
             }
@@ -239,11 +238,7 @@ impl ImageManager {
     pub fn garbage_collect(&mut self) -> ImageManagerResult<Vec<ImageId>> {
         let session = self.state_manager.pooled_session()?;
 
-        let mut used_layers = HashSet::new();
-        for hash in self.get_hard_references(&session)? {
-            self.layer_manager.find_used_layers(&session, &hash, &mut used_layers)?;
-        }
-
+        let used_layers = self.get_used_layers(&session)?;
         let mut removed_layers = Vec::new();
         for layer in self.layer_manager.all_layers(&session)? {
             if !used_layers.contains(&layer.hash) {
@@ -261,24 +256,7 @@ impl ImageManager {
     fn remove_layer(&self, session: &StateSession, layer: &Layer) -> ImageManagerResult<()> {
         self.layer_manager.remove_layer(session, &layer.hash)?;
 
-        let mut reclaimed_size = DataSize(0);
-        for operation in &layer.operations {
-            match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {}
-                LayerOperation::File { source_path, .. } => {
-                    let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize::from_file(&source_path);
-                }
-                LayerOperation::CompressedFile { source_path, .. } => {
-                    let source_path = self.config.base_folder.join(source_path);
-                    reclaimed_size += DataSize::from_file(&source_path);
-                }
-                LayerOperation::Label { .. } => {}
-            }
-        }
-
+        let reclaimed_size = DataSize::from_operations(self.config.base_folder(), &layer.operations);
         match self.registry_storage.as_ref() {
             Some(registry_storage) => {
                 Handle::current().block_on(
@@ -298,6 +276,15 @@ impl ImageManager {
 
         self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
         Ok(())
+    }
+
+    fn get_used_layers(&self, session: &StateSession) -> ImageManagerResult<HashSet<ImageId>> {
+        let mut used_layers = HashSet::new();
+        for hash in self.get_hard_references(&session)? {
+            self.layer_manager.find_used_layers(&session, &hash, &mut used_layers)?;
+        }
+
+        Ok(used_layers)
     }
 
     fn get_hard_references(&self, session: &StateSession) -> ImageManagerResult<Vec<ImageId>> {
