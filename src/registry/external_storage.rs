@@ -23,25 +23,6 @@ use crate::reference::ImageId;
 use crate::registry::config::{InMemoryStorageConfig, S3StorageConfig};
 use crate::registry::storage::{RegistryStorageError, RegistryStorageResult, RegistryStorage};
 
-pub type ArcExternalRegistryStorage = Arc<dyn ExternalStorage + Send + Sync>;
-
-#[async_trait]
-pub trait ExternalStorage: RegistryStorage + ImageStorage {
-    async fn remove_layer(&self, hash: &ImageId) -> RegistryStorageResult<usize>;
-}
-
-#[async_trait]
-impl<T: ExternalStorage + Send + Sync> ImageStorage for T {
-    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> ImageStorageResult<()> {
-        self.upload(data_path, path).await.map_err(|err| ImageStorageError::IO(format!("{}", err)))?;
-        Ok(())
-    }
-
-    async fn remove_layer(&self, hash: &ImageId) -> ImageStorageResult<usize> {
-        ExternalStorage::remove_layer(self, hash).await.map_err(|err| ImageStorageError::IO(format!("{}", err)))
-    }
-}
-
 pub struct S3Storage {
     client: aws_sdk_s3::Client,
     bucket: String
@@ -106,13 +87,18 @@ impl RegistryStorage for S3Storage {
 }
 
 #[async_trait]
-impl ExternalStorage for S3Storage {
-    async fn remove_layer(&self, hash: &ImageId) -> RegistryStorageResult<usize> {
+impl ImageStorage for S3Storage {
+    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> ImageStorageResult<()> {
+        self.upload(data_path, path).await.map_err(|err| ImageStorageError::IO(format!("{}", err)))?;
+        Ok(())
+    }
+
+    async fn remove_layer(&self, hash: &ImageId) -> ImageStorageResult<usize> {
         let objects = self.client.list_objects()
             .bucket(self.bucket.clone())
             .prefix(format!("layers/{}", hash))
             .send().await
-            .map_err(|_| RegistryStorageError::LayerFileNotFound)?;
+            .map_err(|_| ImageStorageError::LayerFileNotFound)?;
 
         let delete_requests = objects.contents()
             .iter()
@@ -126,7 +112,7 @@ impl ExternalStorage for S3Storage {
 
         let mut num_deleted = 0;
         for result in futures::future::join_all(delete_requests).await {
-            result.map_err(|_| RegistryStorageError::LayerFileNotFound)?;
+            result.map_err(|_| ImageStorageError::LayerFileNotFound)?;
             num_deleted += 1;
         }
 
@@ -178,8 +164,13 @@ impl RegistryStorage for InMemoryStorage {
 }
 
 #[async_trait]
-impl ExternalStorage for InMemoryStorage {
-    async fn remove_layer(&self, hash: &ImageId) -> RegistryStorageResult<usize> {
+impl ImageStorage for InMemoryStorage {
+    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> ImageStorageResult<()> {
+        self.upload(data_path, path).await.map_err(|err| ImageStorageError::IO(format!("{}", err)))?;
+        Ok(())
+    }
+
+    async fn remove_layer(&self, hash: &ImageId) -> ImageStorageResult<usize> {
         let mut files = self.files.write().await;
         let mut num_deleted = 0;
 
