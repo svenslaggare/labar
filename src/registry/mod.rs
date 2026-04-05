@@ -219,17 +219,9 @@ async fn remove_image(State(state): State<Arc<AppState>>,
     let token = check_access_right(&request, &state.sign_key, AccessRight::Delete)?;
 
     let mut image_manager = state.pooled_image_manager(&token);
-    let removed_layers = image_manager.remove_image(&tag)?;
-    let mut num_deleted_layers = 0;
-    if let Some(external_storage) = state.external_storage.as_ref() {
-        for hash in removed_layers {
-            if external_storage.remove_layer(&hash).await? > 0 {
-                num_deleted_layers += 1;
-            }
-        }
-    } else {
-        num_deleted_layers = removed_layers.len();
-    }
+    let tag_clone = tag.clone();
+    let removed_layers = tokio::task::spawn_blocking(move || image_manager.remove_image(&tag_clone)).await.unwrap()?;
+    let num_deleted_layers = removed_layers.len();
 
     state.clear_layer_cache().await;
 
@@ -301,7 +293,8 @@ async fn download_layer(State(state): State<Arc<AppState>>,
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                 return match state.external_storage.as_ref() {
                     Some(external_storage) => {
-                        external_storage.download(source_path).await
+                        let response = external_storage.download(source_path).await?;
+                        Ok(response)
                     }
                     None => {
                         let source_path = std::path::Path::new(source_path);

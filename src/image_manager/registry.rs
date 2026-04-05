@@ -1,8 +1,9 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{ Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration};
+
 use async_trait::async_trait;
 use futures::{future, StreamExt};
 use tokio::io::AsyncWriteExt;
@@ -236,9 +237,7 @@ impl RegistryManager {
         match self.registry_storage.as_ref() {
             Some(registry_storage) => {
                 if let Some(source_path) = operation.source_path() {
-                    if !registry_storage.commit_downloaded_file(data_path, source_path).await {
-                        return Err(RegistryError::FailedToUnpack);
-                    }
+                    registry_storage.commit_downloaded_file(data_path, source_path).await?;
                 }
             }
             None => {
@@ -516,6 +515,7 @@ pub enum RegistryError {
     FailToPullThrough,
     TooLargePayload,
     Operation { status_code: StatusCode, message: String, operation: String },
+    Storage(RegistryStorageError),
     Http(reqwest::Error),
     Serialization(serde_json::Error),
     IO(std::io::Error)
@@ -569,6 +569,7 @@ impl Display for RegistryError {
             RegistryError::FailToPullThrough => write!(f, "Failed to pull through upstream in enough time"),
             RegistryError::TooLargePayload => write!(f, "The payload is too large to be uploaded"),
             RegistryError::Operation { status_code, message, operation } => write!(f, "Operation ({}) failed due to: {} ({})", operation, message, status_code),
+            RegistryError::Storage(err) => write!(f, "Storage error: {}", err),
             RegistryError::Http(err) => write!(f, "Http error: {}", err),
             RegistryError::Serialization(err) => write!(f, "Serialization error: {}", err),
             RegistryError::IO(err) => write!(f, "I/O error: {}", err)
@@ -594,11 +595,33 @@ impl From<std::io::Error> for RegistryError {
     }
 }
 
+impl From<RegistryStorageError> for RegistryError {
+    fn from(value: RegistryStorageError) -> Self {
+        RegistryError::Storage(value)
+    }
+}
+
 pub type ArcRegistryStorage = Arc<dyn RegistryStorage + Send + Sync>;
 
 #[async_trait]
 pub trait RegistryStorage {
-    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> bool;
+    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> RegistryStorageResult<()>;
+    async fn remove_layer(&self, hash: &ImageId) -> RegistryStorageResult<usize>;
+}
+
+pub type RegistryStorageResult<T> = Result<T, RegistryStorageError>;
+
+#[derive(Debug)]
+pub enum RegistryStorageError {
+    IO(String)
+}
+
+impl Display for RegistryStorageError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegistryStorageError::IO(err) => write!(f, "I/O: {}", err)
+        }
+    }
 }
 
 fn create_http_client(config: &ImageManagerConfig) -> reqwest::Result<Client> {

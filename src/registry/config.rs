@@ -44,7 +44,6 @@ impl RegistryConfig {
 
     pub fn image_manager_config(&self) -> ImageManagerConfig {
         let mut config = ImageManagerConfig::with_base_folder(self.data_path.clone());
-        config.has_external_storage = self.s3_storage.is_some() || self.in_memory_storage.is_some();
         config.storage_mode = self.storage_mode.clone();
         config
     }

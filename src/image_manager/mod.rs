@@ -153,8 +153,7 @@ pub struct ImageManagerConfig {
     pub accept_self_signed: bool,
     pub max_wait_for_upstream_pull: f64,
     pub upstream_pull_check: f64,
-    pub storage_mode: StorageMode,
-    pub has_external_storage: bool
+    pub storage_mode: StorageMode
 }
 
 impl ImageManagerConfig {
@@ -164,8 +163,7 @@ impl ImageManagerConfig {
             accept_self_signed: true,
             max_wait_for_upstream_pull: 5.0 * 60.0,
             upstream_pull_check: 1.0,
-            storage_mode: StorageMode::AlwaysUncompressed,
-            has_external_storage: false
+            storage_mode: StorageMode::AlwaysUncompressed
         }
     }
 
@@ -211,4 +209,4 @@ pub use crate::image_manager::image::{PullRequest, ListContentEntry};
 pub use crate::image_manager::build::BuildRequest;
 pub use crate::image_manager::unpack::{UnpackRequest, UnpackFile};
 pub use crate::image_manager::state::{StateSession, PooledStateSession, StateManager, SqlResult};
-pub use crate::image_manager::registry::{RegistryStorage, ArcRegistryStorage};
+pub use crate::image_manager::registry::{RegistryStorage, ArcRegistryStorage, RegistryStorageResult, RegistryStorageError};

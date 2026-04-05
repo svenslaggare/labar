@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use chrono::Local;
 use regex::Regex;
-
+use tokio::runtime::Handle;
 use crate::content::{compute_content_hash};
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ArcRegistryStorage, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
@@ -25,6 +25,8 @@ use crate::reference::{ImageId, ImageTag, Reference};
 pub struct ImageManager {
     config: ImageManagerConfig,
     printer: PrinterRef,
+
+    registry_storage: Option<ArcRegistryStorage>,
 
     state_manager: StateManager,
     layer_manager: LayerManager,
@@ -49,6 +51,8 @@ impl ImageManager {
             ImageManager {
                 config: config.clone(),
                 printer: printer.clone(),
+
+                registry_storage: registry_storage.clone(),
 
                 state_manager,
                 layer_manager: LayerManager::new(config.clone()),
@@ -258,31 +262,38 @@ impl ImageManager {
         self.layer_manager.remove_layer(session, &layer.hash)?;
 
         let mut reclaimed_size = DataSize(0);
-        if !self.config.has_external_storage {
-            for operation in &layer.operations {
-                match operation {
-                    LayerOperation::Image { .. } => {}
-                    LayerOperation::ImageAlias { .. } => {}
-                    LayerOperation::Directory { .. } => {}
-                    LayerOperation::File { source_path, .. } => {
-                        let source_path = self.config.base_folder.join(source_path);
-                        reclaimed_size += DataSize::from_file(&source_path);
-                    }
-                    LayerOperation::CompressedFile { source_path, .. } => {
-                        let source_path = self.config.base_folder.join(source_path);
-                        reclaimed_size += DataSize::from_file(&source_path);
-                    }
-                    LayerOperation::Label { .. } => {}
+        for operation in &layer.operations {
+            match operation {
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::File { source_path, .. } => {
+                    let source_path = self.config.base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file(&source_path);
                 }
+                LayerOperation::CompressedFile { source_path, .. } => {
+                    let source_path = self.config.base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file(&source_path);
+                }
+                LayerOperation::Label { .. } => {}
             }
+        }
 
-            let layer_path = self.config.get_layer_folder(&layer.hash);
-            std::fs::remove_dir_all(&layer_path)
-                .map_err(|err|
-                    ImageManagerError::FileIOError {
-                        message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
-                    }
-                )?;
+        match self.registry_storage.as_ref() {
+            Some(registry_storage) => {
+                Handle::current().block_on(
+                    registry_storage.remove_layer(&layer.hash)
+                ).map_err(|err| RegistryError::Storage(err))?;
+            }
+            None => {
+                let layer_path = self.config.get_layer_folder(&layer.hash);
+                std::fs::remove_dir_all(&layer_path)
+                    .map_err(|err|
+                        ImageManagerError::FileIOError {
+                            message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
+                        }
+                    )?;
+            }
         }
 
         self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
