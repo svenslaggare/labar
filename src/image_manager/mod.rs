@@ -211,3 +211,4 @@ pub use crate::image_manager::image::{PullRequest, ListContentEntry};
 pub use crate::image_manager::build::BuildRequest;
 pub use crate::image_manager::unpack::{UnpackRequest, UnpackFile};
 pub use crate::image_manager::state::{StateSession, PooledStateSession, StateManager, SqlResult};
+pub use crate::image_manager::registry::{RegistryStorage, ArcRegistryStorage};

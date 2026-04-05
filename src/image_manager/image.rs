@@ -9,7 +9,7 @@ use regex::Regex;
 
 use crate::content::{compute_content_hash};
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
-use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
+use crate::image_manager::{ArcRegistryStorage, ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
 use crate::image_manager::layer::{LayerManager};
 use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
 use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
@@ -37,6 +37,12 @@ pub struct ImageManager {
 
 impl ImageManager {
     pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> ImageManagerResult<ImageManager> {
+        ImageManager::with_registry_storage(config, printer, None)
+    }
+
+    pub fn with_registry_storage(config: ImageManagerConfig,
+                                 printer: PrinterRef,
+                                 registry_storage: Option<ArcRegistryStorage>) -> ImageManagerResult<ImageManager> {
         let state_manager = StateManager::new(&config.base_folder)?;
 
         Ok(
@@ -50,7 +56,7 @@ impl ImageManager {
                 unpack_manager: UnpackManager::new(config.clone(), printer.clone()),
                 transfer_manager: TransferManager::new(config.clone(), printer.clone()),
                 compression_manager: CompressionManager::new(config.clone(), printer.clone()),
-                registry_manager: RegistryManager::new(config.clone(), printer.clone()),
+                registry_manager: RegistryManager::new(config.clone(), printer.clone(), registry_storage),
             }
         )
     }

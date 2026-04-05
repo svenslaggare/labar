@@ -19,21 +19,29 @@ use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 
 use crate::image::{Layer, LayerOperation};
+use crate::image_manager::RegistryStorage;
 use crate::reference::{ImageId};
 use crate::registry::config::{InMemoryStorageConfig, S3StorageConfig};
 use crate::registry::model::{AppError, AppResult};
 
-pub type BoxExternalStorage = Box<dyn ExternalStorage + Send + Sync>;
+pub type ArcExternalStorage = Arc<dyn ExternalStorage + Send + Sync>;
 
 #[async_trait]
-pub trait ExternalStorage {
+pub trait ExternalStorage: RegistryStorage {
     async fn download(&self, path: &str) -> AppResult<Response>;
-    async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()>;
+    async fn upload(&self, data_path: &Path, path: &str) -> AppResult<()>;
     async fn exists(&self, path: &str) -> AppResult<bool>;
     async fn remove_layer(&self, hash: &ImageId) -> AppResult<usize>;
 }
 
-pub async fn verify_path_exists(external_storage: &BoxExternalStorage, layer: &Layer) -> AppResult<bool> {
+#[async_trait]
+impl<T: ExternalStorage + Send + Sync> RegistryStorage for T {
+    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> bool {
+        self.upload(data_path, path).await.is_ok()
+    }
+}
+
+pub async fn verify_path_exists(external_storage: &ArcExternalStorage, layer: &Layer) -> AppResult<bool> {
     for operation in &layer.operations {
         match operation {
             LayerOperation::Image { .. } => {}
@@ -91,7 +99,7 @@ impl ExternalStorage for S3Storage {
         Ok(Redirect::permanent(object.uri()).into_response())
     }
 
-    async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()> {
+    async fn upload(&self, data_path: &Path, path: &str) -> AppResult<()> {
         debug!("Uploading {} to bucket {}", path, self.bucket);
         self.client.put_object()
             .bucket(self.bucket.clone())
@@ -172,7 +180,7 @@ impl ExternalStorage for InMemoryStorage {
         )
     }
 
-    async fn upload(&self, path: &str, data_path: &Path) -> AppResult<()> {
+    async fn upload(&self, data_path: &Path, path: &str) -> AppResult<()> {
         let buffer = std::fs::read(data_path).map_err(|err| AppError::IO(err))?;
         self.files.write().await.insert(path.to_owned(), Arc::from(buffer));
         Ok(())

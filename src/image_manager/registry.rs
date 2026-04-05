@@ -1,8 +1,9 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration};
-
+use async_trait::async_trait;
 use futures::{future, StreamExt};
 use tokio::io::AsyncWriteExt;
 
@@ -26,14 +27,16 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 
 pub struct RegistryManager {
     config: ImageManagerConfig,
-    printer: PrinterRef
+    printer: PrinterRef,
+    registry_storage: Option<ArcRegistryStorage>
 }
 
 impl RegistryManager {
-    pub fn new(config: ImageManagerConfig, printer: PrinterRef) -> RegistryManager {
+    pub fn new(config: ImageManagerConfig, printer: PrinterRef, registry_storage: Option<ArcRegistryStorage>) -> RegistryManager {
         RegistryManager {
             config: config.clone(),
-            printer
+            printer,
+            registry_storage
         }
     }
 
@@ -226,31 +229,38 @@ impl RegistryManager {
             &download_path
         ).await.map_err(|_| RegistryError::FailedToUnpack)?;
 
-        self.commit_downloaded_file(
-            &download_path,
-            result.as_ref().map(|(compressed_path, _)| compressed_path.as_path()),
-            &local_source_path,
-            &mut download_delete
-        ).await?;
+        let data_path = result
+            .as_ref().map(|(compressed_path, _)| compressed_path.as_path())
+            .unwrap_or(download_path.as_path());
+
+        match self.registry_storage.as_ref() {
+            Some(registry_storage) => {
+                if let Some(source_path) = operation.source_path() {
+                    if !registry_storage.commit_downloaded_file(data_path, source_path).await {
+                        return Err(RegistryError::FailedToUnpack);
+                    }
+                }
+            }
+            None => {
+                self.commit_downloaded_file(&data_path, &local_source_path).await?;
+            }
+        }
+
+        if result.is_none() {
+            download_delete.skip();
+        }
 
         Ok(result.map(|(_, operation)| (file_index, operation)))
     }
 
     async fn commit_downloaded_file(&self,
-                                    download_path: &Path,
-                                    compressed_path: Option<&Path>,
-                                    local_source_path: &Path,
-                                    download_delete: &mut DeferredFileDelete) -> RegistryResult<()> {
+                                    data_path: &Path,
+                                    local_source_path: &Path) -> RegistryResult<()> {
         if let Some(layer_folder) = local_source_path.parent() {
             tokio::fs::create_dir_all(&layer_folder).await?;
         }
 
-        if let Some(compressed_path) = compressed_path {
-            tokio::fs::rename(&compressed_path, &local_source_path).await?;
-        } else {
-            tokio::fs::rename(&download_path, &local_source_path).await?;
-            download_delete.skip();
-        }
+        tokio::fs::rename(&data_path, &local_source_path).await?;
 
         Ok(())
     }
@@ -582,6 +592,13 @@ impl From<std::io::Error> for RegistryError {
     fn from(value: std::io::Error) -> Self {
         RegistryError::IO(value)
     }
+}
+
+pub type ArcRegistryStorage = Arc<dyn RegistryStorage + Send + Sync>;
+
+#[async_trait]
+pub trait RegistryStorage {
+    async fn commit_downloaded_file(&self, data_path: &Path, path: &str) -> bool;
 }
 
 fn create_http_client(config: &ImageManagerConfig) -> reqwest::Result<Client> {

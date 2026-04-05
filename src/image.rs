@@ -55,6 +55,17 @@ pub enum LayerOperation {
 }
 
 impl LayerOperation {
+    pub fn source_path(&self) -> Option<&str> {
+        match self {
+            LayerOperation::File { source_path, .. } => Some(source_path),
+            LayerOperation::CompressedFile { source_path, .. } => Some(source_path),
+            LayerOperation::Image { .. } => None,
+            LayerOperation::ImageAlias { .. } => None,
+            LayerOperation::Directory { .. } => None,
+            LayerOperation::Label { .. } => None
+        }
+    }
+
     pub fn compressed_content_hash(&self) -> Option<&str> {
         if let LayerOperation::CompressedFile { compressed_content_hash, .. } = self {
             Some(compressed_content_hash)

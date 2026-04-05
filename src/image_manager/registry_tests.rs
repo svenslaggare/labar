@@ -768,6 +768,100 @@ async fn test_pull_through() {
 }
 
 #[tokio::test]
+async fn test_sync_external_storage() {
+    let tmp_folder = crate::test_helpers::TempFolder::new();
+    let tmp_primary_registry_folder = crate::test_helpers::TempFolder::new();
+    let tmp_secondary_registry_folder = crate::test_helpers::TempFolder::new();
+
+    let primary_address: SocketAddr = generate_registry_address().parse().unwrap();
+    let secondary_address: SocketAddr = generate_registry_address().parse().unwrap();
+
+    // Build image inside primary registry
+    let mut image = {
+        let config = ImageManagerConfig::with_base_folder(tmp_primary_registry_folder.owned());
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        let image = super::test_helpers::build_image(
+            &mut image_manager,
+            Path::new("testdata/definitions/simple4.labarfile"),
+            ImageTag::with_registry(&primary_address.to_string(), "test", "latest")
+        ).unwrap().image;
+
+        image
+    };
+
+    tokio::spawn(crate::registry::run(create_registry_config(primary_address, &tmp_primary_registry_folder)));
+
+    // Wait until registry starts
+    if !registry_is_reachable(&primary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
+
+    let mut secondary_registry_config = create_registry_config(secondary_address, &tmp_secondary_registry_folder);
+    secondary_registry_config.upstream = Some(
+        RegistryUpstreamConfig {
+            hostname: primary_address.to_string(),
+            username: "guest".to_string(),
+            password: "guest".to_string(),
+
+            sync: true,
+            sync_at_startup: true,
+            sync_interval: Cron::from_str("* * * * *").unwrap(),
+
+            pull_through: false
+        }
+    );
+    secondary_registry_config.in_memory_storage = Some(InMemoryStorageConfig {});
+    tokio::spawn(crate::registry::run(secondary_registry_config));
+
+    // Wait until registry starts
+    if !registry_is_reachable(&secondary_address.to_string(), 1.0).await {
+        panic!("Registry is not reachable");
+    }
+
+    let image_tag = ImageTag::with_registry(&secondary_address.to_string(), "test", "latest");
+    image.tag = image.tag.set_registry(&secondary_address.to_string());
+
+    {
+        let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
+        let mut image_manager = ImageManager::new(config, ConsolePrinter::new()).unwrap();
+
+        // Login
+        let login_result = image_manager.login(&secondary_address.to_string(), "guest", "guest").await;
+        assert!(login_result.is_ok(), "{}", login_result.unwrap_err());
+
+        // Wait until image exists
+        let t0 = std::time::Instant::now();
+        while t0.elapsed().as_secs_f64() < 2.0 {
+            if !image_manager.list_images_in_registry(&secondary_address.to_string()).await.unwrap().is_empty() {
+                break;
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+
+        // Pull
+        let pull_result = image_manager.pull(PullRequest::from_tag(&image_tag)).await;
+        assert!(pull_result.is_ok(), "{}", pull_result.unwrap_err());
+        let pull_image = pull_result.unwrap();
+        assert_eq!(image, pull_image);
+
+        // List images
+        let images = image_manager.list_images(None);
+        assert!(images.is_ok());
+        let images = images.unwrap();
+        assert_eq!(1, images.len());
+        assert_eq!(&image_tag, &images[0].image.tag);
+
+        // Check content
+        let reference = image_tag.clone().to_ref();
+        assert_eq!(Some(DataSize(3001)), image_manager.image_size(&reference).ok());
+        let files = image_manager.list_content(&reference, None).unwrap().into_iter().map(|entry| entry.path().to_owned()).collect::<Vec<_>>();
+        assert_eq!(vec!["file1.txt".to_owned(), "file2.txt".to_owned()], files);
+    }
+}
+
+#[tokio::test]
 async fn test_remove() {
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let tmp_registry_folder = crate::test_helpers::TempFolder::new();
@@ -901,7 +995,7 @@ fn create_registry_config(address: SocketAddr, tmp_registry_folder: &Path) -> Re
 }
 
 async fn registry_is_reachable(registry: &str, max_wait_time: f64) -> bool {
-    let registry_manager = RegistryManager::new(ImageManagerConfig::new(), EmptyPrinter::new());
+    let registry_manager = RegistryManager::new(ImageManagerConfig::new(), EmptyPrinter::new(), None);
 
     let t0 = Instant::now();
     while t0.elapsed().as_secs_f64() < max_wait_time {

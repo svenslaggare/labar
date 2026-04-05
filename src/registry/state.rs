@@ -13,7 +13,7 @@ use crate::reference::ImageTag;
 use crate::registry::auth::{AuthProvider, AuthToken, SqliteAuthProvider};
 use crate::registry::{helpers, ChangedUploadLayerFileOperation, RunRegistryError};
 use crate::registry::config::RegistryConfig;
-use crate::registry::external_storage::{BoxExternalStorage, InMemoryStorage, S3Storage};
+use crate::registry::external_storage::{ArcExternalStorage, InMemoryStorage, S3Storage};
 use crate::registry::helpers::PooledImageManager;
 use crate::registry::model::AppResult;
 
@@ -23,7 +23,7 @@ pub struct AppState {
     pub sign_key: Hmac<Sha256>,
     pub access_provider: Box<dyn AuthProvider + Send + Sync>,
 
-    pub external_storage: Option<BoxExternalStorage>,
+    pub external_storage: Option<ArcExternalStorage>,
 
     image_manager_pool: Arc<ResourcePool<ImageManager>>,
 
@@ -42,11 +42,11 @@ impl AppState {
 
         let external_storage = match (config.s3_storage.as_ref(), config.in_memory_storage.as_ref()) {
             (Some(s3_storage), _) => {
-                let storage: BoxExternalStorage = Box::new(S3Storage::new(s3_storage));
+                let storage: ArcExternalStorage = Arc::new(S3Storage::new(s3_storage));
                 Some(storage)
             }
             (_, Some(in_memory_storage)) => {
-                let storage: BoxExternalStorage = Box::new(InMemoryStorage::new(in_memory_storage));
+                let storage: ArcExternalStorage = Arc::new(InMemoryStorage::new(in_memory_storage));
                 Some(storage)
             }
             _ => None

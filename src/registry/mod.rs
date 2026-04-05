@@ -542,7 +542,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
                 }
 
                 if let Some(external_storage) = state.external_storage.as_ref() {
-                    external_storage.upload(source_path, &temp_file_path).await?;
+                    external_storage.upload(&temp_file_path, source_path).await?;
                 } else {
                     if let Some(parent) = abs_source_path.parent() {
                         tokio::fs::create_dir_all(parent).await?;
