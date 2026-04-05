@@ -221,6 +221,17 @@ impl ImageManager {
         }
     }
 
+    pub async fn remove_image_async(&mut self, tag: &ImageTag) -> ImageManagerResult<Vec<ImageId>> {
+        let mut session = self.state_manager.pooled_session()?;
+
+        if let Some(image) = self.layer_manager.remove_image(&mut session, tag)? {
+            self.printer.println(&format!("Removed image: {} ({})", tag, image.hash));
+            Ok(self.garbage_collect_async().await?)
+        } else {
+            Err(ImageManagerError::ReferenceNotFound { reference: Reference::ImageTag(tag.clone()) })
+        }
+    }
+
     pub fn clean_old_images(&mut self, duration: Duration) -> ImageManagerResult<()> {
         let session = self.state_manager.pooled_session()?;
 
@@ -238,15 +249,27 @@ impl ImageManager {
     pub fn garbage_collect(&mut self) -> ImageManagerResult<Vec<ImageId>> {
         let session = self.state_manager.pooled_session()?;
 
-        let used_layers = self.get_used_layers(&session)?;
         let mut removed_layers = Vec::new();
-        for layer in self.layer_manager.all_layers(&session)? {
-            if !used_layers.contains(&layer.hash) {
-                if let Err(err) = self.remove_layer(&session, &layer) {
-                    self.printer.println(&format!("Failed to remove layer: {}", err));
-                } else {
-                    removed_layers.push(layer.hash);
-                }
+        for layer in self.get_non_used_layers(&session)? {
+            if let Err(err) = self.remove_layer(&session, &layer) {
+                self.printer.println(&format!("Failed to remove layer: {}", err));
+            } else {
+                removed_layers.push(layer.hash);
+            }
+        }
+
+        Ok(removed_layers)
+    }
+
+    pub async fn garbage_collect_async(&mut self) -> ImageManagerResult<Vec<ImageId>> {
+        let session = self.state_manager.pooled_session()?;
+
+        let mut removed_layers = Vec::new();
+        for layer in self.get_non_used_layers(&session)? {
+            if let Err(err) = self.remove_layer_async(&layer).await {
+                self.printer.println(&format!("Failed to remove layer: {}", err));
+            } else {
+                removed_layers.push(layer.hash);
             }
         }
 
@@ -276,6 +299,43 @@ impl ImageManager {
 
         self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
         Ok(())
+    }
+
+    async fn remove_layer_async(&self, layer: &Layer) -> ImageManagerResult<()> {
+        let session = self.state_manager.pooled_session()?;
+
+        self.layer_manager.remove_layer(&session, &layer.hash)?;
+
+        let reclaimed_size = DataSize::from_operations_async(self.config.base_folder(), &layer.operations).await;
+        match self.registry_storage.as_ref() {
+            Some(registry_storage) => {
+                registry_storage.remove_layer(
+                    &layer.hash
+                ).await.map_err(|err| RegistryError::Storage(err))?;
+            }
+            None => {
+                let layer_path = self.config.get_layer_folder(&layer.hash);
+                tokio::fs::remove_dir_all(&layer_path)
+                    .await
+                    .map_err(|err|
+                        ImageManagerError::FileIOError {
+                            message: format!("Failed to remove layer {} due to: {}", layer_path.to_str().unwrap(), err)
+                        }
+                    )?;
+            }
+        }
+
+        self.printer.println(&format!("Removed layer: {} (reclaimed {})", layer.hash, reclaimed_size));
+        Ok(())
+    }
+
+    fn get_non_used_layers(&self, session: &StateSession) -> ImageManagerResult<impl Iterator<Item=Layer>> {
+        let used_layers = self.get_used_layers(&session)?;
+        Ok(
+            self.layer_manager.all_layers(&session)?
+                .into_iter()
+                .filter(move |layer| !used_layers.contains(&layer.hash))
+        )
     }
 
     fn get_used_layers(&self, session: &StateSession) -> ImageManagerResult<HashSet<ImageId>> {

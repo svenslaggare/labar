@@ -219,8 +219,7 @@ async fn remove_image(State(state): State<Arc<AppState>>,
     let token = check_access_right(&request, &state.sign_key, AccessRight::Delete)?;
 
     let mut image_manager = state.pooled_image_manager(&token);
-    let tag_clone = tag.clone();
-    let removed_layers = tokio::task::spawn_blocking(move || image_manager.remove_image(&tag_clone)).await.unwrap()?;
+    let removed_layers = image_manager.remove_image_async(&tag).await?;
     let num_deleted_layers = removed_layers.len();
 
     state.clear_layer_cache().await;

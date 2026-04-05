@@ -97,13 +97,14 @@ impl DataSize {
         DataSize(std::fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0) as usize)
     }
 
+    pub async fn from_file_async(path: &Path) -> DataSize {
+        DataSize(tokio::fs::metadata(path).await.map(|metadata| metadata.len()).unwrap_or(0) as usize)
+    }
+
     pub fn from_operations(base_folder: &Path, operations: &Vec<LayerOperation>) -> DataSize {
         let mut reclaimed_size = DataSize(0);
         for operation in operations {
             match operation {
-                LayerOperation::Image { .. } => {}
-                LayerOperation::ImageAlias { .. } => {}
-                LayerOperation::Directory { .. } => {}
                 LayerOperation::File { source_path, .. } => {
                     let source_path = base_folder.join(source_path);
                     reclaimed_size += DataSize::from_file(&source_path);
@@ -112,6 +113,31 @@ impl DataSize {
                     let source_path = base_folder.join(source_path);
                     reclaimed_size += DataSize::from_file(&source_path);
                 }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
+                LayerOperation::Label { .. } => {}
+            }
+        }
+
+        reclaimed_size
+    }
+
+    pub async fn from_operations_async(base_folder: &Path, operations: &Vec<LayerOperation>) -> DataSize {
+        let mut reclaimed_size = DataSize(0);
+        for operation in operations {
+            match operation {
+                LayerOperation::File { source_path, .. } => {
+                    let source_path = base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file_async(&source_path).await;
+                }
+                LayerOperation::CompressedFile { source_path, .. } => {
+                    let source_path = base_folder.join(source_path);
+                    reclaimed_size += DataSize::from_file_async(&source_path).await;
+                }
+                LayerOperation::Image { .. } => {}
+                LayerOperation::ImageAlias { .. } => {}
+                LayerOperation::Directory { .. } => {}
                 LayerOperation::Label { .. } => {}
             }
         }
