@@ -54,15 +54,16 @@ pub async fn run(config: RegistryConfig) -> Result<(), RunRegistryError> {
     let sign_in_path = config.data_path.join("sign_key");
     let sign_key = if !sign_in_path.exists() {
         let sign_key = Alphanumeric.sample_string(&mut rand::rng(), 32);
-        std::fs::write(
+        tokio::fs::write(
             sign_in_path,
             &sign_key
-        ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
+        ).await.map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?;
+
         sign_key
     } else {
-        std::fs::read_to_string(
+        tokio::fs::read_to_string(
             sign_in_path
-        ).map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?
+        ).await.map_err(|err| RunRegistryError::AuthSetup { reason: err.to_string() })?
     };
 
     let payload_max_size = config.payload_max_size;
