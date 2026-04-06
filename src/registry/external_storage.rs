@@ -138,7 +138,7 @@ impl RegistryStorage for InMemoryStorage {
         let files = self.files.read().await;
         let file = files.get(path).ok_or_else(|| RegistryStorageError::LayerFileNotFound)?;
 
-        let body = Body::from(Body::from(Bytes::from_owner(file.clone())));
+        let body = Body::from(Bytes::from_owner(file.clone()));
 
         Ok(
             Response::builder()
