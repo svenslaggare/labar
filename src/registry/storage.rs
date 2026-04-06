@@ -48,14 +48,14 @@ impl Display for RegistryStorageError {
 pub async fn verify_path_exists(storage: &ArcRegistryStorage, layer: &Layer) -> RegistryStorageResult<bool> {
     for operation in &layer.operations {
         match operation {
-            LayerOperation::Image { .. } => {}
-            LayerOperation::ImageAlias { .. } => {}
-            LayerOperation::Directory { .. } => {}
             LayerOperation::File { source_path, .. } | LayerOperation::CompressedFile { source_path, .. } => {
                 if !storage.exists(source_path).await? {
                     return Ok(false);
                 }
             }
+            LayerOperation::Image { .. } => {}
+            LayerOperation::ImageAlias { .. } => {}
+            LayerOperation::Directory { .. } => {}
             LayerOperation::Label { .. } => {}
         }
     }

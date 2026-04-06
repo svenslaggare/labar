@@ -429,7 +429,7 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
     let token = check_access_right(&request, &state.sign_key, AccessRight::Upload)?;
     let upload_id = helpers::get_upload_id(&request, &token)?;
 
-    let (layer, base_folder) = {
+    let layer = {
         let image_manager = state.pooled_image_manager(&token);
         let state_session = image_manager.pooled_state_session()?;
 
@@ -438,15 +438,13 @@ async fn upload_layer_file(State(state): State<Arc<AppState>>,
             return Err(AppError::LayerFileNotFound);
         }
 
-        let base_folder = state.config.image_manager_config().base_folder().to_path_buf();
-
-        (pending_upload_layer, base_folder)
+        pending_upload_layer
     };
 
     if let Some(operation) = layer.get_file_operation(file_index) {
         match operation {
             LayerOperation::File { source_path, content_hash, .. } | LayerOperation::CompressedFile { source_path, content_hash, .. } => {
-                let temp_file_path = base_folder.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 64));
+                let temp_file_path = state.config.data_path.join("tmp-upload").join(Alphanumeric.sample_string(&mut rand::rng(), 64));
                 if let Some(parent) = temp_file_path.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
