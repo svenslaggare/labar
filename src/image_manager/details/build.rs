@@ -1,16 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 use crate::content::compute_content_hash;
 use crate::helpers::DataSize;
-use crate::image_manager::layer::{LayerManager};
-use crate::image_definition::{ImageDefinition, LayerOperationDefinition, LayerDefinition};
-use crate::image_manager::{ImageManagerResult, ImageManagerError, ImageManagerConfig};
+use crate::image_manager::details::layer::LayerManager;
+use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
+use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::printing::PrinterRef;
-use crate::image_manager::state::{StateSession};
+use crate::image_manager::details::state::StateSession;
 use crate::reference::{ImageId, ImageTag};
 
 pub struct BuildManager {
@@ -430,9 +430,9 @@ fn create_hash(input: &str) -> String {
 
 #[test]
 fn test_build() {
-    use crate::image_manager::ConsolePrinter;
+    use crate::image_manager::{test_helpers, ConsolePrinter};
     use crate::reference::Reference;
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -443,7 +443,7 @@ fn test_build() {
     let build_manager = BuildManager::new(config, printer);
     let mut session = state_manager.session().unwrap();
 
-    let result = super::test_helpers::build_image2(
+    let result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -468,9 +468,9 @@ fn test_build() {
 
 #[test]
 fn test_build_with_cache1() {
-    use crate::image_manager::ConsolePrinter;
+    use crate::image_manager::{test_helpers, ConsolePrinter};
     use crate::reference::Reference;
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -482,7 +482,7 @@ fn test_build_with_cache1() {
     let mut session = state_manager.session().unwrap();
 
     // Build first time
-    let first_result = super::test_helpers::build_image2(
+    let first_result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -494,7 +494,7 @@ fn test_build_with_cache1() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let second_result = super::test_helpers::build_image2(
+    let second_result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -525,7 +525,7 @@ fn test_build_with_cache1() {
 fn test_build_with_cache2() {
     use crate::image_manager::ConsolePrinter;
     use crate::reference::Reference;
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
     use crate::image::{LinkType};
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
@@ -629,9 +629,9 @@ fn test_build_with_cache2() {
 
 #[test]
 fn test_build_with_cache_force() {
-    use crate::image_manager::ConsolePrinter;
+    use crate::image_manager::{test_helpers, ConsolePrinter};
     use crate::reference::Reference;
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -643,7 +643,7 @@ fn test_build_with_cache_force() {
     let mut session = state_manager.session().unwrap();
 
     // Build first time
-    let first_result = super::test_helpers::build_image2(
+    let first_result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -655,7 +655,7 @@ fn test_build_with_cache_force() {
     let first_result = first_result.unwrap();
 
     // Build second time
-    let second_result = super::test_helpers::build_image2(
+    let second_result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -684,9 +684,9 @@ fn test_build_with_cache_force() {
 
 #[test]
 fn test_build_with_image_ref() {
-    use crate::image_manager::ConsolePrinter;
+    use crate::image_manager::{test_helpers, ConsolePrinter};
     use crate::reference::Reference;
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -697,7 +697,7 @@ fn test_build_with_image_ref() {
     let build_manager = BuildManager::new(config, printer);
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,
@@ -706,7 +706,7 @@ fn test_build_with_image_ref() {
         false
     ).unwrap();
 
-    let result = super::test_helpers::build_image2(
+    let result = test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,

@@ -2,8 +2,8 @@ use std::path::{Path};
 
 use crate::image_definition::ImageDefinition;
 use crate::image_manager::{BuildRequest, ImageManager, StateSession};
-use crate::image_manager::build::{BuildManager, BuildResult};
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::details::build::{BuildManager, BuildResult};
+use crate::image_manager::details::layer::LayerManager;
 use crate::reference::ImageTag;
 
 pub fn build_image(image_manager: &mut ImageManager,

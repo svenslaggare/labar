@@ -3,7 +3,7 @@ use std::collections::{HashSet};
 use crate::helpers::DataSize;
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
 use crate::image::{Layer, Image, LayerOperation};
-use crate::image_manager::state::{StateSession};
+use crate::image_manager::details::state::{StateSession};
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct LayerManager {

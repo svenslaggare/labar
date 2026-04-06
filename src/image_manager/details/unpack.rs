@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
-use std::fs::{File};
-use std::io::{BufReader};
+use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use chrono::{DateTime, Local};
@@ -11,16 +11,16 @@ use rusqlite::Row;
 
 use serde::{Deserialize, Serialize};
 
-use zip::write::{SimpleFileOptions};
+use zip::write::SimpleFileOptions;
 use zip::ZipWriter;
 use flate2::read::GzDecoder;
 
 use crate::helpers::{clean_path, split_parts};
-use crate::image_manager::layer::{LayerManager};
+use crate::image_manager::details::layer::LayerManager;
 use crate::image::{Layer, LayerOperation, LinkType};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult};
-use crate::image_manager::printing::{PrinterRef};
-use crate::image_manager::state::StateSession;
+use crate::image_manager::printing::PrinterRef;
+use crate::image_manager::details::state::StateSession;
 use crate::reference::{ImageId, ImageTag, Reference};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -638,10 +638,10 @@ fn test_unpack() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -653,7 +653,7 @@ fn test_unpack() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -686,10 +686,10 @@ fn test_unpack_file() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -701,7 +701,7 @@ fn test_unpack_file() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -710,7 +710,7 @@ fn test_unpack_file() {
         false
     ).unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -751,10 +751,10 @@ fn test_unpack_exist() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -766,7 +766,7 @@ fn test_unpack_exist() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -806,10 +806,10 @@ fn test_remove_unpack() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -821,7 +821,7 @@ fn test_remove_unpack() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -858,10 +858,10 @@ fn test_unpack_replace1() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned());
@@ -873,7 +873,7 @@ fn test_unpack_replace1() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -913,10 +913,10 @@ fn test_unpack_replace2() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
@@ -928,7 +928,7 @@ fn test_unpack_replace2() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &layer_manager,
         &build_manager,
@@ -959,7 +959,7 @@ fn test_unpack_self_reference() {
     use crate::helpers::DataSize;
     use crate::image_manager::ImageManagerConfig;
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
@@ -999,10 +999,10 @@ fn test_extract() {
     use zip::ZipArchive;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     let config = ImageManagerConfig::with_base_folder(tmp_folder.owned().clone());
@@ -1014,7 +1014,7 @@ fn test_extract() {
     let unpack_manager = UnpackManager::new(config.clone(), printer.clone());
     let mut session = state_manager.session().unwrap();
 
-    super::test_helpers::build_image2(
+    test_helpers::build_image2(
         &mut session,
         &mut layer_manager,
         &build_manager,

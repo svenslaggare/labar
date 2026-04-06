@@ -4,7 +4,7 @@ use crate::content::{compute_content_hash, compute_content_hash_async};
 use crate::helpers::{compress_file, decompress_file, DataSize};
 use crate::image::{Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerResult, PrinterRef, StateSession, StorageMode};
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::details::layer::LayerManager;
 use crate::reference::ImageTag;
 
 pub struct CompressionManager {

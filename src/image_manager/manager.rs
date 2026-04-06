@@ -7,20 +7,21 @@ use std::time::{Duration, Instant};
 use chrono::Local;
 use regex::Regex;
 use tokio::runtime::Handle;
+
 use crate::content::compute_content_hash;
 use crate::image::{Image, ImageMetadata, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, RegistryError, StorageMode, UnpackFile};
-use crate::image_manager::layer::LayerManager;
-use crate::image_manager::unpack::{UnpackManager, UnpackRequest, Unpacking};
-use crate::image_manager::build::{BuildManager, BuildRequest, BuildResult};
+use crate::image_manager::details::layer::LayerManager;
+use crate::image_manager::details::unpack::{UnpackManager, UnpackRequest, Unpacking};
+use crate::image_manager::details::build::{BuildManager, BuildRequest, BuildResult};
 use crate::helpers::DataSize;
 use crate::image_definition::{ImageDefinition, LayerDefinition, LayerOperationDefinition};
-use crate::image_manager::compression::CompressionManager;
+use crate::image_manager::details::compression::CompressionManager;
 use crate::image_manager::printing::PrinterRef;
-use crate::image_manager::registry::{RegistryManager, RegistrySession};
-use crate::image_manager::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
-use crate::image_manager::storage::ArcImageStorage;
-use crate::image_manager::transfer::TransferManager;
+use crate::image_manager::details::registry::{RegistryManager, RegistrySession};
+use crate::image_manager::details::state::{PooledStateSession, StateManager, StateSession, STATE_FILENAME};
+use crate::image_manager::details::storage::ArcImageStorage;
+use crate::image_manager::details::transfer::TransferManager;
 use crate::reference::{ImageId, ImageTag, Reference};
 
 pub struct ImageManager {

@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension};
 use crate::helpers::{PooledResource, ResourcePool};
 use crate::image::{Image, Layer};
 use crate::image_manager::ImageManagerResult;
-use crate::image_manager::unpack::Unpacking;
+use crate::image_manager::details::unpack::Unpacking;
 use crate::reference::{ImageId, ImageTag};
 
 pub type SqlResult<T> = rusqlite::Result<T>;

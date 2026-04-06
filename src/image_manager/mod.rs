@@ -2,22 +2,15 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use zip::result::ZipError;
 
-mod layer;
-mod unpack;
-mod build;
 mod printing;
-mod registry;
-mod state;
-mod image;
-mod transfer;
-mod compression;
-mod storage;
+mod manager;
 
 #[cfg(test)]
 mod test_helpers;
 
 #[cfg(test)]
 mod registry_tests;
+mod details;
 
 #[derive(Debug)]
 pub enum ImageManagerError {
@@ -201,13 +194,13 @@ pub enum StorageMode {
     PreferCompressed
 }
 
-pub use image::ImageManager;
-pub use printing::{ConsolePrinter, EmptyPrinter, Printer, PrinterRef};
+pub use manager::ImageManager;
 pub use crate::image_parser::ImageParseError;
-pub use crate::image_manager::registry::RegistryError;
 pub use crate::reference::{ImageId, Reference};
-pub use crate::image_manager::image::{ListContentEntry, PullRequest};
-pub use crate::image_manager::build::BuildRequest;
-pub use crate::image_manager::unpack::{UnpackFile, UnpackRequest};
-pub use crate::image_manager::state::{PooledStateSession, SqlResult, StateManager, StateSession};
-pub use crate::image_manager::storage::{ArcImageStorage, ImageStorage, ImageStorageError, ImageStorageResult};
+pub use crate::image_manager::manager::{ListContentEntry, PullRequest};
+pub use printing::{ConsolePrinter, EmptyPrinter, Printer, PrinterRef};
+pub use details::registry::RegistryError;
+pub use details::build::BuildRequest;
+pub use details::unpack::{UnpackFile, UnpackRequest};
+pub use details::state::{PooledStateSession, SqlResult, StateManager, StateSession};
+pub use details::storage::{ArcImageStorage, ImageStorage, ImageStorageError, ImageStorageResult};

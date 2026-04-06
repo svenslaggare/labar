@@ -9,7 +9,7 @@ use tokio::time::Instant;
 use crate::assert_file_content_eq;
 use crate::helpers::DataSize;
 use crate::image_manager::{ConsolePrinter, EmptyPrinter, ImageManager, ImageManagerConfig, PullRequest, Reference, StorageMode, UnpackRequest};
-use crate::image_manager::registry::RegistryManager;
+use crate::image_manager::details::registry::RegistryManager;
 use crate::reference::ImageTag;
 use crate::registry::auth::AccessRight;
 use crate::registry::config::{InMemoryStorageConfig, RegistryUpstreamConfig};

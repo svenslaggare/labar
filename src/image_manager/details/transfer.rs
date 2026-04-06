@@ -8,7 +8,7 @@ use zip::{ZipArchive, ZipWriter};
 
 use crate::image::{Image, Layer, LayerOperation};
 use crate::image_manager::{ImageManagerConfig, ImageManagerError, ImageManagerResult, PrinterRef, StateSession};
-use crate::image_manager::layer::LayerManager;
+use crate::image_manager::details::layer::LayerManager;
 use crate::reference::{ImageId, ImageTag};
 
 pub struct TransferManager {
@@ -165,10 +165,10 @@ fn test_export_import() {
     use std::str::FromStr;
 
     use crate::reference::ImageTag;
-    use crate::image_manager::build::BuildManager;
-    use crate::image_manager::ImageManagerConfig;
+    use crate::image_manager::details::build::BuildManager;
+    use crate::image_manager::{test_helpers, ImageManagerConfig};
     use crate::image_manager::printing::{ConsolePrinter};
-    use crate::image_manager::state::StateManager;
+    use crate::image_manager::details::state::StateManager;
 
     let tmp_folder = crate::test_helpers::TempFolder::new();
     tmp_folder.create().unwrap();
@@ -187,7 +187,7 @@ fn test_export_import() {
         let transfer_manager = TransferManager::new(config.clone(), printer.clone());
         let mut session = state_manager.session().unwrap();
 
-        let build_result = super::test_helpers::build_image2(
+        let build_result = test_helpers::build_image2(
             &mut session,
             &layer_manager,
             &build_manager,
